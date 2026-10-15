@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "status": "PROPOSAL_ONLY",
+  "source_commit": "23a39f8de2272c150e168a824b7839de3844661c",
+  "baseline_library": "libHMPP_image.so.2.5.2",
+  "selection": null,
+  "candidate_scope_policy": {
+    "writable": "Only the selected function's implementation file after human review",
+    "protected": ["src/header/", "CMakeLists.txt", "ctest/", "ippi_result/", "build/", "benchmark/", "evaluators/"]
+  },
+  "functions": [
+    {
+      "candidate_api": "ippiBGRToYCbCr420_8u_C3P3R",
+      "baseline_api": "HMPPI_BGRToYCbCr420_8u_C3P3R",
+      "candidate_source": "src/image-color-conversion/ippiBGRToYCbCr420.cpp",
+      "existing_test": "ctest/image-color-conversion/ippiBGRToYCbCr420.cpp",
+      "public_header": "src/header/armi.h",
+      "baseline_header": "include/hmppi.h",
+      "api_correspondence": "MATCHING_INPUT_OUTPUT_SHAPE; semantic equivalence requires review",
+      "adapter_needed": true,
+      "correctness_proposal": "Independent 2x2 chroma-subsampling and color-transform specification; check channel order, rounding, saturation, odd ROI, strides, null pointers, and plane boundaries.",
+      "priority_rationale": "Image-domain representative with an isolated output and a large gap in untracked exploratory single-thread data; that data is not formal evidence."
+    },
+    {
+      "candidate_api": "ippiBGRToYUV420_8u_AC4P3R",
+      "baseline_api": "HMPPI_BGRToYUV420_8u_AC4P3R",
+      "candidate_source": "src/image-color-conversion/ippiBGRToYUV420.cpp",
+      "existing_test": "ctest/image-color-conversion/ippiBGRToYUV420.cpp",
+      "public_header": "src/header/armi.h",
+      "baseline_header": "include/hmppi.h",
+      "api_correspondence": "MATCHING_INPUT_OUTPUT_SHAPE; alpha handling and color coefficients require review",
+      "adapter_needed": true,
+      "correctness_proposal": "Independent YUV420 specification; check ignored alpha, channel order, chroma averaging, rounding, saturation, even ROI, strides, and status codes.",
+      "priority_rationale": "Single function file and measurable exploratory gap; vendor compatibility on the target is still unverified."
+    },
+    {
+      "candidate_api": "ippiRGBToYUV422_8u_C3C2R",
+      "baseline_api": "HMPPI_RGBToYUV422_8u_C3C2R",
+      "candidate_source": "src/image-color-conversion/ippiRGBToYUV422.cpp",
+      "existing_test": "ctest/image-color-conversion/ippiRGBToYUV422.cpp",
+      "public_header": "src/header/armi.h",
+      "baseline_header": "include/hmppi.h",
+      "api_correspondence": "MATCHING_INPUT_OUTPUT_SHAPE; packed channel order requires review",
+      "adapter_needed": true,
+      "correctness_proposal": "Independent RGB-to-packed-YUV422 reference; check pair order, chroma sharing, odd width, row stride, rounding, and bounds.",
+      "priority_rationale": "Small, explicit packed-pixel operation with a modest exploratory gap."
+    },
+    {
+      "candidate_api": "ippiDilate3x3_64f_C1R",
+      "baseline_api": "HMPPI_Dilate3x3_64f_C1R",
+      "candidate_source": "src/morphological-operations/Dilate3x3.cpp",
+      "existing_test": "ctest/morphological-operations/Dilate3x3.cpp",
+      "public_header": "src/header/armi.h",
+      "baseline_header": "include/hmppi.h",
+      "api_correspondence": "MATCHING_INPUT_OUTPUT_SHAPE; source halo and border policy require review",
+      "adapter_needed": true,
+      "correctness_proposal": "Independent scalar maximum over a 3x3 neighborhood; check halo ownership, ROI offset, non-contiguous rows, floating edge values, and status codes.",
+      "priority_rationale": "Mathematically simple oracle and clear image-processing kernel; exploratory performance is near parity."
+    },
+    {
+      "candidate_api": "ippiYCbCr422ToRGB_8u_C2C3R",
+      "baseline_api": "HMPPI_YCbCr422ToRGB_8u_C2C3R",
+      "candidate_source": "src/image-color-conversion/ippiYCbCr422ToRGB.cpp",
+      "existing_test": "ctest/image-color-conversion/ippiYCbCr422ToRGB.cpp",
+      "public_header": "src/header/armi.h",
+      "baseline_header": "include/hmppi.h",
+      "api_correspondence": "MATCHING_INPUT_OUTPUT_SHAPE; color coefficients and packed channel order require review",
+      "adapter_needed": true,
+      "correctness_proposal": "Independent packed-YCbCr422 conversion reference; check color matrix, shared chroma, rounding, saturation, odd width, stride, and status codes.",
+      "priority_rationale": "Fair direct API pair and easy isolation; exploratory performance is near parity."
+    }
+  ],
+  "benchmark_proposal": {
+    "status": "DRAFT",
+    "workload": "One shared image input, ROI, strides, seed, process resources, and sampling plan per operation",
+    "bindings": "Separate package/evaluator adapters for IPPI-FT and HMiPPI types, status codes, and symbols; no data conversion inside timed calls",
+    "timing": "Use the same harness and interleaved samples on one target; record each resolved shared-library path and SHA-256",
+    "source": "The untracked benchmark/hmppi_vs_ippi_20260921 is development evidence only and uses patched compatibility copies in historical S5000C runs"
+  }
+}

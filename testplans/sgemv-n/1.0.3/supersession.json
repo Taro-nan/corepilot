@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "superseding_version": "1.0.3",
+  "superseded_version": "1.0.2",
+  "superseded_digest": "efd9362f039b13434d5b9f4e10f3f65a9744c4119cbb148661b01dea95e50dfb",
+  "note": "TestPlanVersion 1.0.2 is invalidated (benchmark argc off-by-one in BenchmarkAsset 1.0.1). 1.0.3 references BenchmarkAssetVersion 1.0.2 (fixed argument contract) while keeping candidate/baseline/TestSuite identity and the 18-point matrix/thresholds unchanged. This independent supersession record establishes the chain without rewriting 1.0.2 in place."
+}

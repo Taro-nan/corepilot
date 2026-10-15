@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "sgemv-n",
+  "version": "1.0.0",
+  "owner": "phyopt-performance-validation",
+  "domain": {
+    "name": "SGEMV-N",
+    "api": "cblas_sgemv",
+    "layout": "column-major",
+    "operation": "NoTrans",
+    "datatype": "float32"
+  },
+  "target": {
+    "platform": "S5000C",
+    "build_target": "FT2000",
+    "compatibility_scope": "S5000C / FT2000-compatible build and runtime path"
+  },
+  "digest_algorithm": "phyopt-evaluator-content-sha256-v1",
+  "digest": "e1d2effa606f2ef4f028a490ffef8dc7a9b2968fc15128250a281a2539c8ae58",
+  "qualification": {
+    "record": "qualification.json",
+    "requires_target_qualification": true,
+    "requires_owner_approval": true
+  },
+  "correctness": {
+    "definition": "Every declared case is executed exactly once against the candidate cblas_sgemv symbol and emits one structured PASS/FAIL measurement.",
+    "inventory": "correctness/cases.json",
+    "case_ids": [
+      "m0_n5", "m5_n0", "m1_n1", "m3_n5", "m7_n9_odd", "lda_padded", "inc2", "inc_neg", "beta_nonzero", "alpha_zero", "alpha_neg", "vec_width", "block_boundary", "medium_127x129", "b16_m15", "b16_m16", "b16_m17", "b16_m31", "b16_m32", "b16_m33", "b32_m31", "b32_m32", "b32_m33", "b32_m63", "b32_m64", "b32_m65", "n_block_3", "n_block_4", "n_block_5"
+    ],
+    "command": {
+      "executable": "bash",
+      "script": "scripts/run-correctness.sh",
+      "arguments": ["case_id", "artifact_path", "m", "n", "lda", "incx", "incy", "alpha", "beta", "threads", "seed", "runtime_root"],
+      "measurement_prefix": "PHYOPT_MEASUREMENT"
+    },
+    "reference": {
+      "implementation": "correctness/sgemv_correctness_formal.c",
+      "accumulation": "scalar IEEE-754 binary64 accumulation followed by float32 result comparison",
+      "qualification_required": true
+    },
+    "tolerance": {
+      "rule": "abs(observed-reference) <= absolute + relative * abs(reference)",
+      "absolute": 0.0001,
+      "relative": 0.0001,
+      "qualification_required": true
+    }
+  },
+  "performance": {
+    "definition": "Baseline and Candidate are measured live with the same evaluator-built executable, workload, sampling policy, resource declaration, and Runner machine context.",
+    "inventory": "benchmark/workloads.json",
+    "workload_ids": [
+      "square_4096_t1", "square_4096_t8", "square_4096_t16", "wide_1024x16384_t1", "wide_1024x16384_t8", "wide_1024x16384_t16", "tall_16384x1024_t1", "tall_16384x1024_t8", "tall_16384x1024_t16", "small_512_t1", "large_8192_t16", "large_16384_t8", "b16_15", "b16_16", "b16_17", "b32_2047", "b32_2048", "b32_2049"
+    ],
+    "command": {
+      "executable": "bash",
+      "script": "scripts/run-performance.sh",
+      "arguments": ["phase", "role", "workload_id", "artifact_path", "m", "n", "lda", "incx", "incy", "alpha", "beta", "threads", "loops", "seed", "iteration_index", "runtime_root"],
+      "measurement_prefix": "PHYOPT_MEASUREMENT"
+    },
+    "sampling": {
+      "warmup_count": 3,
+      "sample_count": 7,
+      "statistic": "median",
+      "process_model": "one-process-per-sample"
+    },
+    "measurement": {
+      "unit": "seconds",
+      "value": "latency_seconds",
+      "derived": ["median", "gflops", "speedup"],
+      "raw_samples_retained": true,
+      "output_schema": "benchmark/output-schema.json"
+    }
+  },
+  "resource_requirements": {
+    "cpu_set": "0-15",
+    "numa_node": 0,
+    "thread_counts": [1, 8, 16],
+    "enforcement": {
+      "threads": "NOT_ENFORCED",
+      "cpu_set": "NOT_ENFORCED",
+      "numa_node": "NOT_ENFORCED"
+    }
+  },
+  "baseline_definition": {
+    "mode": "live-symmetric-execution",
+    "historical_measurements_are_formal_evidence": false,
+    "identity_required": ["artifact_id", "sha256", "runtime_path", "resolved_cblas_sgemv_path"],
+    "symmetry_required": ["benchmark_source", "benchmark_binary", "workload", "sampling", "resource_policy", "machine_context"]
+  },
+  "acceptance_policy": {
+    "correctness": "all declared cases must execute and report PASS with VALID evidence",
+    "performance": "derive each role median from exactly seven retained positive raw samples",
+    "regression": "candidate median is compared only with the live baseline median from the same formal experiment"
+  },
+  "artifact_identity_policy": {
+    "required_files": [
+      "qualification.json",
+      "correctness/cases.json",
+      "correctness/policy.json",
+      "correctness/sgemv_correctness_formal.c",
+      "correctness/run-case.sh",
+      "benchmark/workloads.json",
+      "benchmark/policy.json",
+      "benchmark/sgemv_bench_formal.c",
+      "benchmark/output-schema.json",
+      "benchmark/run-sample.sh",
+      "scripts/build-evaluator.sh",
+      "scripts/run-correctness.sh",
+      "scripts/run-performance.sh",
+      "scripts/qualify-on-target.sh",
+      "scripts/qualification-runner.mjs",
+      "include/cblas.h"
+    ],
+    "source_files": ["correctness/sgemv_correctness_formal.c", "benchmark/sgemv_bench_formal.c", "include/cblas.h"],
+    "benchmark_binary": "SHA-256 of the evaluator-built executable is recorded with every target measurement",
+    "candidate_binary": "explicit artifact path, SHA-256, and dladdr-resolved cblas_sgemv path are required",
+    "baseline_binary": "explicit artifact path, SHA-256, and dladdr-resolved cblas_sgemv path are required",
+    "runtime_resolution": "dlopen plus dlsym plus dladdr; no link-time role-specific benchmark executable",
+    "mutable_dependencies": "explicit-artifact-inputs-only"
+  }
+}

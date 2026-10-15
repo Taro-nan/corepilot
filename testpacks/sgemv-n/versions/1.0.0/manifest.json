@@ -1,0 +1,406 @@
+{
+  "schema_version": 1,
+  "test_suite_version_id": "3963822e-9ff9-45e9-bb1a-4da4435f98a2",
+  "semantic_version": "1.0.0",
+  "function_family": "GEMV",
+  "operation": "N",
+  "data_type": "single precision",
+  "api": "cblas_sgemv",
+  "source_draft_digest": "4b08de7686a9a92bf6d93cb5bcb2b0a0ff1e389128da20944d649841f9678f19",
+  "assets": [
+    {
+      "relative_path": "assets/benchmark/sgemv_bench.c",
+      "sha256": "e99b79f055458863db8652eb39b55c170b4a956318d5671f0be2f4e419e6904d"
+    },
+    {
+      "relative_path": "assets/correctness/sgemv_correctness.c",
+      "sha256": "d6d1f7dec2709df2c87a02587daeafface53169ad1c5554ed2b66928f3cf8cd5"
+    },
+    {
+      "relative_path": "assets/documentation/20260904_sgemv_n_v1.md",
+      "sha256": "dfe672ee8c8ff6cca1fd07fd3f2713e92f1f567ee56455db2e8937d91f39a1d8"
+    },
+    {
+      "relative_path": "assets/documentation/20260904_sgemv_n_v2_kml_gap_analysis.md",
+      "sha256": "8088bd632737e0e3bd94940008ef305196e1c0d836c2ab5a05b8754502c14404"
+    },
+    {
+      "relative_path": "assets/historical/sgemv_three_way_corrected_speedup.csv",
+      "sha256": "7bf6b2f906d3d43c0ec140b76adfe176bc6a5d4b2bebab2cf6af4cbf15c3626c"
+    },
+    {
+      "relative_path": "assets/historical/sgemv_three_way_v1_corrected.csv",
+      "sha256": "f6424bf4d5199fde3bf603e6e749dbb9099eaddfc7a11d98c7d5400773e4698a"
+    },
+    {
+      "relative_path": "assets/historical/sgemv_v1_correctness.log",
+      "sha256": "b072bba526ff8a08b5e8a99f85af469e1307e9a51685c434400504e67bfc96b7"
+    },
+    {
+      "relative_path": "assets/historical/sgemv_v1_vs_release033_speedup.csv",
+      "sha256": "d97ebf68f51dc8807bbc7aebfb17aad3c685cdbff72edc8c85fa690b4aeb92f0"
+    },
+    {
+      "relative_path": "assets/historical/sgemv_v1_vs_release033.csv",
+      "sha256": "4b2b76690bd75926c68439833cebd84a4ab35576e958928003a9f34378e2bb5f"
+    },
+    {
+      "relative_path": "assets/script/run_sgemv_kernel_ab.sh",
+      "sha256": "0ed8c65dfd06dfd1e6b6ffd82fde9991d8f0eef844418ada918c8f1966cb1493"
+    },
+    {
+      "relative_path": "assets/script/run_sgemv_three_way.sh",
+      "sha256": "cea19ce2bc49b2b8abc93b1ebcaf3bb5c9a84605e5de25c70dd70572f62c147d"
+    },
+    {
+      "relative_path": "assets/script/run_sgemv_v1_correctness.sh",
+      "sha256": "94b05602e55fbfa42278e4c4e292843d803de7be536d4030e2e23d483efcbfd3"
+    },
+    {
+      "relative_path": "cases/cases.json",
+      "sha256": "558d75a21cf80e534e878b49fc9d0181dd2bccadf22f28d90bf139f1c4b30bcc"
+    },
+    {
+      "relative_path": "guards/forbidden-artifacts.json",
+      "sha256": "5af4e1f6e7953cce477e7f091641b64e031cd215e30864b9cbab6e05d9f10193"
+    },
+    {
+      "relative_path": "oracle/oracle.json",
+      "sha256": "b7fd9feb8c48da49a8570297d97105526c856a9293b5a22e61795dee38aaf4a0"
+    },
+    {
+      "relative_path": "qualification/qualification-report.json",
+      "sha256": "226bdc98a3934e6aa6be460b2777e50f66f0e04ef794a8efea806c9149f1f5f7"
+    }
+  ],
+  "aggregate_digest": "f75b7dee9239e902e04140359901b675695a6bee710f5b274fcb1ec4eb5015fe",
+  "cases": [
+    {
+      "case_id": "m0_n5",
+      "m": 0,
+      "n": 5,
+      "lda": 1,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 101
+    },
+    {
+      "case_id": "m5_n0",
+      "m": 5,
+      "n": 0,
+      "lda": 5,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 102
+    },
+    {
+      "case_id": "m1_n1",
+      "m": 1,
+      "n": 1,
+      "lda": 1,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 1
+    },
+    {
+      "case_id": "m3_n5",
+      "m": 3,
+      "n": 5,
+      "lda": 3,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 2
+    },
+    {
+      "case_id": "m7_n9_odd",
+      "m": 7,
+      "n": 9,
+      "lda": 7,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 3
+    },
+    {
+      "case_id": "lda_padded",
+      "m": 5,
+      "n": 5,
+      "lda": 8,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 4
+    },
+    {
+      "case_id": "inc2",
+      "m": 4,
+      "n": 6,
+      "lda": 4,
+      "incx": 2,
+      "incy": 2,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 5
+    },
+    {
+      "case_id": "inc_neg",
+      "m": 4,
+      "n": 6,
+      "lda": 4,
+      "incx": -1,
+      "incy": -1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 6
+    },
+    {
+      "case_id": "beta_nonzero",
+      "m": 6,
+      "n": 6,
+      "lda": 6,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 0.7,
+      "beta": -0.3,
+      "seed": 7
+    },
+    {
+      "case_id": "alpha_zero",
+      "m": 5,
+      "n": 5,
+      "lda": 5,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 0,
+      "beta": 0,
+      "seed": 8
+    },
+    {
+      "case_id": "alpha_neg",
+      "m": 5,
+      "n": 5,
+      "lda": 5,
+      "incx": 1,
+      "incy": 1,
+      "alpha": -1,
+      "beta": 1,
+      "seed": 9
+    },
+    {
+      "case_id": "vec_width",
+      "m": 16,
+      "n": 16,
+      "lda": 16,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 10
+    },
+    {
+      "case_id": "block_boundary",
+      "m": 64,
+      "n": 128,
+      "lda": 67,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 11
+    },
+    {
+      "case_id": "medium_127x129",
+      "m": 127,
+      "n": 129,
+      "lda": 130,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 12
+    },
+    {
+      "case_id": "b16_m15",
+      "m": 15,
+      "n": 16,
+      "lda": 15,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 21
+    },
+    {
+      "case_id": "b16_m16",
+      "m": 16,
+      "n": 16,
+      "lda": 16,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 22
+    },
+    {
+      "case_id": "b16_m17",
+      "m": 17,
+      "n": 16,
+      "lda": 17,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 23
+    },
+    {
+      "case_id": "b16_m31",
+      "m": 31,
+      "n": 16,
+      "lda": 31,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 24
+    },
+    {
+      "case_id": "b16_m32",
+      "m": 32,
+      "n": 16,
+      "lda": 32,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 25
+    },
+    {
+      "case_id": "b16_m33",
+      "m": 33,
+      "n": 16,
+      "lda": 33,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 26
+    },
+    {
+      "case_id": "b32_m31",
+      "m": 31,
+      "n": 8,
+      "lda": 31,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 31
+    },
+    {
+      "case_id": "b32_m32",
+      "m": 32,
+      "n": 8,
+      "lda": 32,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 32
+    },
+    {
+      "case_id": "b32_m33",
+      "m": 33,
+      "n": 8,
+      "lda": 33,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 33
+    },
+    {
+      "case_id": "b32_m63",
+      "m": 63,
+      "n": 8,
+      "lda": 63,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 34
+    },
+    {
+      "case_id": "b32_m64",
+      "m": 64,
+      "n": 8,
+      "lda": 64,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 35
+    },
+    {
+      "case_id": "b32_m65",
+      "m": 65,
+      "n": 8,
+      "lda": 65,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 36
+    },
+    {
+      "case_id": "n_block_3",
+      "m": 8,
+      "n": 3,
+      "lda": 8,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 41
+    },
+    {
+      "case_id": "n_block_4",
+      "m": 8,
+      "n": 4,
+      "lda": 8,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 42
+    },
+    {
+      "case_id": "n_block_5",
+      "m": 8,
+      "n": 5,
+      "lda": 8,
+      "incx": 1,
+      "incy": 1,
+      "alpha": 1,
+      "beta": 0,
+      "seed": 43
+    }
+  ],
+  "oracle_version": "1",
+  "tolerance_rule": "abs(got-ref) <= floor + factor*eps*(abs(alpha)*sum(|A*x|) + abs(beta*y0))",
+  "fixed_seed": 1,
+  "qualification_state": "LOCAL_QUALIFICATION_PASSED",
+  "frozen_at": "2026-09-07T09:07:11.917Z",
+  "target_execution_status": "NOT_EXECUTED",
+  "supersedes": null,
+  "invalidation_reason": null
+}

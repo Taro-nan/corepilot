@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "definition": "For non-overlapping source and destination with API-valid byte strides aligned to double elements, caller supplies a one-pixel source halo. For finite float64 values every C1 ROI output is numerically exactly equal to the maximum of nine neighboring source values; signed-zero sign is not constrained. All destination padding remains unchanged. Null pointers, non-positive ROI size, and short byte strides return their source-defined status without writing output.",
+  "argument_contract": ["case_id", "artifact_path", "width", "height", "src_padding", "dst_padding", "pattern", "seed", "error_mode", "expected_status", "threads", "runtime_root"],
+  "reference": "correctness/scalar_oracle.c",
+  "tolerance": { "absolute": 0, "relative": 0 },
+  "out_of_scope": ["NaN", "Inf", "overlapping source/destination", "byte strides not divisible by sizeof(double)"]
+}

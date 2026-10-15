@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "record_type": "binary_bundle_runtime_symbol_closure",
+  "observed_at": "2026-10-08T07:34:37Z",
+  "baseline_id": "hmippi-binary-2-5-2",
+  "bundle_sha256": "9d46f0b490f0dc8a3bed4ce12006a05722d25afab44e0f7ae0bb3d39c9f94617",
+  "target": "Phytium S5000C; Linux aarch64; glibc 2.34",
+  "source_asset_root": "D:/Projects/phytium/ippi/ippi-ft/.tmp/hmpp252_bench_headers/data/HMPP",
+  "staged_root": "/tmp/phyopt-hmppi-original-9d46f0b4-20261008",
+  "source_inventory": {
+    "headers": 7,
+    "shared_libraries": [
+      "lib/libHMPP_audio.so.2.5.2",
+      "lib/libHMPP_core.so.2.5.2",
+      "lib/libHMPP_image.so.2.5.2",
+      "lib/libHMPP_signal.so.2.5.2",
+      "lib/libsignal_base.so",
+      "lib/libsignal_kml.so"
+    ],
+    "other_shared_libraries": [],
+    "static_libraries": [],
+    "runtime_directories": [],
+    "readme_or_install_documents": [],
+    "environment_scripts": []
+  },
+  "validation_layers": {
+    "FILE_INVENTORY_VALID": true,
+    "ELF_DEPENDENCY_VALID": true,
+    "SYMBOL_CLOSURE_VALID": false,
+    "LOAD_VALIDATED": false
+  },
+  "symbol_closure": {
+    "symbol": "kml_fft_execute_dft_c2r",
+    "consumers": [
+      { "library": "lib/libsignal_kml.so", "binding": "GLOBAL", "visibility": "DEFAULT", "section": "UND" },
+      { "library": "lib/libHMPP_signal.so.2.5.2", "binding": "GLOBAL", "visibility": "DEFAULT", "section": "UND" }
+    ],
+    "providers_in_frozen_bundle": [],
+    "bundle_classification": "MISSING_SYMBOL_PROVIDER",
+    "observed_external_providers_not_in_bundle": [
+      {
+        "path": "/home/chenmn/ippi/kml/lib/libkml_rt.so.1.26.1.RC1",
+        "soname": "libkml_rt.so.1",
+        "sha256": "0d005d3e6e572636693091597677d64535afa329b92ffee6f0009271e02ed435",
+        "binding": "GLOBAL",
+        "visibility": "DEFAULT"
+      },
+      {
+        "path": "/home/chenmn/ippi/kml/lib/neon/libkfft.so.1.26.1.RC1",
+        "soname": "libkfft.so.1",
+        "sha256": "645741cce5ff3d0876953f715da0817a4eea1ae07ccfb52078da3636d996f0af",
+        "binding": "GLOBAL",
+        "visibility": "DEFAULT"
+      },
+      {
+        "path": "/home/chenmn/ippi/kml/lib/sve/libkfft.so.1.26.1.RC1",
+        "sha256": "6f09afc43f7bd3c8052474ac1cb7debe6dc17907c7acfbb665205e2526cc542e",
+        "binding": "GLOBAL",
+        "visibility": "DEFAULT"
+      },
+      {
+        "path": "/home/chenmn/ippi/kml/lib/sve_no_f64mm/libkfft.so.1.26.1.RC1",
+        "sha256": "35c0f90738b37571aba6863a0f93d2f9d7a9199512a0bd3347113eb2421f15fb",
+        "binding": "GLOBAL",
+        "visibility": "DEFAULT"
+      },
+      {
+        "path": "/home/chenmn/ippi/kml/lib/sve512/libkfft.so.1.26.1.RC1",
+        "sha256": "b1defd3d6f934935df4c853c7ea059703727966eab192b6bf249197755714045",
+        "binding": "GLOBAL",
+        "visibility": "DEFAULT"
+      }
+    ]
+  },
+  "runtime_dependency_graph": {
+    "elf_needed": {
+      "libHMPP_image.so.2.5.2": ["libsignal_base.so", "libsignal_kml.so", "libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+      "libsignal_base.so": ["libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+      "libsignal_kml.so": ["libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"]
+    },
+    "symbol_edges": [
+      { "consumer": "libsignal_kml.so", "symbol": "kml_fft_execute_dft_c2r", "frozen_bundle_provider": null },
+      { "consumer": "libHMPP_signal.so.2.5.2", "symbol": "kml_fft_execute_dft_c2r", "frozen_bundle_provider": null },
+      { "consumer": "libHMPP_image.so.2.5.2", "symbol": "HMPP_Malloc", "bundle_provider": "libHMPP_core.so.2.5.2", "auto_loaded_by_dt_needed": false },
+      { "consumer": "libsignal_base.so", "symbol": "HMPP_GetStatusString", "bundle_provider": "libHMPP_core.so.2.5.2", "auto_loaded_by_dt_needed": false }
+    ]
+  },
+  "loader_order": {
+    "bundle_alone_is_loader_order_issue": false,
+    "reason": "None of the six HMPP libraries declares a DT_NEEDED edge to a KML provider. LD_LIBRARY_PATH alone does not load libraries absent from DT_NEEDED.",
+    "vendor_global_loading_policy_proven": false,
+    "preload_or_rtld_global_used": false,
+    "note": "The supplied HMPP asset tree contains no README, install guide or environment script proving an intended global KML load order. Historical patched benchmark scripts are not vendor runtime evidence."
+  },
+  "dlopen_probe": {
+    "entry": "lib/libHMPP_image.so.2.5.2",
+    "loader_environment": "LD_LIBRARY_PATH=/tmp/phyopt-hmppi-original-9d46f0b4-20261008/lib",
+    "result": "FAILED",
+    "error": "libsignal_kml.so: undefined symbol: kml_fft_execute_dft_c2r",
+    "actual_loaded_library_identity": null
+  },
+  "baseline_state": "INVALID",
+  "user_action_required": "Provide or approve a complete, original, version-compatible KML runtime artifact set and vendor loading documentation before changing the frozen baseline identity or attempting a special loader policy."
+}

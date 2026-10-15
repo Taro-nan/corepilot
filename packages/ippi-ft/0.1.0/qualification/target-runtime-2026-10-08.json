@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "subject": "hmippi-binary-2-5-2",
+  "bundle_sha256": "9d46f0b490f0dc8a3bed4ce12006a05722d25afab44e0f7ae0bb3d39c9f94617",
+  "candidate_source_commit": "23a39f8de2272c150e168a824b7839de3844661c",
+  "target": {
+    "architecture": "aarch64",
+    "kernel": "5.10.0-5.10.1.25.oe1.aarch64",
+    "glibc": "2.34"
+  },
+  "staging": {
+    "mode": "isolated-manual-probe-not-formal-runner-staging",
+    "probe_source": "qualification/probe-original-baseline.c",
+    "path": "/tmp/phyopt-hmppi-original-9d46f0b4-20261008",
+    "files": "7 headers and 6 unmodified AArch64 shared libraries",
+    "relative_path_size_and_sha256": "All 13 staged files matched local source relative paths and byte lengths, and each SHA-256 matched baselines/performance.json."
+  },
+  "entry_library": {
+    "path": "lib/libHMPP_image.so.2.5.2",
+    "size": 1378336,
+    "sha256": "b9a18fd59aeced9ee0a1a9bc9d197b39bc11fb6c997c7ab71b0841d92ead99a1",
+    "soname": "libHMPP_image.so.2.5.2",
+    "exported_symbol": "HMPPI_Dilate3x3_64f_C1R"
+  },
+  "loader": {
+    "environment": "LD_LIBRARY_PATH=/tmp/phyopt-hmppi-original-9d46f0b4-20261008/lib",
+    "direct_needed": ["libsignal_base.so", "libsignal_kml.so", "libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+    "resolved_bundled": ["libsignal_base.so", "libsignal_kml.so"],
+    "resolved_system": ["libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+    "missing_sonames_reported_by_ldd": [],
+    "unresolved_relocations": ["kml_fft_execute_dft_c2r", "kml_fft_execute_dft_r2c", "cblas_dgemm", "HMPP_Malloc", "HMPP_GetStatusString", "sincos"],
+    "dlopen_result": "FAILED: libsignal_kml.so: undefined symbol: kml_fft_execute_dft_c2r",
+    "actual_loaded_library_identity": null
+  },
+  "api_equivalence": {
+    "declarations": "Both APIs take float64 source/destination pointers, byte strides and width/height ROI and export distinct vendor symbols.",
+    "roi_halo_behavior": "UNVERIFIED_ON_HMPPI",
+    "overlap_behavior": "UNVERIFIED_ON_HMPPI",
+    "special_float_behavior": "UNVERIFIED_ON_HMPPI",
+    "result": "NOT_ESTABLISHED"
+  },
+  "conclusion": "INVALID",
+  "formal_performance_allowed": false,
+  "reason": "The unchanged frozen binary bundle cannot be loaded with its declared loader environment on this S5000C. Dynamic symbol providers are missing even though all DT_NEEDED SONAMEs resolve.",
+  "next_action": "Obtain a complete unmodified S5000C-compatible vendor runtime bundle or choose a different baseline, freeze a new aggregate identity, then repeat loader and API-semantic qualification. Do not use patched compatibility copies."
+}

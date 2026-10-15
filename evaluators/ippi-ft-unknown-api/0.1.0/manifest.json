@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "ippi-ft-unknown-api",
+  "version": "0.1.0",
+  "owner": "human-review-required",
+  "domain": {
+    "name": "ippi-ft",
+    "api": "UNKNOWN",
+    "layout": "UNKNOWN_REVIEW_REQUIRED",
+    "operation": "UNKNOWN_REVIEW_REQUIRED",
+    "datatype": "UNKNOWN_REVIEW_REQUIRED"
+  },
+  "target": {
+    "platform": "UNKNOWN_REVIEW_REQUIRED",
+    "build_target": "UNKNOWN_REVIEW_REQUIRED",
+    "compatibility_scope": "UNKNOWN_REVIEW_REQUIRED"
+  },
+  "digest_algorithm": "phyopt-evaluator-content-sha256-v1",
+  "digest": "dbc83a1916a9e1dd988259810df223440c0c2b62aa6bc8f4a5de031b42a5d7f6",
+  "qualification": {
+    "record": "qualification.json",
+    "requires_target_qualification": true,
+    "requires_owner_approval": true
+  },
+  "correctness": {
+    "definition": "DRAFT ONLY: no trusted correctness oracle; this script always fails.",
+    "inventory": "correctness/cases.json",
+    "case_ids": [
+      "review-required"
+    ],
+    "command": {
+      "executable": "bash",
+      "script": "scripts/run-correctness.sh",
+      "arguments": [
+        "case_id",
+        "artifact_path",
+        "threads",
+        "runtime_root"
+      ],
+      "measurement_prefix": "PHYOPT_MEASUREMENT"
+    },
+    "reference": {
+      "implementation": "correctness/oracle-proposal.txt",
+      "accumulation": "UNKNOWN_REVIEW_REQUIRED",
+      "qualification_required": true
+    },
+    "tolerance": {
+      "rule": "UNKNOWN_REVIEW_REQUIRED",
+      "absolute": 0,
+      "relative": 0,
+      "qualification_required": true
+    }
+  },
+  "performance": {
+    "definition": "DRAFT ONLY: no formal benchmark or qualified workload; this script always fails.",
+    "inventory": "benchmark/workloads.json",
+    "workload_ids": [
+      "review-required"
+    ],
+    "command": {
+      "executable": "bash",
+      "script": "scripts/run-performance.sh",
+      "arguments": [
+        "phase",
+        "role",
+        "workload_id",
+        "artifact_path",
+        "iteration_index",
+        "threads",
+        "runtime_root"
+      ],
+      "measurement_prefix": "PHYOPT_MEASUREMENT"
+    },
+    "sampling": {
+      "warmup_count": 0,
+      "sample_count": 1,
+      "statistic": "median",
+      "process_model": "one-process-per-sample"
+    },
+    "measurement": {
+      "unit": "seconds",
+      "value": "latency_seconds",
+      "derived": [
+        "median"
+      ],
+      "raw_samples_retained": true,
+      "output_schema": "benchmark/output-schema.json"
+    }
+  },
+  "resource_requirements": {
+    "cpu_set": "UNKNOWN_REVIEW_REQUIRED",
+    "numa_node": 0,
+    "thread_counts": [
+      1
+    ],
+    "enforcement": {
+      "threads": "NOT_ENFORCED",
+      "cpu_set": "NOT_ENFORCED",
+      "numa_node": "NOT_ENFORCED"
+    }
+  },
+  "baseline_definition": {
+    "mode": "live-symmetric-execution",
+    "historical_measurements_are_formal_evidence": false,
+    "identity_required": [
+      "artifact_id",
+      "sha256",
+      "runtime_path"
+    ],
+    "symmetry_required": [
+      "workload",
+      "sampling",
+      "resource_policy"
+    ]
+  },
+  "acceptance_policy": {
+    "correctness": "UNKNOWN_REVIEW_REQUIRED",
+    "performance": "UNKNOWN_REVIEW_REQUIRED",
+    "regression": "UNKNOWN_REVIEW_REQUIRED"
+  },
+  "artifact_identity_policy": {
+    "required_files": [
+      "qualification.json",
+      "correctness/cases.json",
+      "correctness/policy.json",
+      "correctness/oracle-proposal.txt",
+      "benchmark/workloads.json",
+      "benchmark/policy.json",
+      "benchmark/benchmark-proposal.txt",
+      "benchmark/output-schema.json",
+      "scripts/run-correctness.sh",
+      "scripts/run-performance.sh"
+    ],
+    "source_files": [
+      "correctness/oracle-proposal.txt",
+      "benchmark/benchmark-proposal.txt"
+    ],
+    "benchmark_binary": "UNKNOWN_REVIEW_REQUIRED",
+    "candidate_binary": "UNKNOWN_REVIEW_REQUIRED",
+    "baseline_binary": "UNKNOWN_REVIEW_REQUIRED",
+    "runtime_resolution": "UNKNOWN_REVIEW_REQUIRED",
+    "mutable_dependencies": "explicit-artifact-inputs-only"
+  }
+}

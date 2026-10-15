@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "superseding_version": "1.0.2",
+  "superseded_version": "1.0.1",
+  "superseded_digest": "e5a77e65ee874643b9ee47615228bd0c8900d0c46800d28b2a75768a27203710",
+  "note": "TestPlanVersion 1.0.1 remains invalidated and its manifest is preserved unmodified. This independent supersession record establishes the 1.0.2 -> 1.0.1 version chain without rewriting 1.0.1 in place."
+}

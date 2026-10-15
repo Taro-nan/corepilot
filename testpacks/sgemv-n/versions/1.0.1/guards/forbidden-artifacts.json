@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "forbidden_artifacts": [
+    {
+      "path": "/tmp/gemv_n_load_interleave",
+      "reason": "Previously mislabeled as sgemv_v1 during the first three-way test; it actually holds the 2026-09-02 DGEMV load-interleave library. Must never be loaded as an SGEMV candidate.",
+      "function_family": "DGEMV",
+      "forbidden_for": "SGEMV",
+      "source": "user-confirmed",
+      "severity": "BLOCKING"
+    }
+  ]
+}

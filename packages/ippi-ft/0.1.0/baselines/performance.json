@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "baseline_id": "hmippi-binary-2-5-2",
+  "version": "2.5.2",
+  "kind": "binary_bundle",
+  "state": "INVALID",
+  "digest_algorithm": "sha256-file-identities-v1",
+  "sha256": "9d46f0b490f0dc8a3bed4ce12006a05722d25afab44e0f7ae0bb3d39c9f94617",
+  "headers": [
+    { "path": "include/hmpp.h", "sha256": "e4f9180feb7fbb131c956022c3b118c160fccfd2bf5bbb8f67650579ff5ae53b" },
+    { "path": "include/hmpp_core.h", "sha256": "e3420f139594de4f80240ec9613cd9a692e62c1599b0535607dd7ba05998f771" },
+    { "path": "include/hmpp_type.h", "sha256": "1c1726c1ec59159c6ded223dc8f8132b31afb94810adaba0930b8327ea1171fa" },
+    { "path": "include/hmpp_typebase.h", "sha256": "e63dc58403c93b1f90e8a196d3c724406c4f1e48b279213d8338172bb2a6fa7b" },
+    { "path": "include/hmppa.h", "sha256": "2db1c05a3d00fdb99918b111d685a98949eb1ccdeed4cfbdb0352a0b1eedb2c8" },
+    { "path": "include/hmppi.h", "sha256": "6ba2f249b3a0fcc18de3685547bf132c574ced4c800604d8b674f86963d49a50" },
+    { "path": "include/hmpps.h", "sha256": "fa3a094a80f561ddf7cb0a47c3f6aab37428910f8e1b93a22c3ccf9e4bd11eb6" }
+  ],
+  "libraries": [
+    {
+      "path": "lib/libHMPP_audio.so.2.5.2",
+      "role": "OTHER",
+      "sha256": "c8a4d3fdd07a0b51ee85864863f8abe189c7fa6e14a3caaf2ed0c7a9a4250e1d",
+      "soname": "libHMPP_audio.so.2.5.2",
+      "elf": { "class": "ELF64", "endian": "LITTLE", "machine": "AARCH64", "build_id": "51b91f132d5212f582a1dfeb365236a14e26fe1a" },
+      "needed": [
+        { "soname": "libsignal_base.so", "classification": "BUNDLED_DEPENDENCY" },
+        { "soname": "libgomp.so.1", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "libc.so.6", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "ld-linux-aarch64.so.1", "classification": "SYSTEM_DEPENDENCY" }
+      ]
+    },
+    {
+      "path": "lib/libHMPP_core.so.2.5.2",
+      "role": "ENTRY",
+      "sha256": "31d382992b8a58c9663b01b3ec7055a93694073b1bb223679ffd338a6f0c238f",
+      "soname": "libHMPP_core.so.2.5.2",
+      "elf": { "class": "ELF64", "endian": "LITTLE", "machine": "AARCH64", "build_id": "0c8b13e935f3c276234d8e95763023379b578f8c" },
+      "needed": [
+        { "soname": "libgomp.so.1", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "libc.so.6", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "ld-linux-aarch64.so.1", "classification": "SYSTEM_DEPENDENCY" }
+      ]
+    },
+    {
+      "path": "lib/libHMPP_image.so.2.5.2",
+      "role": "ENTRY",
+      "sha256": "b9a18fd59aeced9ee0a1a9bc9d197b39bc11fb6c997c7ab71b0841d92ead99a1",
+      "soname": "libHMPP_image.so.2.5.2",
+      "elf": { "class": "ELF64", "endian": "LITTLE", "machine": "AARCH64", "build_id": "580d9ad6e89ceb6f66c141287c32404778c1ef32" },
+      "needed": [
+        { "soname": "libsignal_base.so", "classification": "BUNDLED_DEPENDENCY" },
+        { "soname": "libsignal_kml.so", "classification": "BUNDLED_DEPENDENCY" },
+        { "soname": "libgomp.so.1", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "libc.so.6", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "ld-linux-aarch64.so.1", "classification": "SYSTEM_DEPENDENCY" }
+      ]
+    },
+    {
+      "path": "lib/libHMPP_signal.so.2.5.2",
+      "role": "OTHER",
+      "sha256": "9ed9bbdb10902bb6552a0330702068327feccff3806d7a078100432a51c07a06",
+      "soname": "libHMPP_signal.so.2.5.2",
+      "elf": { "class": "ELF64", "endian": "LITTLE", "machine": "AARCH64", "build_id": "b177b31c11e0a51d5f4b8efee1dd1a7d72530261" },
+      "needed": [
+        { "soname": "libsignal_base.so", "classification": "BUNDLED_DEPENDENCY" },
+        { "soname": "libsignal_kml.so", "classification": "BUNDLED_DEPENDENCY" },
+        { "soname": "libgomp.so.1", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "libc.so.6", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "ld-linux-aarch64.so.1", "classification": "SYSTEM_DEPENDENCY" }
+      ]
+    },
+    {
+      "path": "lib/libsignal_base.so",
+      "role": "BUNDLED_DEPENDENCY",
+      "sha256": "a8fbf391d71fb8f221a288242fe9740e0850d7267554df8eff0dbe82a1a56436",
+      "soname": "libsignal_base.so",
+      "elf": { "class": "ELF64", "endian": "LITTLE", "machine": "AARCH64", "build_id": "e57573dd33fb9953c8e1d01c95db898464a127b6" },
+      "needed": [
+        { "soname": "libgomp.so.1", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "libc.so.6", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "ld-linux-aarch64.so.1", "classification": "SYSTEM_DEPENDENCY" }
+      ]
+    },
+    {
+      "path": "lib/libsignal_kml.so",
+      "role": "BUNDLED_DEPENDENCY",
+      "sha256": "3f42821c61dd59d5a771c04c062c183226b62b4e0b0ffc463bccbf2732807911",
+      "soname": "libsignal_kml.so",
+      "elf": { "class": "ELF64", "endian": "LITTLE", "machine": "AARCH64", "build_id": "49fddd8a821e02bbacca698a91ab3bb5054f7e57" },
+      "needed": [
+        { "soname": "libgomp.so.1", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "libc.so.6", "classification": "SYSTEM_DEPENDENCY" },
+        { "soname": "ld-linux-aarch64.so.1", "classification": "SYSTEM_DEPENDENCY" }
+      ]
+    }
+  ],
+  "loader_environment": { "mechanism": "LD_LIBRARY_PATH", "search_paths": ["lib"] },
+  "target_compatibility": ["Linux AArch64 ELF64; S5000C glibc 2.34 runtime INVALID: original bundle has unresolved symbols"],
+  "dependency_closure": {
+    "status": "INVALID",
+    "target_machine": "Phytium S5000C; Linux 5.10.0-5.10.1.25.oe1.aarch64; glibc 2.34",
+    "checked_at": "2026-10-08T07:01:09Z",
+    "resolved_libraries": [
+      { "soname": "libsignal_base.so", "path": "/tmp/phyopt-hmppi-original-9d46f0b4-20261008/lib/libsignal_base.so", "sha256": "a8fbf391d71fb8f221a288242fe9740e0850d7267554df8eff0dbe82a1a56436" },
+      { "soname": "libsignal_kml.so", "path": "/tmp/phyopt-hmppi-original-9d46f0b4-20261008/lib/libsignal_kml.so", "sha256": "3f42821c61dd59d5a771c04c062c183226b62b4e0b0ffc463bccbf2732807911" },
+      { "soname": "libgomp.so.1", "path": "/usr/lib64/libgomp.so.1", "sha256": "f405bce0a82746737b06c4683a8a3cb9942807978b3bc9bffba18e60e835aa9b" },
+      { "soname": "libc.so.6", "path": "/usr/lib64/libc.so.6", "sha256": "c88520719d6a6fb1db74d2e03bb0b53e19e8821929fbd44bc8703598a4fd8f2e" },
+      { "soname": "ld-linux-aarch64.so.1", "path": "/lib/ld-linux-aarch64.so.1", "sha256": "5c4207b9db7910f350001eca3097f662912552c2b8b66959b2db6c09d087b96c" }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "line_prefix": "PHYOPT_DLADDR",
+  "note": "Emitted BEFORE the timed region; resolves cblas_sgemv via dlsym(RTLD_DEFAULT) and prints the shared object it was loaded from via dladdr.",
+  "fields": [
+    { "name": "proof_method", "type": "string", "const": "dladdr_dlsym" },
+    { "name": "symbol", "type": "string", "const": "cblas_sgemv" },
+    { "name": "resolved_path", "type": "string" },
+    { "name": "realpath", "type": "string" },
+    { "name": "benchmark_role", "type": "string", "values": ["candidate", "baseline"] },
+    { "name": "benchmark_binary_sha256", "type": "string" },
+    { "name": "test_plan_version", "type": "string" },
+    { "name": "test_plan_digest", "type": "string" }
+  ]
+}

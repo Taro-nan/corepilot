@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "package_id": "ftblas",
+  "version": "1.0.0",
+  "owner": "phyopt-performance-validation",
+  "library": {
+    "name": "PhyBLAS / FTBLAS",
+    "source_compatibility": ["blas_ft source baseline 5e55d54192e3f9b9c876f989b78a43e937ad670d", "OpenBLAS-compatible CBLAS source tree with FT2000 target"],
+    "target_compatibility": ["Linux / AArch64", "S5000C / FT2000"]
+  },
+  "qualification": {"state": "DRAFT", "reviewer": null, "reviewed_at": null},
+  "functions": [{"function_id": "matrix-vector", "api": "cblas_sgemv"}],
+  "build_definitions": [{"build_id": "shared-ft2000", "definition": "build/shared.json"}],
+  "formal_evaluators": [{
+    "evaluator_id": "sgemv-n",
+    "version": "1.0.0",
+    "owner": "phyopt-performance-validation",
+    "digest": "e1d2effa606f2ef4f028a490ffef8dc7a9b2968fc15128250a281a2539c8ae58",
+    "catalog_path": "sgemv-n/1.0.0"
+  }],
+  "targets": [{
+    "target_id": "sgemv-n",
+    "function_id": "matrix-vector",
+    "build_id": "shared-ft2000",
+    "evaluator": {"evaluator_id": "sgemv-n", "evaluator_version": "1.0.0"},
+    "candidate_scope": {
+      "include": ["kernel/arm64/gemv_n.S", "kernel/arm64/sgemv_n_neon.c", "driver/level2/gemv_n.c", "driver/level2/gemv_thread.c", "interface/gemv.c"],
+      "exclude": ["test/", "benchmark/", "scripts/"]
+    },
+    "development_benchmark": {
+      "evaluator": {"evaluator_id": "sgemv-n", "evaluator_version": "1.0.0"},
+      "workload_ids": ["square_4096_t1", "wide_1024x16384_t1", "tall_16384x1024_t1", "b16_15", "b16_16", "b16_17", "b32_2047", "b32_2048", "b32_2049"]
+    },
+    "artifacts": {
+      "candidate": {"artifact_id": "phyblas-source-baseline-5e55d5419", "relative_path": "libblas_ft_ft2000p-r0.3.33.so"},
+      "baseline": {
+        "id": "openblas-release033",
+        "library": "OpenBLAS",
+        "version": "0.3.33",
+        "sha256": "6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257"
+      }
+    },
+    "performance_acceptance": {"weighted_geomean_min": 1.03, "overall_ci_lower_min": 1.0, "key_case_ci_lower_min": 0.98, "confidence_level": 0.95},
+    "analysis_sampling": {"interleave_seed": 20260907, "bootstrap_iterations": 10000},
+    "domain_payload": {"layout": "column-major", "operation": "NoTrans", "datatype": "float32"}
+  }]
+}

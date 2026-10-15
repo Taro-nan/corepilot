@@ -1,0 +1,44 @@
+node_modules/
+# Codex/工作助手本地记忆，不属于项目源码或发布产物
+.workbuddy/
+dist/
+.phyopt/
+/tests/*
+!/tests/optimization-runtime.test.ts
+!/tests/optimization-approval.test.ts
+!/tests/runner-http.test.ts
+!/tests/validation-domain.test.ts
+!/tests/evaluator-isolation.test.ts
+!/tests/rpc-experiment-transition-adapter.test.ts
+!/tests/formal-evaluator-fixture.ts
+!/tests/hypothesis-fixture.ts
+!/tests/formal-evaluator.test.ts
+!/tests/experiment-failure.test.ts
+!/tests/candidate-evaluation-feedback.test.ts
+!/tests/pi-agent-runtime.test.ts
+!/tests/pi-wire.test.ts
+!/tests/workspace-tools.test.ts
+!/tests/library-package.test.ts
+!/tests/library-onboarding.test.ts
+!/tests/public-agent-workflow.test.ts
+!/tests/homepage.test.ts
+!/tests/cli-homepage-redraw.test.ts
+!/tests/cli-resize-reflow.test.ts
+!/tests/cli-resize.test.ts
+/docs/dev-log/
+*.sqlite
+*.sqlite-*
+~$*.docx
+# real-machine raw evidence (hostname/user/IP/private data must NOT be committed)
+evidence/
+# reproducible source archives are large binaries; their manifest (SHA) is committed
+source-archives/**/*.tar.gz
+
+# VS Code extension test download cache
+.vscode-test/
+
+# VS Code extension package
+*.vsix
+
+# local release build output (artifacts are not committed; historical notes are in docs/history/d17-delivery.md)
+/build/

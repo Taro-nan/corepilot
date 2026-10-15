@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "test_plan_version": "1.0.1",
+  "function_family": "GEMV",
+  "operation": "N",
+  "data_type": "single precision",
+  "api": "cblas_sgemv",
+  "comparison": {
+    "candidate": {
+      "name": "FT-BLAS SGEMV-N v1",
+      "path": "/tmp/sgemv_n_v1_final_20260904/libblas_ft_ft2000p-r0.3.33.so",
+      "sha256": "48add03e5f2339d7a187a59fec957f5a1a81441df2fe2a4ac1b8ca3554fd0b3a"
+    },
+    "baseline_openblas": {
+      "name": "OpenBLAS release033",
+      "path": "/tmp/gemv_n_release033/libopenblas_ft2000p-r0.3.33.so",
+      "sha256": "6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257"
+    },
+    "baseline_pre_opt_ft": null,
+    "note": "No pre-optimization FT-BLAS baseline; only evaluate relative to OpenBLAS release033."
+  },
+  "matrix": {
+    "alpha": 1,
+    "beta": 0,
+    "incx": 1,
+    "incy": 1,
+    "lda_mode": "m",
+    "points": [
+      {
+        "point_id": "square_4096_t1",
+        "m": 4096,
+        "n": 4096,
+        "threads": 1,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "square_4096_t8",
+        "m": 4096,
+        "n": 4096,
+        "threads": 8,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "square_4096_t16",
+        "m": 4096,
+        "n": 4096,
+        "threads": 16,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "wide_1024x16384_t1",
+        "m": 1024,
+        "n": 16384,
+        "threads": 1,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "wide_1024x16384_t8",
+        "m": 1024,
+        "n": 16384,
+        "threads": 8,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "wide_1024x16384_t16",
+        "m": 1024,
+        "n": 16384,
+        "threads": 16,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "tall_16384x1024_t1",
+        "m": 16384,
+        "n": 1024,
+        "threads": 1,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "tall_16384x1024_t8",
+        "m": 16384,
+        "n": 1024,
+        "threads": 8,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "tall_16384x1024_t16",
+        "m": 16384,
+        "n": 1024,
+        "threads": 16,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "small_512_t1",
+        "m": 512,
+        "n": 512,
+        "threads": 1,
+        "weight": 1,
+        "category": "small",
+        "critical": false
+      },
+      {
+        "point_id": "large_8192_t16",
+        "m": 8192,
+        "n": 8192,
+        "threads": 16,
+        "weight": 1,
+        "category": "large",
+        "critical": true
+      },
+      {
+        "point_id": "large_16384_t8",
+        "m": 16384,
+        "n": 16384,
+        "threads": 8,
+        "weight": 1,
+        "category": "large",
+        "critical": true
+      },
+      {
+        "point_id": "b16_15",
+        "m": 15,
+        "n": 16,
+        "threads": 1,
+        "weight": 1,
+        "category": "boundary16",
+        "critical": true
+      },
+      {
+        "point_id": "b16_16",
+        "m": 16,
+        "n": 16,
+        "threads": 1,
+        "weight": 1,
+        "category": "boundary16",
+        "critical": true
+      },
+      {
+        "point_id": "b16_17",
+        "m": 17,
+        "n": 16,
+        "threads": 1,
+        "weight": 1,
+        "category": "boundary16",
+        "critical": true
+      },
+      {
+        "point_id": "b32_2047",
+        "m": 2047,
+        "n": 2048,
+        "threads": 16,
+        "weight": 1,
+        "category": "boundary32",
+        "critical": true
+      },
+      {
+        "point_id": "b32_2048",
+        "m": 2048,
+        "n": 2048,
+        "threads": 16,
+        "weight": 1,
+        "category": "boundary32",
+        "critical": true
+      },
+      {
+        "point_id": "b32_2049",
+        "m": 2049,
+        "n": 2048,
+        "threads": 16,
+        "weight": 1,
+        "category": "boundary32",
+        "critical": true
+      }
+    ]
+  },
+  "sampling": {
+    "samples_per_point": 7,
+    "interleave_seed": 20260907,
+    "statistic": "median",
+    "ci_method": "percentile_bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_iterations": 10000,
+    "warmup": 3,
+    "loops": 60
+  },
+  "thresholds": {
+    "weighted_geomean_min": 1.03,
+    "overall_ci_lower_min": 1,
+    "key_case_ci_lower_min": 0.98,
+    "report_all_regressions": true
+  },
+  "execution": {
+    "cpu_set": "0-15",
+    "numa_nodes": "0",
+    "max_threads": 16,
+    "taskset": "taskset -c 0-15",
+    "numactl": "numactl --cpunodebind=0 --membind=0",
+    "omp_env": {
+      "OMP_DYNAMIC": "FALSE",
+      "OMP_PLACES": "cores",
+      "OMP_PROC_BIND": "spread",
+      "OMP_WAIT_POLICY": "ACTIVE"
+    }
+  },
+  "weight_semantics": {
+    "kind": "synthetic_equal_weight",
+    "boundary_point_share": 0.3333333333333333,
+    "note": "Equal weight over all points is a synthetic score, not a real business workload distribution; it must not be presented as overall real-workload benefit."
+  },
+  "benchmark_spec": {
+    "source_sha256": "3daf65d86078e6c83ec4684f935f709a1dfe75e66ad7c59ae21de8a0fa69fc72",
+    "build_command": [
+      "gcc",
+      "-O2",
+      "-fopenmp",
+      "-I",
+      "<testpack>/include",
+      "<testpack>/sgemv_bench_formal.c",
+      "-o",
+      "<workdir>/sgemv_bench_formal",
+      "-L",
+      "/tmp/sgemv_n_v1_final_20260904",
+      "-Wl,-rpath,/tmp/sgemv_n_v1_final_20260904",
+      "-lblas_ft_ft2000p-r0.3.33",
+      "-lm",
+      "-lpthread"
+    ]
+  },
+  "dladdr_probe_sha256": "1422b0959733dff4875927a3a30b412f6e5a7ed27285425158c5b561b45a6e5a",
+  "statistics_spec": {
+    "sample_parser_sha256": "7f7ffefe09dff86fddc1af4089d829c7ba2e69998be5119dd32a7bb37e1157d4",
+    "median_sha256": "61e0b1b632c44ada247688f5a0732194ed6af203bd32658928e2826a8c574068",
+    "bootstrap_sha256": "a54da3c9090d173ca388aa7856b99160d1e800413a06f47c2181ef37d649b050",
+    "speedup_sha256": "3645fe3c2b3fb2bf6d2f588ce5ce695ff89c97116aa304fde276e4fe3f9f566a",
+    "geomean_sha256": "2126f0757b38aa15aecdad7155fcb231bd39e6321e43b026af26a06daf087f8a",
+    "note": "median + percentile-bootstrap + speedup-time/gflops + weighted geomean"
+  },
+  "supersedes": "1.0.0",
+  "invalidation_reason": "1.0.0 had wrong 32-row boundary points (255/256/257 at threads=1 run the 4-col 16-row kernel, not the 2-col 32-row kernel) and its aggregate_digest did not cover benchmark/probe/build/statistics source.",
+  "frozen_at": "2026-09-08T01:55:50.764Z",
+  "aggregate_digest": "e5a77e65ee874643b9ee47615228bd0c8900d0c46800d28b2a75768a27203710"
+}

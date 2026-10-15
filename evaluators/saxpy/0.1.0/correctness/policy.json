@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "definition": "Every declared SAXPY case executes once and compares every logical output element with the evaluator-owned scalar reference.",
+  "argument_contract": ["case_id", "artifact_path", "n", "incx", "incy", "alpha", "threads", "seed", "runtime_root"],
+  "reference": "float64 scalar y[i] + alpha*x[i], rounded to float32 for comparison",
+  "tolerance": { "absolute": 0.00001, "relative": 0.00001 }
+}

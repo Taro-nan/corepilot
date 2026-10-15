@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "status": "BUILD_BINDING_VALIDATED",
+  "source_commit": "23a39f8de2272c150e168a824b7839de3844661c",
+  "source_archive_sha256": "a9131a9a7963c87d9c35699d4a8397985ed940657343c672ab17aa7c5bd11dde",
+  "reason": "The source commit includes build/CMakeCache.txt from /home/fang/ippi-ft. An isolated fresh CMake directory implements the owner-approved build policy without reusing imported caches or artifacts.",
+  "previous_build_directory": "build",
+  "validated_build_directory": "build/phyopt",
+  "candidate_artifact_relative_path": "build/phyopt/lib/libftppi.so",
+  "compiler": "/usr/bin/g++ GCC 10.3.1",
+  "effective_compile_flags": "-fopenmp -w -O2 -DNDEBUG -fPIC -fopenmp -std=gnu++17",
+  "unchanged_policy": ["Release", "C++17", "OpenMP ON", "OMP_NUM_THREADS=1", "parallel build 16"],
+  "rebuilt_main_artifact_sha256": "87805e10942159d8cf28b2cc48efe0cc690c1297631ee8f302d16f2e23c57b6a",
+  "byte_identical_to_frozen_baseline": true,
+  "correctness": "19/19 PASS",
+  "evaluator_digest": "de9d376571a51a0e0a36dac9fee85e99cce57dc0340e90ad4476b34f143a868d",
+  "report_path": "/home/chenmn/phyopt-qualifications/ippi-build-binding-20261010/result/report.json",
+  "report_sha256": "ead6249d598317fe58ff335f4c855e1675aa30ff80e084a4397c096495b842ad",
+  "raw_measurements_sha256": "239e75b128c43788f8e4a3e5c54544273f1ad3d3a7ff7572e5aa43e34b3f02f5",
+  "preserved_failed_workflow": "workflow:2d7f83ad-a769-4dd1-89f6-b88301010ea1",
+  "preserved_failed_task": "opt-task:f9cdcf6b-6db0-49ef-bf57-a1f106f9b696",
+  "candidates_created_by_failed_task": 0
+}

@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "build_input_version": "1.0.1",
+  "supersedes": "1.0.0",
+  "candidate_source_identity": {
+    "confirmed": true,
+    "repo": "D:/Projects/phytium/blas_ft/source",
+    "branch": "opt/blas/sgemv/v1 (same commit as opt/blas/sgemv/v2)",
+    "commit": "5e55d54192e3f9b9c876f989b78a43e937ad670d",
+    "baseline_commit": "23b977e646e8ad96bab94f5c7c02f7a6c247197e",
+    "worktree_clean": true,
+    "line_endings_note": "core.autocrlf=true makes the worktree CRLF; authoritative SHA-256 are the LF git blobs reproduced by the source archive.",
+    "files": [
+      {
+        "path": "kernel/arm64/gemv_n.S",
+        "sha256": "82a0c8f1d4d1958bd5ce01d0afb778d096e11662c07e73690bf827f4410f1f5f",
+        "worktree_sha256": "d8de32905783063e949f9d508cfb11c7782ad172e0b51fc5e4e066ec3f03fa59"
+      },
+      {
+        "path": "driver/level2/gemv_thread.c",
+        "sha256": "2768e34b2df1dede372c6985d4de4fba1dbef77e32abe493cc4f46ec9ad0b18e",
+        "worktree_sha256": "3d9ce5ab73d2f67307b495ddb8ad7d8f3c6969d35149d72b10814254d780b187"
+      }
+    ],
+    "build_target": "TARGET=FT2000",
+    "build_command": "make -j16 shared NO_LAPACK=1 TARGET=FT2000 USE_OPENMP=1 NUM_THREADS=32",
+    "build_concurrency_note": "-j16 limits build concurrency to the authorized 16 threads; NUM_THREADS=32 is only the library compile-time thread capacity, not the runtime thread allowance (correctness/performance remain <= 16 threads).",
+    "kernels": "4-column x 16-row (4 Y accumulators) and 2-column x 32-row (8 Y accumulators), plus original single-column fallback",
+    "dispatcher": "local_m = ceil(M/workers); workers<16 -> 4-col; workers>=16 && 64<=local_m<512 -> 2-col; else original single-column; mode enabled only for FT2000 && single && real && GEMV-N",
+    "binding_evidence": "docs/gemv_n/20260904_sgemv_n_v1.md section 9 (可追溯信息) binds gemv_n.S / gemv_thread.c SHA-256 to the candidate shared library SHA-256 48add03e5f2339d7a187a59fec957f5a1a81441df2fe2a4ac1b8ca3554fd0b3a"
+  },
+  "candidate_artifact": {
+    "target_sha256": "48add03e5f2339d7a187a59fec957f5a1a81441df2fe2a4ac1b8ca3554fd0b3a",
+    "found": false,
+    "conclusion": "CANDIDATE_ARTIFACT_REBUILD_REQUIRED",
+    "searched_roots": [
+      "D:/Projects/phytium (project dirs)",
+      "~/Downloads",
+      "~/Desktop"
+    ],
+    "sha256_seen": [
+      "af5fd5d465142c0888f61220c91c7a5844a1aae42649562cceb9488e6e5f7a08",
+      "e442c3558a413a4b0accac9271ebee01c4976627a3e913cf067ec37401335dfd",
+      "fc51b935d7b3003feaf8d0313b2be8d61a358f425a8e998ad150c21d7cc799fe",
+      "54b75b354b1b189150930589de6c10e176a59b96292a0e2a714bac29f51e4a69"
+    ]
+  },
+  "source_archive": {
+    "filename": "blas_ft_sgemv_n_5e55d5419.tar.gz",
+    "sha256": "3a688b27229126d6c9f6ec11d4c5b76e7eb97363178d7a127d4bbc77a0f1b83a",
+    "commit": "5e55d54192e3f9b9c876f989b78a43e937ad670d",
+    "prefix": "blas_ft_sgemv_n_5e55d5419/",
+    "archive_method": "git -c core.autocrlf=false archive --format=tar.gz --prefix=<prefix>/ <commit>",
+    "submodules": [],
+    "untracked_files_dependency": false,
+    "generated_files_dependency": false,
+    "file_count": 12629,
+    "manifest_digest": "24ded918cea641f0a268b3c31c18c084b06bbd27b8d1f5c2b3ac1eceb9ef8fe7",
+    "note": "No submodules; no untracked files; no generated files needed by make. git archive (autocrlf disabled) reproduces the LF blobs, whose SHA-256 match the authoritative source identity above."
+  },
+  "openblas_baseline_identity": {
+    "version": "OpenBLAS 0.3.33 (release033)",
+    "source_sha256": "6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257",
+    "recoverable": true,
+    "recovery_source": "/home/chenmn/projects/blas_ft_trsm_worktrees/release/libopenblas_ft2000p-r0.3.33.so"
+  },
+  "build_command": [
+    "make",
+    "-j16",
+    "shared",
+    "NO_LAPACK=1",
+    "TARGET=FT2000",
+    "USE_OPENMP=1",
+    "NUM_THREADS=32"
+  ],
+  "compile_flags": [
+    "gcc",
+    "-O2",
+    "-fopenmp"
+  ],
+  "test_suite_version": "1.0.1",
+  "test_suite_digest": "0069a43937c1a2139e598b8e352e0340137d4febf61fb34a50e18d9b7e41d9aa",
+  "files": [
+    {
+      "relative_path": "candidate_source/kernel/arm64/gemv_n.S",
+      "sha256": "82a0c8f1d4d1958bd5ce01d0afb778d096e11662c07e73690bf827f4410f1f5f"
+    },
+    {
+      "relative_path": "candidate_source/driver/level2/gemv_thread.c",
+      "sha256": "2768e34b2df1dede372c6985d4de4fba1dbef77e32abe493cc4f46ec9ad0b18e"
+    }
+  ],
+  "aggregate_digest": "8942723073fb7511e402da4362ee2220299c80a8bd9bcdb0a0a42bd27652e5f3",
+  "frozen_at": "2026-09-08T07:36:58.573Z"
+}

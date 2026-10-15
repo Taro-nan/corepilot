@@ -1,0 +1,7 @@
+{
+  "executable": "cc",
+  "args": ["-shared", "-fPIC", "fixtures/vector.c", "-o", "libfixture.so"],
+  "cwd": ".",
+  "environment": {},
+  "timeout_ms": 30000
+}

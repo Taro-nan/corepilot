@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "workloads": [
+    { "workload_id": "square_4096_t1", "m": 4096, "n": 4096, "lda": 4096, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 1, "loops": 60, "seed": 1001, "critical": true, "weight": 1 },
+    { "workload_id": "square_4096_t8", "m": 4096, "n": 4096, "lda": 4096, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 8, "loops": 60, "seed": 1002, "critical": true, "weight": 1 },
+    { "workload_id": "square_4096_t16", "m": 4096, "n": 4096, "lda": 4096, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 16, "loops": 60, "seed": 1003, "critical": true, "weight": 1 },
+    { "workload_id": "wide_1024x16384_t1", "m": 1024, "n": 16384, "lda": 1024, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 1, "loops": 60, "seed": 1004, "critical": true, "weight": 1 },
+    { "workload_id": "wide_1024x16384_t8", "m": 1024, "n": 16384, "lda": 1024, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 8, "loops": 60, "seed": 1005, "critical": true, "weight": 1 },
+    { "workload_id": "wide_1024x16384_t16", "m": 1024, "n": 16384, "lda": 1024, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 16, "loops": 60, "seed": 1006, "critical": true, "weight": 1 },
+    { "workload_id": "tall_16384x1024_t1", "m": 16384, "n": 1024, "lda": 16384, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 1, "loops": 60, "seed": 1007, "critical": true, "weight": 1 },
+    { "workload_id": "tall_16384x1024_t8", "m": 16384, "n": 1024, "lda": 16384, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 8, "loops": 60, "seed": 1008, "critical": true, "weight": 1 },
+    { "workload_id": "tall_16384x1024_t16", "m": 16384, "n": 1024, "lda": 16384, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 16, "loops": 60, "seed": 1009, "critical": true, "weight": 1 },
+    { "workload_id": "small_512_t1", "m": 512, "n": 512, "lda": 512, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 1, "loops": 60, "seed": 1010, "critical": false, "weight": 1 },
+    { "workload_id": "large_8192_t16", "m": 8192, "n": 8192, "lda": 8192, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 16, "loops": 60, "seed": 1011, "critical": true, "weight": 1 },
+    { "workload_id": "large_16384_t8", "m": 16384, "n": 16384, "lda": 16384, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 8, "loops": 60, "seed": 1012, "critical": true, "weight": 1 },
+    { "workload_id": "b16_15", "m": 15, "n": 16, "lda": 15, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 1, "loops": 60, "seed": 1013, "critical": true, "weight": 1 },
+    { "workload_id": "b16_16", "m": 16, "n": 16, "lda": 16, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 1, "loops": 60, "seed": 1014, "critical": true, "weight": 1 },
+    { "workload_id": "b16_17", "m": 17, "n": 16, "lda": 17, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 1, "loops": 60, "seed": 1015, "critical": true, "weight": 1 },
+    { "workload_id": "b32_2047", "m": 2047, "n": 2048, "lda": 2047, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 16, "loops": 60, "seed": 1016, "critical": true, "weight": 1 },
+    { "workload_id": "b32_2048", "m": 2048, "n": 2048, "lda": 2048, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 16, "loops": 60, "seed": 1017, "critical": true, "weight": 1 },
+    { "workload_id": "b32_2049", "m": 2049, "n": 2048, "lda": 2049, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "threads": 16, "loops": 60, "seed": 1018, "critical": true, "weight": 1 }
+  ]
+}

@@ -1,0 +1,24 @@
+model:
+  model_id: deepseek-flash
+  endpoint: https://api.deepseek.com/v1
+  timeout_ms: 1200000
+target:
+  host: 10.31.31.65
+  username: chenmn
+  port: 22
+  identity_file: C:\Users\11959\.ssh\id_ed25519_ft_10_31_31_65
+  workspace_root: /tmp/phyopt
+build:
+  executable: make
+  args:
+    - -j32
+    - NO_LAPACK=1
+    - TARGET=FT2000
+    - USE_OPENMP=1
+    - NUM_THREADS=32
+  cwd: .
+  environment: {}
+  timeout_ms: 600000
+validation:
+  testpack: D:\Projects\phytium\phyopt-agent\testpacks\sgemv-n.yaml
+output_dir: D:\Projects\phytium\phyopt-agent\.phyopt\runs

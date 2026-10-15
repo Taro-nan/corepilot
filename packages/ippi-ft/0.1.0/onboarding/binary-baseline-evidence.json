@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "source_root": "D:\\Projects\\phytium\\ippi\\ippi-ft\\.tmp\\hmpp252_bench_headers\\data\\HMPP",
+  "inspection": {
+    "read_only": true,
+    "methods": ["Get-FileHash SHA256", "objdump -f -p -T", "ELF e_machine header bytes"],
+    "headers_directory": "include",
+    "libraries_directory": "lib",
+    "header_count": 7,
+    "library_count": 6,
+    "version_evidence": "2.5.2 is observed in four filenames and SONAMEs; the product-version API was not executed",
+    "elf_identity": "All six libraries are ELF64 little-endian AArch64 (e_machine 183)",
+    "rpath_runpath": "No RPATH or RUNPATH observed in the six libraries",
+    "direct_bundled_dependency_closure": "All direct non-system DT_NEEDED libraries are present in the inspected bundle",
+    "system_dependencies_observed": ["libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+    "missing_bundled_direct_dependencies": [],
+    "verified_exported_entry_symbols": [
+      "HMPPI_BGRToYCbCr420_8u_C3P3R",
+      "HMPPI_BGRToYUV420_8u_AC4P3R",
+      "HMPPI_RGBToYUV422_8u_C3C2R",
+      "HMPPI_Dilate3x3_64f_C1R",
+      "HMPPI_YCbCr422ToRGB_8u_C2C3R"
+    ],
+    "target_runtime_closure": "UNVERIFIED",
+    "target_runtime_execution": "NOT_ATTEMPTED",
+    "observed_library_paths_on_target": [],
+    "source_bytes_digest_algorithm": "SHA-256 over lexical relative POSIX path + NUL + complete file bytes + NUL for all 13 files",
+    "source_bytes_sha256": "6346013ccfa051f63ae36f8e2c10f9a6ac1d474b48de404b9fec5b4aba286f97"
+  },
+  "unknowns": [
+    "Target-side direct and transitive dependency resolution, including system libraries, has not been checked with the ARM loader.",
+    "Unmodified vendor binaries have not been shown to execute on the intended S5000C target.",
+    "Actual loader paths and SHA-256 values at runtime have not been captured.",
+    "Product version has not been queried through the vendor API.",
+    "The local untracked benchmark documents modified compatibility copies; those copies are excluded from this baseline identity."
+  ],
+  "human_decisions": [
+    { "topic": "vendor binary provenance and target support", "status": "PENDING", "decision": null },
+    { "topic": "loader search path and dependency closure on target", "status": "PENDING", "decision": null },
+    { "topic": "selected optimization function and formal workload", "status": "PENDING", "decision": null }
+  ]
+}

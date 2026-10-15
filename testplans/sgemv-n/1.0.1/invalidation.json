@@ -1,0 +1,15 @@
+{
+  "invalidated_test_plan_version": "1.0.1",
+  "invalidated_aggregate_digest": "e5a77e65ee874643b9ee47615228bd0c8900d0c46800d28b2a75768a27203710",
+  "invalidation_reason": "benchmark_spec仅为示意代码；timed loop omitted；不存在完整sgemv_bench_formal.c；build_command引用的include/cblas.h不存在；冻结计划不可执行",
+  "invalidated_at": "2026-09-08T07:16:11.786Z",
+  "states": [
+    "D6_C_STOPPED",
+    "ARTIFACT_IDENTITY_VERIFICATION_FAILED",
+    "CANDIDATE_ARTIFACT_UNAVAILABLE",
+    "TESTPLAN_BUILD_ASSET_INVALID",
+    "FORMAL_PERFORMANCE_NOT_EXECUTED"
+  ],
+  "superseded_by": null,
+  "note": "TestSuiteVersion 1.0.1 remains valid; only TestPlanVersion 1.0.1 is invalidated."
+}

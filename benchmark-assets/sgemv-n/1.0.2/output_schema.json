@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "line_prefix": "PHYOPT_RESULT",
+  "fields": [
+    { "name": "role", "type": "string", "values": ["candidate", "baseline"] },
+    { "name": "m", "type": "int" },
+    { "name": "n", "type": "int" },
+    { "name": "threads", "type": "int" },
+    { "name": "loops", "type": "int" },
+    { "name": "seconds", "type": "float" },
+    { "name": "gflops", "type": "float" }
+  ]
+}

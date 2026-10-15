@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "baseline_id": "ippi-ft-main-23a39f8d",
+  "kind": "source_build",
+  "source": {
+    "repository": "D:/Projects/phytium/ippi/ippi-ft",
+    "branch": "main",
+    "commit": "23a39f8de2272c150e168a824b7839de3844661c",
+    "archive_sha256": "c414e0e598197531618f40004da002c0cdf98a85edf83133cbafbf67af52962f",
+    "dilate_source_sha256": "c2d271160e92ff7844dc23ebdc1ad787be20bbf1fa70102e87baa3823e7b9022"
+  },
+  "build": {
+    "system": "CMake 3.19.2",
+    "compiler": "/usr/bin/g++",
+    "compiler_version": "GCC 10.3.1",
+    "build_type": "Release",
+    "cpp_standard": "gnu++17",
+    "openmp": "ON; runtime OMP_NUM_THREADS=1",
+    "effective_compile_flags": "-fopenmp -w -O2 -DNDEBUG -fPIC -fopenmp -std=gnu++17",
+    "configure_command": "cmake -S source -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DFTPPI_USE_OPENMP=ON -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "build_command": "cmake --build build --parallel 16",
+    "first_attempt": "CMake default C++ standard failed on std::is_same_v; C++17 is required by the unmodified source",
+    "second_attempt": "OpenMP OFF linked but dlopen failed on undefined omp_get_thread_num; the unmodified source requires OpenMP linkage"
+  },
+  "machine": {
+    "name": "S5000C",
+    "hostname": "localhost.localdomain",
+    "os": "openEuler 21.09",
+    "kernel": "5.10.0-5.10.1.25.oe1.aarch64",
+    "machine_id_sha256": "2db275c83133a31561f0f04412839a483cf0ac71d0d33c0b4c130f8ccf83609f",
+    "cpuinfo_sha256": "7a0b8b019a39a1e1c80068672a67891bc6226cf08a514c73c5b592d2fdde0fe9",
+    "os_release_sha256": "ffc9b8990a42211ec46b546fa180c4885e2b70e50b579c6ec0b96137d11e3338"
+  },
+  "artifact": {
+    "path": "/home/chenmn/phyopt-baselines/ippi-ft-main-23a39f8d-openmp1/libftppi.so",
+    "size_bytes": 4631144,
+    "sha256": "87805e10942159d8cf28b2cc48efe0cc690c1297631ee8f302d16f2e23c57b6a",
+    "elf": "ELF64 little-endian AArch64 shared object",
+    "soname": "libftppi.so",
+    "build_id": "63779860266274599e3e3fe5ff9f168b9765acb5",
+    "mode": "0555",
+    "needed": ["libgomp.so.1", "libstdc++.so.6", "libm.so.6", "libgcc_s.so.1", "libc.so.6"]
+  },
+  "state": "OWNER_APPROVED",
+  "qualification_report_sha256": "137af260ac6fb4fc42fd1902697808e2b7a562b34bdacd2ae5199c46eac8986d",
+  "rejected_build_artifact": {
+    "path": "/home/chenmn/phyopt-baselines/ippi-ft-main-23a39f8d/libftppi.so",
+    "sha256": "19c7da15bc63e7ba7d09e0491d06ecefc446fd23df61ee2a89e9fe401c55bd77",
+    "reason": "OpenMP OFF build fails dlopen on undefined omp_get_thread_num; not used as baseline"
+  },
+  "formal_performance_evidence": false
+}

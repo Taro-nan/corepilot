@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "line_prefix": "PHYOPT_MEASUREMENT",
+  "required_fields": ["kind", "role", "subject_id", "sample_index", "value", "unit", "validity", "domain_payload"]
+}

@@ -1,0 +1,10 @@
+type=s trans=N M=127 N=129 LDA=130 incx=1 incy=1 max_error=1.955032348633e-06 tolerance=7.112917651918e-04 index=8 PASS
+type=s trans=N M=127 N=130 LDA=131 incx=1 incy=1 max_error=1.966953277588e-06 tolerance=7.370682126396e-04 index=8 PASS
+type=s trans=N M=127 N=131 LDA=132 incx=1 incy=1 max_error=1.963973045349e-06 tolerance=7.616269402721e-04 index=8 PASS
+type=s trans=N M=127 N=129 LDA=130 incx=-1 incy=-1 max_error=1.955032348633e-06 tolerance=7.112917651918e-04 index=8 PASS
+type=s trans=N M=4103 N=4111 LDA=4112 incx=1 incy=1 max_error=2.286434173584e-05 tolerance=3.689987077175e-03 index=38 PASS
+type=s trans=N M=4096 N=4096 LDA=4099 incx=1 incy=1 max_error=2.310276031494e-05 tolerance=2.178828421576e-03 index=38 PASS
+type=s trans=N M=512 N=32768 LDA=512 incx=1 incy=1 max_error=3.653526306152e-04 tolerance=4.771346520038e-02 index=274 PASS
+type=s trans=N M=8192 N=8192 LDA=8195 incx=1 incy=1 max_error=7.023811340332e-05 tolerance=6.053026683871e-03 index=38 PASS
+type=s trans=T M=4096 N=4096 LDA=4099 incx=1 incy=1 max_error=4.577636718750e-04 tolerance=3.056913715099e-01 index=354 PASS
+type=d trans=N M=4096 N=4096 LDA=4099 incx=1 incy=1 max_error=2.647881913731e-14 tolerance=2.178828421576e-10 index=1675 PASS

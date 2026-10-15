@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "line_prefix": "PHYOPT_MEASUREMENT",
+  "required_fields": ["kind", "role", "subject_id", "sample_index", "value", "unit", "validity", "domain_payload"],
+  "kind": "PERFORMANCE_SAMPLE",
+  "unit": "seconds",
+  "value": "latency_seconds",
+  "domain_payload_required": ["parameters", "elapsed_seconds", "latency_seconds", "gflops", "artifact_identity", "benchmark_identity"]
+}

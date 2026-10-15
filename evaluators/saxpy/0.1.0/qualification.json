@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "saxpy",
+  "version": "0.1.0",
+  "subject_digest": "d989eb4fae96a316ecfc9cf460146a07b37b7d73be242f1119f3c9ff8370a73f",
+  "status": "QUALIFICATION_PENDING",
+  "target": {
+    "platform": "S5000C",
+    "build_target": "FT2000",
+    "compatibility_scope": "S5000C / FT2000-compatible OpenBLAS cblas_saxpy path",
+    "machine_identity_sha256": null
+  },
+  "qualification_run": {
+    "run_id": null,
+    "result": "NOT_RUN",
+    "started_at": null,
+    "completed_at": null
+  },
+  "owner": "phyopt-performance-validation",
+  "reviewer": null,
+  "approved_at": null,
+  "evidence": {
+    "report_sha256": null,
+    "raw_measurements_sha256": null
+  },
+  "updated_at": "2026-09-30T00:00:00.000Z",
+  "checks": [
+    { "check_id": "static.bundle", "scope": "STATIC", "status": "PASS", "summary": "bundle structure and generic command contracts are locally testable" },
+    { "check_id": "target.execution", "scope": "TARGET", "status": "REQUIRES_TARGET_QUALIFICATION", "summary": "real S5000C correctness, measurement, resource, and artifact identity checks have not run" }
+  ]
+}

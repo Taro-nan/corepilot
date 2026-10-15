@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "saxpy",
+  "version": "0.1.0",
+  "owner": "phyopt-performance-validation",
+  "domain": {
+    "name": "SAXPY",
+    "api": "cblas_saxpy",
+    "layout": "strided-vectors",
+    "operation": "y=alpha*x+y",
+    "datatype": "float32"
+  },
+  "target": {
+    "platform": "S5000C",
+    "build_target": "FT2000",
+    "compatibility_scope": "S5000C / FT2000-compatible OpenBLAS cblas_saxpy path"
+  },
+  "digest_algorithm": "phyopt-evaluator-content-sha256-v1",
+  "digest": "d989eb4fae96a316ecfc9cf460146a07b37b7d73be242f1119f3c9ff8370a73f",
+  "qualification": {
+    "record": "qualification.json",
+    "requires_target_qualification": true,
+    "requires_owner_approval": true
+  },
+  "correctness": {
+    "definition": "Every declared case executes exactly once against the staged cblas_saxpy symbol and emits one structured PASS or FAIL measurement.",
+    "inventory": "correctness/cases.json",
+    "case_ids": ["n0", "n1", "odd_17", "incx2", "incy3", "alpha_zero", "vector_boundary"],
+    "command": {
+      "executable": "bash",
+      "script": "scripts/run-correctness.sh",
+      "arguments": ["case_id", "artifact_path", "n", "incx", "incy", "alpha", "threads", "seed", "runtime_root"],
+      "measurement_prefix": "PHYOPT_MEASUREMENT"
+    },
+    "reference": {
+      "implementation": "correctness/saxpy_correctness.c",
+      "accumulation": "scalar IEEE-754 binary64 multiply-add followed by float32 rounding",
+      "qualification_required": true
+    },
+    "tolerance": {
+      "rule": "abs(observed-reference) <= absolute + relative * abs(reference)",
+      "absolute": 0.00001,
+      "relative": 0.00001,
+      "qualification_required": true
+    }
+  },
+  "performance": {
+    "definition": "Baseline and Candidate are measured live with the same evaluator-owned cblas_saxpy harness, workload, sampling, resources, and machine context.",
+    "inventory": "benchmark/workloads.json",
+    "workload_ids": ["saxpy_1024_t1", "saxpy_65536_t1", "saxpy_1048576_t1", "saxpy_1048576_incx2_t1"],
+    "command": {
+      "executable": "bash",
+      "script": "scripts/run-performance.sh",
+      "arguments": ["phase", "role", "workload_id", "artifact_path", "n", "incx", "incy", "alpha", "threads", "loops", "seed", "iteration_index", "runtime_root"],
+      "measurement_prefix": "PHYOPT_MEASUREMENT"
+    },
+    "sampling": {
+      "warmup_count": 1,
+      "sample_count": 3,
+      "statistic": "median",
+      "process_model": "one-process-per-sample"
+    },
+    "measurement": {
+      "unit": "seconds",
+      "value": "latency_seconds",
+      "derived": ["median", "gflops", "speedup"],
+      "raw_samples_retained": true,
+      "output_schema": "benchmark/output-schema.json"
+    }
+  },
+  "resource_requirements": {
+    "cpu_set": "0-15",
+    "numa_node": 0,
+    "thread_counts": [1],
+    "enforcement": {
+      "threads": "NOT_ENFORCED",
+      "cpu_set": "NOT_ENFORCED",
+      "numa_node": "NOT_ENFORCED"
+    }
+  },
+  "baseline_definition": {
+    "mode": "live-symmetric-execution",
+    "historical_measurements_are_formal_evidence": false,
+    "identity_required": ["artifact_id", "sha256", "runtime_path", "resolved_cblas_saxpy_path"],
+    "symmetry_required": ["benchmark_source", "benchmark_binary", "workload", "sampling", "resource_policy", "machine_context"]
+  },
+  "acceptance_policy": {
+    "correctness": "all declared cases must execute and report PASS with VALID evidence",
+    "performance": "derive each role median from exactly three retained positive raw samples",
+    "regression": "candidate median is compared only with the live baseline median from the same formal experiment"
+  },
+  "artifact_identity_policy": {
+    "required_files": [
+      "qualification.json",
+      "correctness/cases.json",
+      "correctness/policy.json",
+      "correctness/saxpy_correctness.c",
+      "correctness/run-case.sh",
+      "benchmark/workloads.json",
+      "benchmark/policy.json",
+      "benchmark/saxpy_benchmark.c",
+      "benchmark/output-schema.json",
+      "benchmark/run-sample.sh",
+      "scripts/build-evaluator.sh",
+      "scripts/run-correctness.sh",
+      "scripts/run-performance.sh"
+    ],
+    "source_files": ["correctness/saxpy_correctness.c", "benchmark/saxpy_benchmark.c"],
+    "benchmark_binary": "SHA-256 of the evaluator-built SAXPY executable is recorded with every target measurement",
+    "candidate_binary": "explicit artifact path, SHA-256, and dladdr-resolved cblas_saxpy path are required",
+    "baseline_binary": "explicit artifact path, SHA-256, and dladdr-resolved cblas_saxpy path are required",
+    "runtime_resolution": "dlopen plus dlsym(cblas_saxpy) plus dladdr; no role-specific link-time benchmark binary",
+    "mutable_dependencies": "explicit-artifact-inputs-only"
+  }
+}

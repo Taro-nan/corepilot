@@ -1,0 +1,18 @@
+# SGEMV-N public optimize 示例；请按目标机器和 testpack 调整构建参数。
+model:
+  model_id: kimi-k2.7-code
+  api_key: "${PHYOPT_KIMI_API_KEY}"
+  endpoint: https://api.moonshot.cn/v1
+  timeout_ms: 1200000
+target:
+  ssh_alias: phytium-s5000c
+  workspace_root: /tmp/phyopt
+build:
+  executable: make
+  args: [-j16, NO_LAPACK=1, TARGET=FT2000, USE_OPENMP=1, NUM_THREADS=32]
+  cwd: .
+  environment: {}
+  timeout_ms: 600000
+validation:
+  testpack: ../../testpacks/sgemv-n.yaml
+output_dir: ./.phyopt/runs

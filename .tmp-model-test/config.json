@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "project_root": null,
+  "backend": {
+    "host": "127.0.0.1",
+    "port": 7346,
+    "db_path": null,
+    "runner": "mock",
+    "transport": "mock",
+    "ssh_alias": null
+  },
+  "model": {
+    "provider": "kimi",
+    "name": "kimi-k2.7-code",
+    "credential_ref": "PHYOPT_KIMI_API_KEY",
+    "endpoint_ref": null,
+    "endpoint": null
+  },
+  "target": null,
+  "build": {
+    "executable": "make",
+    "args": [],
+    "cwd": null,
+    "environment": {},
+    "timeout_ms": 600000
+  },
+  "source": null,
+  "test_assets": [],
+  "baseline": null,
+  "gates": null,
+  "budget": {
+    "max_candidates": 3,
+    "max_model_calls": 12,
+    "max_duration_ms": 3600000
+  },
+  "output_dir": null,
+  "current": {
+    "task_id": null,
+    "candidate_id": null
+  }
+}

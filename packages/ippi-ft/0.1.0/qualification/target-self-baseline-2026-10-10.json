@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "target_id": "ippi-dilate3x3-64f-c1r",
+  "source_commit": "23a39f8de2272c150e168a824b7839de3844661c",
+  "machine_identity_sha256": "2db275c83133a31561f0f04412839a483cf0ac71d0d33c0b4c130f8ccf83609f",
+  "baseline_artifact": {
+    "path": "/home/chenmn/phyopt-baselines/ippi-ft-main-23a39f8d-openmp1/libftppi.so",
+    "sha256": "87805e10942159d8cf28b2cc48efe0cc690c1297631ee8f302d16f2e23c57b6a",
+    "unchanged_after_run": true
+  },
+  "evaluator": {
+    "id": "ippi-dilate3x3-64f-c1r",
+    "version": "0.1.0",
+    "content_sha256": "de9d376571a51a0e0a36dac9fee85e99cce57dc0340e90ad4476b34f143a868d",
+    "harness_sha256": "26ce499dcdc3c370a54ac6e34fb76e26b5cd29a23b427b07b1da081f6326a475",
+    "state": "QUALIFIED",
+    "approved_at": "2026-10-10T07:30:42Z"
+  },
+  "claim_scope": {
+    "operation": "finite float64 C1 3x3 neighborhood maximum",
+    "preconditions": ["API-valid double-aligned byte strides", "non-overlapping source and destination", "one valid source-pixel halo around ROI"],
+    "out_of_scope": ["NaN", "Inf", "source/destination overlap", "non-double-aligned strides"]
+  },
+  "acceptance_policy": {
+    "weighted_geomean_min": 1.03,
+    "overall_ci_lower_min": 1.0,
+    "key_case_ci_lower_min": 0.97,
+    "confidence_level": 0.95
+  },
+  "target_run": {
+    "run_id": "ippi-dilate-self-baseline-2026-10-10-owner-policy-v4",
+    "started_at": "2026-10-10T07:30:19.008Z",
+    "completed_at": "2026-10-10T07:30:25.788Z",
+    "correctness": "19/19 PASS",
+    "performance": "6 workloads x 5 positive finite samples, with one warmup each",
+    "raw_measurements_count": 49,
+    "report_path": "/home/chenmn/phyopt-qualifications/ippi-dilate-self-baseline-20261010-owner-policy-v4/report.json",
+    "report_sha256": "137af260ac6fb4fc42fd1902697808e2b7a562b34bdacd2ae5199c46eac8986d",
+    "raw_measurements_path": "/home/chenmn/phyopt-qualifications/ippi-dilate-self-baseline-20261010-owner-policy-v4/raw-measurements.jsonl",
+    "raw_measurements_sha256": "4be5f620ec31b4c82b2c28190ed826372f224d03716bcc5e476f800a78a08f04"
+  },
+  "resource_observation": {
+    "threads": 1,
+    "cpu_set": "0",
+    "numa_policy": "bind",
+    "numa_node_bind": "0",
+    "numa_memory_bind": "0",
+    "omp_num_threads": "1"
+  },
+  "owner_approval": "owner-directive-2026-10-10"
+}

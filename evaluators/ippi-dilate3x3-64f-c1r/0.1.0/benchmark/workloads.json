@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "workloads": [
+    { "workload_id": "square_64_contiguous", "parameters": { "width": 64, "height": 64, "src_padding": 0, "dst_padding": 0, "loops": 512, "seed": 201 }, "threads": 1, "critical": false, "weight": 1 },
+    { "workload_id": "image_640x480_contiguous", "parameters": { "width": 640, "height": 480, "src_padding": 0, "dst_padding": 0, "loops": 16, "seed": 202 }, "threads": 1, "critical": true, "weight": 1 },
+    { "workload_id": "image_1280x720_padded", "parameters": { "width": 1280, "height": 720, "src_padding": 8, "dst_padding": 16, "loops": 6, "seed": 203 }, "threads": 1, "critical": true, "weight": 1 },
+    { "workload_id": "image_1920x1080_contiguous", "parameters": { "width": 1920, "height": 1080, "src_padding": 0, "dst_padding": 0, "loops": 3, "seed": 204 }, "threads": 1, "critical": true, "weight": 2 },
+    { "workload_id": "wide_2048x512_padded", "parameters": { "width": 2048, "height": 512, "src_padding": 8, "dst_padding": 8, "loops": 6, "seed": 205 }, "threads": 1, "critical": false, "weight": 1 },
+    { "workload_id": "tall_512x2048_contiguous", "parameters": { "width": 512, "height": 2048, "src_padding": 0, "dst_padding": 0, "loops": 6, "seed": 206 }, "threads": 1, "critical": false, "weight": 1 }
+  ]
+}

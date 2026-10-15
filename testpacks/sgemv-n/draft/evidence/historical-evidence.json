@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "evidence": [
+    {
+      "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1/raw/sgemv_v1_correctness.log",
+      "tier": "raw",
+      "verification_status": "UNVERIFIED_IMPORT",
+      "note": "original correctness log (10 cases, all PASS)"
+    },
+    {
+      "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1/raw/sgemv_v1_vs_release033.csv",
+      "tier": "raw",
+      "verification_status": "UNVERIFIED_IMPORT",
+      "note": "two-way v1 vs release033 raw; NOT auto-treated as a valid official result"
+    },
+    {
+      "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/raw/sgemv_three_way_v1_corrected.csv",
+      "tier": "corrected",
+      "verification_status": "UNVERIFIED_IMPORT",
+      "note": "three-way raw re-measured with the correct v1 library"
+    },
+    {
+      "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/summary/sgemv_v1_vs_release033_speedup.csv",
+      "tier": "summary",
+      "verification_status": "UNVERIFIED_IMPORT",
+      "note": "derived summary (v1 vs release033)"
+    },
+    {
+      "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/summary/sgemv_three_way_corrected_speedup.csv",
+      "tier": "summary",
+      "verification_status": "UNVERIFIED_IMPORT",
+      "note": "derived summary (three-way corrected)"
+    }
+  ],
+  "server_artifacts": [
+    {
+      "path": "/tmp/sgemv_n_v1_final_20260904",
+      "description": "correct SGEMV v1 build directory",
+      "verification_status": "UNVERIFIED_REMOTE_PATH"
+    },
+    {
+      "path": "/tmp/sgemv_n_v1_final_20260904/libblas_ft_ft2000p-r0.3.33.so",
+      "description": "current optimized library",
+      "verification_status": "UNVERIFIED_REMOTE_PATH"
+    },
+    {
+      "path": "/tmp/gemv_n_release033/libopenblas_ft2000p-r0.3.33.so",
+      "description": "OpenBLAS release033",
+      "verification_status": "UNVERIFIED_REMOTE_PATH"
+    },
+    {
+      "path": "/tmp/sgemv_bench_v1_final",
+      "description": "current performance program",
+      "verification_status": "UNVERIFIED_REMOTE_PATH"
+    },
+    {
+      "path": "/tmp/sgemv_bench_release033",
+      "description": "OpenBLAS performance program",
+      "verification_status": "UNVERIFIED_REMOTE_PATH"
+    },
+    {
+      "path": "/tmp/sgemv_correctness_v1_final",
+      "description": "current correctness program",
+      "verification_status": "UNVERIFIED_REMOTE_PATH"
+    }
+  ]
+}

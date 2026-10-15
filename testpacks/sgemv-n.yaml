@@ -1,0 +1,113 @@
+# SGEMV-N 迁移期运行时验证口径。该文件只描述测试，不包含 API Key。
+# 它尚未绑定 owner 批准且独立 staging 的 evaluator bundle，因此只能用于
+# legacy/development 路径；RPC formal execution 会明确拒绝该文件。
+schema_version: 1
+testpack_id: sgemv-n
+function_name: cblas_sgemv
+function_family: gemv
+operation: N
+data_type: float32
+
+resources:
+  cpu_set: "0-15"
+  numa_nodes: [0]
+  thread_counts: [1, 8, 16]
+
+correctness:
+  command:
+    executable: bash
+    args: [testpacks/sgemv-n/versions/1.0.1/assets/script/run_sgemv_v1_correctness.sh]
+    cwd: ..
+    environment: {}
+    timeout_ms: 600000
+  pass_required: 18
+  cases:
+    - { case_id: m0_n5, m: 0, n: 5, threads: 1, seed: 101, critical: true, weight: 1 }
+    - { case_id: m5_n0, m: 5, n: 0, threads: 1, seed: 102, critical: true, weight: 1 }
+    - { case_id: m1_n1, m: 1, n: 1, threads: 1, seed: 1, critical: true, weight: 1 }
+    - { case_id: m3_n5, m: 3, n: 5, threads: 1, seed: 2, critical: true, weight: 1 }
+    - { case_id: m7_n9_odd, m: 7, n: 9, threads: 1, seed: 3, critical: true, weight: 1 }
+    - { case_id: lda_padded, m: 5, n: 5, threads: 1, seed: 4, critical: true, weight: 1 }
+    - { case_id: inc2, m: 4, n: 6, threads: 1, seed: 5, critical: true, weight: 1 }
+    - { case_id: inc_neg, m: 4, n: 6, threads: 1, seed: 6, critical: true, weight: 1 }
+    - { case_id: beta_nonzero, m: 6, n: 6, threads: 1, seed: 7, critical: true, weight: 1 }
+    - { case_id: alpha_zero, m: 5, n: 5, threads: 1, seed: 8, critical: true, weight: 1 }
+    - { case_id: alpha_neg, m: 5, n: 5, threads: 1, seed: 9, critical: true, weight: 1 }
+    - { case_id: vec_width, m: 16, n: 16, threads: 1, seed: 10, critical: true, weight: 1 }
+    - { case_id: block_boundary, m: 64, n: 128, threads: 8, seed: 11, critical: true, weight: 1 }
+    - { case_id: medium_127x129, m: 127, n: 129, threads: 8, seed: 12, critical: true, weight: 1 }
+    - { case_id: b16_m15, m: 15, n: 16, threads: 1, seed: 21, critical: true, weight: 1 }
+    - { case_id: b16_m16, m: 16, n: 16, threads: 1, seed: 22, critical: true, weight: 1 }
+    - { case_id: b16_m17, m: 17, n: 16, threads: 1, seed: 23, critical: true, weight: 1 }
+    - { case_id: b32_m2049, m: 2049, n: 2048, threads: 16, seed: 24, critical: true, weight: 1 }
+
+performance:
+  command:
+    executable: bash
+    args: [testpacks/sgemv-n/versions/1.0.1/assets/script/run_sgemv_three_way.sh]
+    cwd: ..
+    environment: {}
+    timeout_ms: 1200000
+  cases:
+    - { case_id: square_4096_t1, m: 4096, n: 4096, threads: 1, seed: 1001, critical: true, weight: 1 }
+    - { case_id: square_4096_t8, m: 4096, n: 4096, threads: 8, seed: 1002, critical: true, weight: 1 }
+    - { case_id: square_4096_t16, m: 4096, n: 4096, threads: 16, seed: 1003, critical: true, weight: 1 }
+    - { case_id: wide_1024x16384_t1, m: 1024, n: 16384, threads: 1, seed: 1004, critical: true, weight: 1 }
+    - { case_id: wide_1024x16384_t8, m: 1024, n: 16384, threads: 8, seed: 1005, critical: true, weight: 1 }
+    - { case_id: wide_1024x16384_t16, m: 1024, n: 16384, threads: 16, seed: 1006, critical: true, weight: 1 }
+    - { case_id: tall_16384x1024_t1, m: 16384, n: 1024, threads: 1, seed: 1007, critical: true, weight: 1 }
+    - { case_id: tall_16384x1024_t8, m: 16384, n: 1024, threads: 8, seed: 1008, critical: true, weight: 1 }
+    - { case_id: tall_16384x1024_t16, m: 16384, n: 1024, threads: 16, seed: 1009, critical: true, weight: 1 }
+    - { case_id: small_512_t1, m: 512, n: 512, threads: 1, seed: 1010, critical: false, weight: 1 }
+    - { case_id: large_8192_t16, m: 8192, n: 8192, threads: 16, seed: 1011, critical: true, weight: 1 }
+    - { case_id: large_16384_t8, m: 16384, n: 16384, threads: 8, seed: 1012, critical: true, weight: 1 }
+    - { case_id: b16_15, m: 15, n: 16, threads: 1, seed: 1013, critical: true, weight: 1 }
+    - { case_id: b16_16, m: 16, n: 16, threads: 1, seed: 1014, critical: true, weight: 1 }
+    - { case_id: b16_17, m: 17, n: 16, threads: 1, seed: 1015, critical: true, weight: 1 }
+    - { case_id: b32_2047, m: 2047, n: 2048, threads: 16, seed: 1016, critical: true, weight: 1 }
+    - { case_id: b32_2048, m: 2048, n: 2048, threads: 16, seed: 1017, critical: true, weight: 1 }
+    - { case_id: b32_2049, m: 2049, n: 2048, threads: 16, seed: 1018, critical: true, weight: 1 }
+  sampling:
+    warmup: 3
+    samples: 7
+    interleave_seed: 20260907
+    bootstrap_iterations: 10000
+  baselines:
+    current:
+      id: phyopt-current
+      library: PhyBLAS
+      version: working-tree
+      sha256: e442c3558a413a4b0accac9271ebee01c4976627a3e913cf067ec37401335dfd
+      path: /home/chenmn/projects/blas_ft/Source/lib
+    comparison:
+      id: openblas-release033
+      library: OpenBLAS
+      version: release033
+      sha256: 6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257
+      path: /home/chenmn/projects/blas_ft_trsm_worktrees/release/libopenblas_ft2000p-r0.3.33.so
+  thresholds:
+    weighted_geomean_min: 1.03
+    overall_ci_lower_min: 1.0
+    key_case_ci_lower_min: 0.98
+    confidence_level: 0.95
+  key_cases: [square_4096_t1, square_4096_t8, square_4096_t16, wide_1024x16384_t1, wide_1024x16384_t8, wide_1024x16384_t16, tall_16384x1024_t1, tall_16384x1024_t8, tall_16384x1024_t16, large_8192_t16, large_16384_t8, b16_15, b16_16, b16_17, b32_2047, b32_2048, b32_2049]
+
+revalidation:
+  formal:
+    required: true
+    timeout_ms: 600000
+    command:
+      executable: bash
+      args: [testpacks/sgemv-n/versions/1.0.1/assets/script/run_sgemv_v1_correctness.sh]
+      cwd: ..
+      environment: {}
+      timeout_ms: 600000
+  independent:
+    required: true
+    timeout_ms: 1200000
+    command:
+      executable: bash
+      args: [testpacks/sgemv-n/versions/1.0.1/assets/script/run_sgemv_three_way.sh]
+      cwd: ..
+      environment: {}
+      timeout_ms: 1200000

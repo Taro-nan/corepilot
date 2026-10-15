@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "workloads": [
+    {
+      "workload_id": "review-required",
+      "parameters": {},
+      "threads": 1,
+      "critical": false,
+      "weight": 1
+    }
+  ]
+}

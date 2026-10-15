@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "ippi-ft-unknown-api",
+  "version": "0.1.0",
+  "subject_digest": "dbc83a1916a9e1dd988259810df223440c0c2b62aa6bc8f4a5de031b42a5d7f6",
+  "status": "DRAFT",
+  "target": {
+    "platform": "UNKNOWN_REVIEW_REQUIRED",
+    "build_target": "UNKNOWN_REVIEW_REQUIRED",
+    "compatibility_scope": "UNKNOWN_REVIEW_REQUIRED",
+    "machine_identity_sha256": null
+  },
+  "qualification_run": {
+    "run_id": null,
+    "result": "NOT_RUN",
+    "started_at": null,
+    "completed_at": null
+  },
+  "owner": "human-review-required",
+  "reviewer": null,
+  "approved_at": null,
+  "evidence": {
+    "report_sha256": null,
+    "raw_measurements_sha256": null
+  },
+  "updated_at": "2026-10-08T06:06:02.283Z",
+  "checks": [
+    {
+      "check_id": "target.execution",
+      "scope": "TARGET",
+      "status": "REQUIRES_TARGET_QUALIFICATION",
+      "summary": "No target qualification or human approval has occurred."
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "definition": "Allocate and initialize source halo and destination before timing. Timed loop contains only the logical IPPI-FT call; both roles use identical arguments and input seeds.",
+  "argument_contract": ["phase", "role", "workload_id", "artifact_path", "width", "height", "src_padding", "dst_padding", "loops", "seed", "threads", "iteration_index", "runtime_root"],
+  "sampling": { "warmup_count": 1, "sample_count": 5, "statistic": "median", "process_model": "one-process-per-sample" },
+  "qualification_note": "1920x1080 is the largest initial workload; 3840x2160 is deferred until target cost and owner review are known."
+}

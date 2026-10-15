@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "test_plan_version": "1.0.0",
+  "function_family": "GEMV",
+  "operation": "N",
+  "data_type": "single precision",
+  "api": "cblas_sgemv",
+  "comparison": {
+    "candidate": {
+      "name": "FT-BLAS SGEMV-N v1",
+      "path": "/tmp/sgemv_n_v1_final_20260904/libblas_ft_ft2000p-r0.3.33.so",
+      "sha256": "48add03e5f2339d7a187a59fec957f5a1a81441df2fe2a4ac1b8ca3554fd0b3a"
+    },
+    "baseline_openblas": {
+      "name": "OpenBLAS release033",
+      "path": "/tmp/gemv_n_release033/libopenblas_ft2000p-r0.3.33.so",
+      "sha256": "6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257"
+    },
+    "baseline_pre_opt_ft": null,
+    "note": "No pre-optimization FT-BLAS baseline; only evaluate relative to OpenBLAS release033."
+  },
+  "matrix": {
+    "alpha": 1,
+    "beta": 0,
+    "incx": 1,
+    "incy": 1,
+    "lda_mode": "m",
+    "points": [
+      {
+        "point_id": "square_4096_t1",
+        "m": 4096,
+        "n": 4096,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "square_4096_t8",
+        "m": 4096,
+        "n": 4096,
+        "threads": 8,
+        "weight": 1
+      },
+      {
+        "point_id": "square_4096_t16",
+        "m": 4096,
+        "n": 4096,
+        "threads": 16,
+        "weight": 1
+      },
+      {
+        "point_id": "wide_1024x16384_t1",
+        "m": 1024,
+        "n": 16384,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "wide_1024x16384_t8",
+        "m": 1024,
+        "n": 16384,
+        "threads": 8,
+        "weight": 1
+      },
+      {
+        "point_id": "wide_1024x16384_t16",
+        "m": 1024,
+        "n": 16384,
+        "threads": 16,
+        "weight": 1
+      },
+      {
+        "point_id": "tall_16384x1024_t1",
+        "m": 16384,
+        "n": 1024,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "tall_16384x1024_t8",
+        "m": 16384,
+        "n": 1024,
+        "threads": 8,
+        "weight": 1
+      },
+      {
+        "point_id": "tall_16384x1024_t16",
+        "m": 16384,
+        "n": 1024,
+        "threads": 16,
+        "weight": 1
+      },
+      {
+        "point_id": "small_512_t1",
+        "m": 512,
+        "n": 512,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "large_8192_t16",
+        "m": 8192,
+        "n": 8192,
+        "threads": 16,
+        "weight": 1
+      },
+      {
+        "point_id": "large_16384_t8",
+        "m": 16384,
+        "n": 16384,
+        "threads": 8,
+        "weight": 1
+      },
+      {
+        "point_id": "b16_127",
+        "m": 127,
+        "n": 128,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "b16_128",
+        "m": 128,
+        "n": 128,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "b16_129",
+        "m": 129,
+        "n": 128,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "b32_255",
+        "m": 255,
+        "n": 256,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "b32_256",
+        "m": 256,
+        "n": 256,
+        "threads": 1,
+        "weight": 1
+      },
+      {
+        "point_id": "b32_257",
+        "m": 257,
+        "n": 256,
+        "threads": 1,
+        "weight": 1
+      }
+    ]
+  },
+  "sampling": {
+    "samples_per_point": 7,
+    "interleave_seed": 20260907,
+    "statistic": "median",
+    "ci_method": "percentile_bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_iterations": 10000,
+    "warmup": 3,
+    "loops": 60
+  },
+  "thresholds": {
+    "weighted_geomean_min": 1.03,
+    "overall_ci_lower_min": 1,
+    "key_case_ci_lower_min": 0.98,
+    "report_all_regressions": true
+  },
+  "execution": {
+    "cpu_set": "0-15",
+    "numa_nodes": "0",
+    "max_threads": 16,
+    "taskset": "taskset -c 0-15",
+    "numactl": "numactl --cpunodebind=0 --membind=0",
+    "omp_env": {
+      "OMP_DYNAMIC": "FALSE",
+      "OMP_PLACES": "cores",
+      "OMP_PROC_BIND": "spread",
+      "OMP_WAIT_POLICY": "ACTIVE"
+    }
+  },
+  "frozen_at": "2026-09-08T01:46:09.688Z",
+  "aggregate_digest": "5200ecfafbaee23ba97056263279c138f865f5d5490255a745ff665aa14330d3"
+}

@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "sgemv-n",
+  "version": "1.0.0",
+  "subject_digest": "e1d2effa606f2ef4f028a490ffef8dc7a9b2968fc15128250a281a2539c8ae58",
+  "status": "QUALIFIED",
+  "target": {
+    "platform": "S5000C",
+    "build_target": "FT2000",
+    "compatibility_scope": "S5000C / FT2000-compatible build and runtime path",
+    "machine_identity_sha256": "58e793cd7ed19e396bf49afb9ab01999b64a64e526f1bd1e9891f00bef2b9ce1"
+  },
+  "qualification_run": {
+    "run_id": "sgemv-n-1.0.0-s5000c-rpc-20260929-01",
+    "result": "TARGET_EXECUTION_PASSED",
+    "started_at": "2026-09-29T07:15:43.911Z",
+    "completed_at": "2026-09-29T07:20:05.766Z"
+  },
+  "owner": "phyopt-performance-validation",
+  "reviewer": "Chen Mengnan <1195903721@qq.com>",
+  "approved_at": "2026-09-29T08:06:21.240Z",
+  "evidence": {
+    "report_sha256": "ab01d007a6b7f3aa7df0b5e7c9381cd1a59d747f89c6cd52fe95706345862ad2",
+    "raw_measurements_sha256": "49666937b1f6dfd5ef66fcb75107c45dd4e02ab2623b8bab8405f2195562e851",
+    "evidence_digest": "7564170a63bb77350b810943c01b14bb2ba358a498aaa3144d21800b411c479c"
+  },
+  "updated_at": "2026-09-29T08:06:21.240Z",
+  "checks": [
+    {
+      "check_id": "manifest.completeness",
+      "scope": "STATIC",
+      "status": "PASS",
+      "summary": "Required identity, definitions, inventories, policies, resources, baseline, and artifact fields are present."
+    },
+    {
+      "check_id": "digest.correctness",
+      "scope": "STATIC",
+      "status": "PASS",
+      "summary": "The content digest covers immutable evaluator assets and excludes this qualification attestation."
+    },
+    {
+      "check_id": "inventory.consistency",
+      "scope": "STATIC",
+      "status": "PASS",
+      "summary": "Manifest case and workload identities exactly match their immutable inventories."
+    },
+    {
+      "check_id": "runner.contract",
+      "scope": "STATIC",
+      "status": "PASS",
+      "summary": "Commands emit the Runner measurement schema with one independent process per raw sample."
+    },
+    {
+      "check_id": "isolation.dependencies",
+      "scope": "STATIC",
+      "status": "PASS",
+      "summary": "The bundle does not load legacy assets or candidate-controlled evaluator files."
+    },
+    {
+      "check_id": "target.architecture",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "The RPC run observed arm64, 32 logical CPUs, two NUMA nodes, implementer 0x70, part 0x862, and machine identity 58e793cd7ed19e396bf49afb9ab01999b64a64e526f1bd1e9891f00bef2b9ce1; the product model was not exposed by the system."
+    },
+    {
+      "check_id": "target.runner_runtime",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "phyopt-runner 0.4.0 ran under the independently deployed Node.js v22.19.0 ARM64 runtime with required resource enforcement."
+    },
+    {
+      "check_id": "target.reference_and_tolerance",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "The scalar IEEE-754 binary64 oracle and absolute/relative tolerances of 1e-4 produced valid PASS facts for all 29 Candidate cases without tolerance changes."
+    },
+    {
+      "check_id": "target.artifact_resolution",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "Candidate SHA-256 48add03e5f2339d7a187a59fec957f5a1a81441df2fe2a4ac1b8ca3554fd0b3a and Baseline SHA-256 6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257 matched their staged files and dladdr-resolved cblas_sgemv paths."
+    },
+    {
+      "check_id": "target.correctness",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "The Candidate executed and passed exactly the 29 declared correctness cases; all structured measurements were retained and synchronized."
+    },
+    {
+      "check_id": "target.repeated_sampling",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "All 18 workloads ran live for Baseline and Candidate with three warmups and seven independent raw samples; 252 raw measurements and 36 retained-sample medians were synchronized."
+    },
+    {
+      "check_id": "target.resource_enforcement",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "All 389 Formal commands had valid Runner-owned resource facts: taskset envelope 0-15, NUMA CPU/memory bind to node 0, exact 1/8/16 thread environments, and observed runtime maxima of 1/8/16."
+    },
+    {
+      "check_id": "target.baseline_candidate_symmetry",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "Baseline and Candidate used the same evaluator-built benchmark, workload inventory, sampling policy, machine, and enforced resource policy."
+    },
+    {
+      "check_id": "target.control_plane_rpc",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "Control Plane and Runner retained identical stable identities for all 391 CommandExecution and 317 Measurement facts from Experiment experiment:3bf8b656-d13f-4038-a1a2-54e9b5d9604b."
+    },
+    {
+      "check_id": "target.bundle_immutability",
+      "scope": "TARGET",
+      "status": "PASS",
+      "summary": "Runner verification at evaluator command boundaries and independent postflight inspection retained content digest e1d2effa606f2ef4f028a490ffef8dc7a9b2968fc15128250a281a2539c8ae58."
+    }
+  ]
+}

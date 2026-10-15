@@ -1,0 +1,7 @@
+{
+  "executable": "bash",
+  "args": ["-lc", "set -euo pipefail; while IFS= read -r -d '' file; do if grep -Iq . \u0022$file\u0022; then sed -i 's/\\r$//' \u0022$file\u0022; fi; done < <(find . -type f -perm /111 -print0); exec make -j16 shared NO_LAPACK=1 TARGET=FT2000 USE_OPENMP=1 NUM_THREADS=32"],
+  "cwd": ".",
+  "environment": {},
+  "timeout_ms": 1200000
+}

@@ -1,0 +1,13 @@
+{
+  "status": "DRAFT",
+  "argument_contract": [
+    "phase",
+    "role",
+    "workload_id",
+    "artifact_path",
+    "iteration_index",
+    "threads",
+    "runtime_root"
+  ],
+  "benchmark": "UNKNOWN_REVIEW_REQUIRED"
+}

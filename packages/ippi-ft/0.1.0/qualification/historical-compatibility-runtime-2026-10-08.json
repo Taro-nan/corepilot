@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "record_type": "historical_binary_runtime_reconstruction",
+  "observed_at": "2026-10-08T07:56:21Z",
+  "target": "Phytium S5000C; Linux aarch64; glibc 2.34",
+  "baseline_id": "hmippi-binary-2-5-2",
+  "original_bundle_sha256": "9d46f0b490f0dc8a3bed4ce12006a05722d25afab44e0f7ae0bb3d39c9f94617",
+  "classification": "BINARY_MODIFICATION",
+  "additional_runtime": "KML 26.1.RC1",
+  "loader_policy": "ordered LD_PRELOAD plus LD_LIBRARY_PATH",
+  "historical_evidence": {
+    "readme": "D:/Projects/phytium/ippi/ippi-ft/benchmark/hmppi_vs_ippi_20260921/README.md",
+    "run_script": "D:/Projects/phytium/ippi/ippi-ft/benchmark/hmppi_vs_ippi_20260921/run_benchmark.sh",
+    "build_definition": "D:/Projects/phytium/ippi/ippi-ft/benchmark/hmppi_vs_ippi_20260921/CMakeLists.txt",
+    "patch_scripts": [
+      "D:/Projects/phytium/ippi/ippi-ft/benchmark/hmppi_vs_ippi_20260921/patch_hmpp_core_cpu_check.py",
+      "D:/Projects/phytium/ippi/ippi-ft/benchmark/hmppi_vs_ippi_20260921/patch_kml_cpu_checks.py"
+    ],
+    "success_log": "D:/Projects/phytium/ippi/ippi-ft/benchmark/hmppi_vs_ippi_20260921/results/benchmark_run_numactl_i0_t1.log",
+    "past_process_maps_or_complete_environment_log_available": false,
+    "note": "Historical scripts and success logs establish the intended compatibility configuration; the exact 2026-09-21 process map was not retained. The configuration was reproduced by new isolated probes."
+  },
+  "cpu_id_error_owners": [
+    { "message_prefix": "HMPP", "library": "libHMPP_core.so.2.5.2" },
+    { "message_prefix": "BLAS", "library": "libkblas.so.1.26.1.RC1" },
+    { "message_prefix": "FFT", "library": "libkfft.so.1.26.1.RC1" },
+    { "message_prefix": "FFT", "library": "libkfftf.so.1.26.1.RC1" },
+    { "message_prefix": "VML&LIBM", "library": "libkm.so.1.26.1.RC1" },
+    { "message_prefix": "VML&LIBM", "library": "libkvml.so.1.26.1.RC1" }
+  ],
+  "modified_copies": [
+    {
+      "library": "libHMPP_core.so.2.5.2",
+      "original_path": "/home/chenmn/ippi/hmpp/BoostKit-hmpp_2.5.2/HMPP/lib/libHMPP_core.so.2.5.2",
+      "original_sha256": "31d382992b8a58c9663b01b3ec7055a93694073b1bb223679ffd338a6f0c238f",
+      "modified_path": "/home/chenmn/ippi/hmpp_core_bypass_20260921/libHMPP_core.so.2.5.2",
+      "modified_sha256": "e1fca081d4e7e902408234c79b2533d9629ffb8a53be9873470781ed7ecedf1b",
+      "size_both_bytes": 67824,
+      "soname_both": "libHMPP_core.so.2.5.2",
+      "build_id_both": "0c8b13e935f3c276234d8e95763023379b578f8c",
+      "patch_offset_hex": "0x119c",
+      "original_bytes": "61 03 00 54",
+      "modified_bytes": "0b 00 00 14",
+      "differing_byte_count": 3
+    },
+    {
+      "library": "libkblas.so.1.26.1.RC1",
+      "original_path": "/home/chenmn/ippi/kml/lib/neon/kblas/locking/libkblas.so.1.26.1.RC1",
+      "original_sha256": "ad68becc848504c9d6ad3f841d7fd2f78116002be63452f32a783bf81c8fa56d",
+      "modified_path": "/home/chenmn/ippi/kml_bypass_20260921/libkblas.so.1.26.1.RC1",
+      "modified_sha256": "0ea48908a1bd0aa7b59e29366f4ecb4b51d013308ee1e1d408616d7dfa550c52",
+      "size_both_bytes": 10140408,
+      "soname_both": "libkblas.so.1",
+      "build_id_both": null,
+      "patch_offset_hex": "0x45458",
+      "original_bytes": "81 00 00 54",
+      "modified_bytes": "1f 20 03 d5",
+      "differing_byte_count": 4
+    },
+    {
+      "library": "libkfft.so.1.26.1.RC1",
+      "original_path": "/home/chenmn/ippi/kml/lib/neon/libkfft.so.1.26.1.RC1",
+      "original_sha256": "645741cce5ff3d0876953f715da0817a4eea1ae07ccfb52078da3636d996f0af",
+      "modified_path": "/home/chenmn/ippi/kml_bypass_20260921/libkfft.so.1.26.1.RC1",
+      "modified_sha256": "5fe80014e2ecb43323a43439a9d1af11b8af14295af4e4a532d6c9bfb0a545c2",
+      "size_both_bytes": 1676824,
+      "soname_both": "libkfft.so.1",
+      "build_id_both": null,
+      "patch_offset_hex": "0x7158",
+      "original_bytes": "81 00 00 54",
+      "modified_bytes": "1f 20 03 d5",
+      "differing_byte_count": 4
+    },
+    {
+      "library": "libkfftf.so.1.26.1.RC1",
+      "original_path": "/home/chenmn/ippi/kml/lib/neon/libkfftf.so.1.26.1.RC1",
+      "original_sha256": "752c0a928a43a6bb48b977e1518f9ad019a50a1014104fddfca7c9dde1e3cf32",
+      "modified_path": "/home/chenmn/ippi/kml_bypass_20260921/libkfftf.so.1.26.1.RC1",
+      "modified_sha256": "f3a85edeb83255b15d8aad1c68fbf8bdd8a59182dbd13ef1f98cce1e46e77ba6",
+      "size_both_bytes": 2858536,
+      "soname_both": "libkfftf.so.1",
+      "build_id_both": null,
+      "patch_offset_hex": "0x89f8",
+      "original_bytes": "81 00 00 54",
+      "modified_bytes": "1f 20 03 d5",
+      "differing_byte_count": 4
+    },
+    {
+      "library": "libkvml.so.1.26.1.RC1",
+      "original_path": "/home/chenmn/ippi/kml/lib/noarch/kvml/single/libkvml.so.1.26.1.RC1",
+      "original_sha256": "0a1b9686a7971ff5cfd129f47ff97260a7786769ddf7b426c2c46c0293ec7990",
+      "modified_path": "/home/chenmn/ippi/kml_bypass_20260921/libkvml.so.1.26.1.RC1",
+      "modified_sha256": "674589834815898b91de82290368dbebf4736015b9aa190a2cb0f0a8d2509826",
+      "size_both_bytes": 2101528,
+      "soname_both": "libkvml.so.1",
+      "build_id_both": null,
+      "patch_offset_hex": "0xf03c0",
+      "original_bytes": "c1 01 00 54",
+      "modified_bytes": "1f 20 03 d5",
+      "differing_byte_count": 4
+    }
+  ],
+  "kml_origin": {
+    "installed_root": "/home/chenmn/ippi/kml",
+    "archive": "/home/chenmn/ippi/staging/kml-26.1.RC1.aarch64.tar.gz",
+    "archive_sha256": "1f034aead123b402aa85bc1892b4ec8fba146245c8cd8c863879883bf76daf6a",
+    "archive_match": "The five original KML libraries above have the same SHA-256 as their entries streamed from this archive. The four bypass copies do not."
+  },
+  "historical_loader_policy": {
+    "build_links": ["libftppi.so", "libHMPP_image.so.2.5.2", "libHMPP_core.so.2.5.2", "libkfft.so", "libkfftf.so", "libkvml.so", "libkm.so", "libkblas.so", "OpenMP", "pthread", "libm"],
+    "build_rpath": ["IPPI_ROOT/build/lib", "HMPP_ROOT/lib", "KML_ROOT/lib/neon", "KML_ROOT/lib/neon/kblas/locking", "KML_ROOT/lib/noarch", "KML_ROOT/lib/noarch/kvml/single"],
+    "LD_LIBRARY_PATH": "HMPP_ROOT/lib:IPPI_ROOT/build/lib:prior_LD_LIBRARY_PATH",
+    "LD_PRELOAD_order": [
+      "/home/chenmn/ippi/hmpp_core_bypass_20260921/libHMPP_core.so.2.5.2",
+      "/home/chenmn/ippi/kml/lib/noarch/libkm.so.1.26.1.RC1",
+      "/home/chenmn/ippi/kml_bypass_20260921/libkblas.so.1.26.1.RC1",
+      "/home/chenmn/ippi/kml_bypass_20260921/libkfft.so.1.26.1.RC1",
+      "/home/chenmn/ippi/kml_bypass_20260921/libkfftf.so.1.26.1.RC1",
+      "/home/chenmn/ippi/kml_bypass_20260921/libkvml.so.1.26.1.RC1"
+    ],
+    "other_environment": { "OMP_DYNAMIC": "FALSE", "OMP_PROC_BIND": "close", "OMP_PLACES": "cores", "OMP_NUM_THREADS": "per thread count" },
+    "historical_wrapper": "run_benchmark.sh uses numactl --interleave/--cpunodebind and taskset -c around the executable; the minimal load probe did not run a benchmark or apply those performance controls."
+  },
+  "reproduced_probe": {
+    "source": "qualification/probe-original-baseline.c",
+    "source_sha256": "c594ebbcf042e62a488f4cea3e3678f73f483bd173610c6b9eaf676c5af998da",
+    "entry_library": "/tmp/phyopt-hmppi-original-9d46f0b4-20261008/lib/libHMPP_image.so.2.5.2",
+    "entry_sha256": "b9a18fd59aeced9ee0a1a9bc9d197b39bc11fb6c997c7ab71b0841d92ead99a1",
+    "LD_LIBRARY_PATH": "/tmp/phyopt-hmppi-original-9d46f0b4-20261008/lib",
+    "LD_PRELOAD": "historical_loader_policy.LD_PRELOAD_order",
+    "original_hmpp_root_probe": "PASS; status=0; independent 5x4 padded-stride scalar 3x3 valid ROI exact match",
+    "isolated_staging_operation_count": 4,
+    "isolated_staging_result": "4/4 PASS; first three probes checked dlopen, FFT provider, status and exact valid ROI; the final probe also checked HMPP_Malloc and cblas_dgemm providers",
+    "actual_symbol_providers": {
+      "kml_fft_execute_dft_c2r": "/home/chenmn/ippi/kml_bypass_20260921/libkfft.so.1.26.1.RC1",
+      "HMPP_Malloc": "/home/chenmn/ippi/hmpp_core_bypass_20260921/libHMPP_core.so.2.5.2",
+      "cblas_dgemm": "/home/chenmn/ippi/kml_bypass_20260921/libkblas.so.1.26.1.RC1"
+    }
+  },
+  "actual_loaded_libraries": [
+    { "path": "/home/chenmn/ippi/hmpp/BoostKit-hmpp_2.5.2/HMPP/lib/libHMPP_image.so.2.5.2", "sha256": "b9a18fd59aeced9ee0a1a9bc9d197b39bc11fb6c997c7ab71b0841d92ead99a1", "soname": "libHMPP_image.so.2.5.2", "build_id": "580d9ad6e89ceb6f66c141287c32404778c1ef32", "role": "ORIGINAL_HMPP" },
+    { "path": "/home/chenmn/ippi/hmpp/BoostKit-hmpp_2.5.2/HMPP/lib/libsignal_base.so", "sha256": "a8fbf391d71fb8f221a288242fe9740e0850d7267554df8eff0dbe82a1a56436", "soname": "libsignal_base.so", "build_id": "e57573dd33fb9953c8e1d01c95db898464a127b6", "role": "ORIGINAL_HMPP" },
+    { "path": "/home/chenmn/ippi/hmpp/BoostKit-hmpp_2.5.2/HMPP/lib/libsignal_kml.so", "sha256": "3f42821c61dd59d5a771c04c062c183226b62b4e0b0ffc463bccbf2732807911", "soname": "libsignal_kml.so", "build_id": "49fddd8a821e02bbacca698a91ab3bb5054f7e57", "role": "ORIGINAL_HMPP" },
+    { "path": "/home/chenmn/ippi/hmpp_core_bypass_20260921/libHMPP_core.so.2.5.2", "sha256": "e1fca081d4e7e902408234c79b2533d9629ffb8a53be9873470781ed7ecedf1b", "soname": "libHMPP_core.so.2.5.2", "build_id": "0c8b13e935f3c276234d8e95763023379b578f8c", "role": "COMPATIBILITY_MODIFIED" },
+    { "path": "/home/chenmn/ippi/kml/lib/noarch/libkm.so.1.26.1.RC1", "sha256": "b8d1c39fa09588c0322693e9fb06037d6339a9578831da670bf530824b2a88ac", "soname": "libkm.so.1", "build_id": null, "role": "ORIGINAL_KML" },
+    { "path": "/home/chenmn/ippi/kml_bypass_20260921/libkblas.so.1.26.1.RC1", "sha256": "0ea48908a1bd0aa7b59e29366f4ecb4b51d013308ee1e1d408616d7dfa550c52", "soname": "libkblas.so.1", "build_id": null, "role": "COMPATIBILITY_MODIFIED" },
+    { "path": "/home/chenmn/ippi/kml_bypass_20260921/libkfft.so.1.26.1.RC1", "sha256": "5fe80014e2ecb43323a43439a9d1af11b8af14295af4e4a532d6c9bfb0a545c2", "soname": "libkfft.so.1", "build_id": null, "role": "COMPATIBILITY_MODIFIED" },
+    { "path": "/home/chenmn/ippi/kml_bypass_20260921/libkfftf.so.1.26.1.RC1", "sha256": "f3a85edeb83255b15d8aad1c68fbf8bdd8a59182dbd13ef1f98cce1e46e77ba6", "soname": "libkfftf.so.1", "build_id": null, "role": "COMPATIBILITY_MODIFIED" },
+    { "path": "/home/chenmn/ippi/kml_bypass_20260921/libkvml.so.1.26.1.RC1", "sha256": "674589834815898b91de82290368dbebf4736015b9aa190a2cb0f0a8d2509826", "soname": "libkvml.so.1", "build_id": null, "role": "COMPATIBILITY_MODIFIED" },
+    { "path": "/usr/lib64/libm.so.6", "sha256": "8819bc6b1066dbe9e806adde8a28c420e46533bf8c3b4e9e451d8fa357b88bf5", "soname": "libm.so.6", "build_id": "c236afe71198ae628443d3944ea32032138", "role": "SYSTEM" },
+    { "path": "/usr/lib64/libgomp.so.1.0.0", "sha256": "f405bce0a82746737b06c4683a8a3cb9942807978b3bc9bffba18e60e835aa9b", "soname": "libgomp.so.1", "build_id": "ccd09f30ccf89730191d63b5e40c09507da5d120", "role": "SYSTEM" },
+    { "path": "/usr/lib64/libc.so.6", "sha256": "c88520719d6a6fb1db74d2e03bb0b53e19e8821929fbd44bc8703598a4fd8f2e", "soname": "libc.so.6", "build_id": "a85b80fcfcfd3a57a1c02a53dda9e57c83822872", "role": "SYSTEM" },
+    { "path": "/usr/lib/ld-linux-aarch64.so.1", "sha256": "5c4207b9db7910f350001eca3097f662912552c2b8b66959b2db6c09d087b96c", "soname": "ld-linux-aarch64.so.1", "build_id": "d5ea66b10f84857378ad9e7ad2c0ea424c22d4ac", "role": "SYSTEM" }
+  ],
+  "runtime_graph": {
+    "dt_needed": {
+      "libHMPP_image.so.2.5.2": ["libsignal_base.so", "libsignal_kml.so", "libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+      "libsignal_base.so": ["libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+      "libsignal_kml.so": ["libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+      "libkfft.so.1": ["libm.so.6", "libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+      "libkfftf.so.1": ["libm.so.6", "libgomp.so.1", "libc.so.6", "ld-linux-aarch64.so.1"],
+      "libkblas.so.1": ["libm.so.6", "libc.so.6", "ld-linux-aarch64.so.1"]
+    },
+    "global_scope_symbol_edges": [
+      "libsignal_kml.so:kml_fft_execute_dft_c2r -> compatibility-modified libkfft.so.1",
+      "libsignal_kml.so:cblas_dgemm -> compatibility-modified libkblas.so.1",
+      "libHMPP_image.so.2.5.2:HMPP_Malloc -> compatibility-modified libHMPP_core.so.2.5.2"
+    ]
+  },
+  "baseline_state": "INVALID",
+  "owner_review_required": true,
+  "formal_claim_allowed": false,
+  "review_question": "May a newly identified compatibility-modified HMPP/KML runtime, with these exact hashes and loader policy, be used as a formal performance baseline on this S5000C? The original frozen HMiPPI bundle alone remains invalid."
+}

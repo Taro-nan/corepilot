@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "package_version": "1.0.0",
+  "states": [
+    "S2500_MACHINE_PROFILE_COMPLETED",
+    "S2500_ARTIFACT_DISCOVERY_COMPLETED",
+    "S2500_REQUIRED_ARTIFACTS_MISSING",
+    "WAITING_FOR_S2500_EXECUTION_RESOURCES",
+    "REAL_CORRECTNESS_NOT_EXECUTED",
+    "FORMAL_PERFORMANCE_VALIDATION_NOT_EXECUTED"
+  ],
+  "topology": {
+    "complete": true,
+    "missing_fields": [
+      "cpu_part",
+      "cpu_variant",
+      "cpu_revision"
+    ],
+    "selected_nodes": [
+      0,
+      1
+    ],
+    "selected_cpu_set": "0-15",
+    "selection_reason": "nodes 0 and 1 are adjacent with the minimum non-self NUMA distance (20) and normal free memory (~30GB each); no CPU 0-15 assumption copied from S5000C",
+    "distance": 20,
+    "per_node_memory": {
+      "0": 32269,
+      "1": 32730
+    }
+  },
+  "candidate_source_identity": {
+    "confirmed": true,
+    "repo": "D:/Projects/phytium/blas_ft/source",
+    "branch": "opt/blas/sgemv/v2",
+    "commit": "5e55d54192e3f9b9c876f989b78a43e937ad670d",
+    "clean": true,
+    "source_files": [
+      {
+        "path": "kernel/arm64/gemv_n.S",
+        "sha256": "d8de32905783063e949f9d508cfb11c7782ad172e0b51fc5e4e066ec3f03fa59"
+      },
+      {
+        "path": "driver/level2/gemv_thread.c",
+        "sha256": "3d9ce5ab73d2f67307b495ddb8ad7d8f3c6969d35149d72b10814254d780b187"
+      }
+    ],
+    "call_path": "cblas_sgemv -> sgemv_ -> sgemv_thread_n -> gemv_kernel -> GEMV_N -> SGEMV_N -> sgemv_n",
+    "kernels": "4-col (16-row) and 2-col (32-row) cross-pipeline; selection via sgemv_n_kernel_mode(m, workers)",
+    "build": "make TARGET=FT2000 USE_OPENMP=1 NUM_THREADS=<N> (exact flags to be fixed at build time)"
+  },
+  "openblas_baseline_identity": {
+    "version": "0.3.33",
+    "source_package_sha256": null,
+    "target": "FT2000",
+    "use_openmp": true,
+    "thread_config": "NUM_THREADS=<N> (to be fixed)",
+    "compiler": "gcc (to be fixed)",
+    "confirmed": false
+  },
+  "isa_audit": {
+    "verdict": "ISA_COMPATIBILITY_CONFIRMED",
+    "reason": "the SGEMV-N kernel (gemv_n.S) uses only fp/asimd FMA (fmla), ld1 loads and prfm prefetch, all present in S2500 Features; it does not use asimddp/sha3/sm3/sm4/atomics/fphp which S2500 lacks.",
+    "s2500_features": "fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid",
+    "candidate_uses": [
+      "fp",
+      "asimd",
+      "fmla",
+      "ld1",
+      "prfm"
+    ],
+    "build_caveat": "the build must NOT select an FT2000P-specific path that requires features absent on S2500 (verified by ISA-only check, no library name/implementer inference)."
+  },
+  "test_suite_version": "0069a43937c1a2139e598b8e352e0340137d4febf61fb34a50e18d9b7e41d9aa",
+  "binding_plan": {
+    "threads1": {
+      "threads": 1,
+      "cpu": "single fixed CPU within node 0 (e.g. cpu 0)",
+      "memory": "membind to node 0",
+      "policy": "taskset -c <cpu> numactl --cpunodebind=0 --membind=0"
+    },
+    "threads8": {
+      "threads": 8,
+      "cpu": "one full NUMA node (node 0 = cpus 0-7)",
+      "memory": "membind to node 0",
+      "policy": "taskset -c 0-7 numactl --cpunodebind=0 --membind=0"
+    },
+    "threads16": {
+      "threads": 16,
+      "cpu": "selected two nodes (0+1 = cpus 0-15)",
+      "memory": "interleave across nodes 0 and 1",
+      "policy": "taskset -c 0-15 numactl --cpunodebind=0-1 --interleave=0-1",
+      "note": "candidate and baseline use the identical policy; not copied from S5000C."
+    }
+  },
+  "aggregate_digest": "9f30c1c07ada6ce34f34183f92a548abb86c1d942583b3ac5268b88b85b2bbd9",
+  "frozen_at": "2026-09-08T06:28:55.153Z"
+}

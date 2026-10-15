@@ -1,0 +1,10 @@
+{
+  "executable": "bash",
+  "args": [
+    "-c",
+    "cmake -S . -B build/phyopt -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DFTPPI_USE_OPENMP=ON -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && cmake --build build/phyopt --parallel 16"
+  ],
+  "cwd": ".",
+  "environment": { "OMP_NUM_THREADS": "1" },
+  "timeout_ms": 1800000
+}

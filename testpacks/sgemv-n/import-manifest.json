@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "testpack_id": "sgemv-n",
+  "testpack_dir": "testpacks/sgemv-n",
+  "function_family": "GEMV",
+  "operation": "N",
+  "data_type": "single precision",
+  "api": "cblas_sgemv",
+  "repository": {
+    "branch": "opt/blas/sgemv/v2",
+    "commit": "5e55d54192e3f9b9c876f989b78a43e937ad670d",
+    "dirty": false
+  },
+  "target_source_files": [
+    { "path": "D:/Projects/phytium/blas_ft/source/kernel/arm64/gemv_n.S", "sha256": "d8de32905783063e949f9d508cfb11c7782ad172e0b51fc5e4e066ec3f03fa59" },
+    { "path": "D:/Projects/phytium/blas_ft/source/driver/level2/gemv_thread.c", "sha256": "3d9ce5ab73d2f67307b495ddb8ad7d8f3c6969d35149d72b10814254d780b187" }
+  ],
+  "assets": [
+    { "source_path": "D:/Projects/phytium/blas_ft/test/cases/gemv_n/sgemv_correctness.c", "category": "correctness" },
+    { "source_path": "D:/Projects/phytium/blas_ft/test/cases/gemv_n/sgemv_bench.c", "category": "benchmark" },
+    { "source_path": "D:/Projects/phytium/blas_ft/test/tools/gemv_n/run_sgemv_v1_correctness.sh", "category": "script" },
+    { "source_path": "D:/Projects/phytium/blas_ft/test/tools/gemv_n/run_sgemv_kernel_ab.sh", "category": "script" },
+    { "source_path": "D:/Projects/phytium/blas_ft/test/tools/gemv_n/run_sgemv_three_way.sh", "category": "script" },
+    { "source_path": "D:/Projects/phytium/blas_ft/docs/gemv_n/20260904_sgemv_n_v1.md", "category": "documentation" },
+    { "source_path": "D:/Projects/phytium/blas_ft/docs/gemv_n/20260904_sgemv_n_v2_kml_gap_analysis.md", "category": "documentation" },
+    { "source_path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1/raw/sgemv_v1_correctness.log", "category": "historical" },
+    { "source_path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1/raw/sgemv_v1_vs_release033.csv", "category": "historical" },
+    { "source_path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/raw/sgemv_three_way_v1_corrected.csv", "category": "historical" },
+    { "source_path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/summary/sgemv_v1_vs_release033_speedup.csv", "category": "historical" },
+    { "source_path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/summary/sgemv_three_way_corrected_speedup.csv", "category": "historical" }
+  ],
+  "forbidden_artifacts": [
+    {
+      "path": "/tmp/gemv_n_load_interleave",
+      "reason": "Previously mislabeled as sgemv_v1 during the first three-way test; it actually holds the 2026-09-02 DGEMV load-interleave library. Must never be loaded as an SGEMV candidate.",
+      "function_family": "DGEMV",
+      "forbidden_for": "SGEMV",
+      "source": "user-confirmed",
+      "severity": "BLOCKING"
+    }
+  ],
+  "server_artifacts": [
+    { "path": "/tmp/sgemv_n_v1_final_20260904", "description": "correct SGEMV v1 build directory", "verification_status": "UNVERIFIED_REMOTE_PATH" },
+    { "path": "/tmp/sgemv_n_v1_final_20260904/libblas_ft_ft2000p-r0.3.33.so", "description": "current optimized library", "verification_status": "UNVERIFIED_REMOTE_PATH" },
+    { "path": "/tmp/gemv_n_release033/libopenblas_ft2000p-r0.3.33.so", "description": "OpenBLAS release033", "verification_status": "UNVERIFIED_REMOTE_PATH" },
+    { "path": "/tmp/sgemv_bench_v1_final", "description": "current performance program", "verification_status": "UNVERIFIED_REMOTE_PATH" },
+    { "path": "/tmp/sgemv_bench_release033", "description": "OpenBLAS performance program", "verification_status": "UNVERIFIED_REMOTE_PATH" },
+    { "path": "/tmp/sgemv_correctness_v1_final", "description": "current correctness program", "verification_status": "UNVERIFIED_REMOTE_PATH" }
+  ],
+  "historical_evidence": [
+    { "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1/raw/sgemv_v1_correctness.log", "tier": "raw", "verification_status": "UNVERIFIED_IMPORT", "note": "original correctness log (10 cases, all PASS)" },
+    { "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1/raw/sgemv_v1_vs_release033.csv", "tier": "raw", "verification_status": "UNVERIFIED_IMPORT", "note": "two-way v1 vs release033 raw; NOT auto-treated as a valid official result" },
+    { "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/raw/sgemv_three_way_v1_corrected.csv", "tier": "corrected", "verification_status": "UNVERIFIED_IMPORT", "note": "three-way raw re-measured with the correct v1 library" },
+    { "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/summary/sgemv_v1_vs_release033_speedup.csv", "tier": "summary", "verification_status": "UNVERIFIED_IMPORT", "note": "derived summary (v1 vs release033)" },
+    { "path": "D:/Projects/phytium/blas_ft/results/gemv_n/20260904_sgemv_n_v1_corrected/summary/sgemv_three_way_corrected_speedup.csv", "tier": "summary", "verification_status": "UNVERIFIED_IMPORT", "note": "derived summary (three-way corrected)" }
+  ],
+  "cases": [
+    { "case_id": "m0_n5", "m": 0, "n": 5, "lda": 1, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 101 },
+    { "case_id": "m5_n0", "m": 5, "n": 0, "lda": 5, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 102 },
+    { "case_id": "m1_n1", "m": 1, "n": 1, "lda": 1, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 1 },
+    { "case_id": "m3_n5", "m": 3, "n": 5, "lda": 3, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 2 },
+    { "case_id": "m7_n9_odd", "m": 7, "n": 9, "lda": 7, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 3 },
+    { "case_id": "lda_padded", "m": 5, "n": 5, "lda": 8, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 4 },
+    { "case_id": "inc2", "m": 4, "n": 6, "lda": 4, "incx": 2, "incy": 2, "alpha": 1, "beta": 0, "seed": 5 },
+    { "case_id": "inc_neg", "m": 4, "n": 6, "lda": 4, "incx": -1, "incy": -1, "alpha": 1, "beta": 0, "seed": 6 },
+    { "case_id": "beta_nonzero", "m": 6, "n": 6, "lda": 6, "incx": 1, "incy": 1, "alpha": 0.7, "beta": -0.3, "seed": 7 },
+    { "case_id": "alpha_zero", "m": 5, "n": 5, "lda": 5, "incx": 1, "incy": 1, "alpha": 0, "beta": 0, "seed": 8 },
+    { "case_id": "alpha_neg", "m": 5, "n": 5, "lda": 5, "incx": 1, "incy": 1, "alpha": -1, "beta": 1, "seed": 9 },
+    { "case_id": "vec_width", "m": 16, "n": 16, "lda": 16, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 10 },
+    { "case_id": "block_boundary", "m": 64, "n": 128, "lda": 67, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 11 },
+    { "case_id": "medium_127x129", "m": 127, "n": 129, "lda": 130, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 12 },
+    { "case_id": "b16_m15", "m": 15, "n": 16, "lda": 15, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 21 },
+    { "case_id": "b16_m16", "m": 16, "n": 16, "lda": 16, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 22 },
+    { "case_id": "b16_m17", "m": 17, "n": 16, "lda": 17, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 23 },
+    { "case_id": "b16_m31", "m": 31, "n": 16, "lda": 31, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 24 },
+    { "case_id": "b16_m32", "m": 32, "n": 16, "lda": 32, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 25 },
+    { "case_id": "b16_m33", "m": 33, "n": 16, "lda": 33, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 26 },
+    { "case_id": "b32_m31", "m": 31, "n": 8, "lda": 31, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 31 },
+    { "case_id": "b32_m32", "m": 32, "n": 8, "lda": 32, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 32 },
+    { "case_id": "b32_m33", "m": 33, "n": 8, "lda": 33, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 33 },
+    { "case_id": "b32_m63", "m": 63, "n": 8, "lda": 63, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 34 },
+    { "case_id": "b32_m64", "m": 64, "n": 8, "lda": 64, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 35 },
+    { "case_id": "b32_m65", "m": 65, "n": 8, "lda": 65, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 36 },
+    { "case_id": "n_block_3", "m": 8, "n": 3, "lda": 8, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 41 },
+    { "case_id": "n_block_4", "m": 8, "n": 4, "lda": 8, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 42 },
+    { "case_id": "n_block_5", "m": 8, "n": 5, "lda": 8, "incx": 1, "incy": 1, "alpha": 1, "beta": 0, "seed": 43 }
+  ],
+  "oracle": {
+    "schema_version": 1,
+    "algorithm": "sgemv_n",
+    "input_type": "float32",
+    "accumulator_type": "float64",
+    "atol": 0.0001,
+    "rtol": 0.0001,
+    "provisional": true,
+    "seed": 1
+  },
+  "call_path": [
+    { "hop": "test program", "file": "test/cases/gemv_n/sgemv_correctness.c", "symbol": "cblas_sgemv", "condition": "CblasColMajor + CblasNoTrans", "evidence": "call_gemv() case 's' -> cblas_sgemv(...)", "confidence": "confirmed" },
+    { "hop": "benchmark program", "file": "test/cases/gemv_n/sgemv_bench.c", "symbol": "cblas_sgemv", "condition": "CblasColMajor + CblasNoTrans", "evidence": "call_gemv() case 's' -> cblas_sgemv(...)", "confidence": "confirmed" },
+    { "hop": "BLAS entry", "file": "interface (CBLAS)", "symbol": "sgemv_", "condition": "standard CBLAS wrapping", "evidence": "cblas_sgemv forwards to BLAS sgemv_", "confidence": "inferred" },
+    { "hop": "driver/dispatcher", "file": "driver/level2/gemv_thread.c", "symbol": "CNAME (threaded GEMV driver)", "condition": "FT2000_SGEMV_N_OPT", "evidence": "gemv_thread.c builds queues and calls gemv_kernel", "confidence": "confirmed" },
+    { "hop": "kernel dispatch", "file": "driver/level2/gemv_thread.c", "symbol": "gemv_kernel -> GEMV", "condition": "GEMV == GEMV_N (non-trans)", "evidence": "gemv_thread.c:159 GEMV(m,n,kernel_mode,...)", "confidence": "confirmed" },
+    { "hop": "kernel symbol", "file": "common_macro.h / common_s.h", "symbol": "GEMV_N -> SGEMV_N -> sgemv_n", "condition": "single precision, real", "evidence": "common_macro.h:1085, common_s.h:30/211", "confidence": "confirmed" },
+    { "hop": "final symbol", "file": "kernel/arm64/gemv_n.S", "symbol": "sgemv_n", "condition": "FT2000_SGEMV_N_OPT (single, real, non-trans)", "evidence": "kernel/Makefile.L2:254 sgemv_n built from gemv_n.S; PROLOGUE exports REALNAME", "confidence": "confirmed" }
+  ],
+  "unconfirmed": [
+    "exact main-loop block boundaries (do not assume 4/8/16; must be read from gemv_n.S loop structure)",
+    "exact CNAME symbol name for gemv_thread.c threaded driver (inferred, not directly observed)",
+    "single-thread vs multi-thread: gemv_kernel is shared; split_x / reduction path is the only divergence (confirmed in gemv_thread.c)"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "argument_contract": ["case_id", "artifact_path", "m", "n", "lda", "incx", "incy", "alpha", "beta", "threads", "seed", "runtime_root"],
+  "reference": {
+    "implementation": "sgemv_correctness_formal.c",
+    "accumulator": "float64",
+    "output_comparison": "float32 candidate output against float64 scalar reference"
+  },
+  "tolerance": {
+    "absolute": 0.0001,
+    "relative": 0.0001,
+    "rule": "abs(observed-reference) <= absolute + relative * abs(reference)",
+    "qualification": "QUALIFICATION_PENDING"
+  },
+  "result": {
+    "kind": "CORRECTNESS_CASE",
+    "values": ["PASS", "FAIL"],
+    "requires_structured_measurement": true
+  }
+}

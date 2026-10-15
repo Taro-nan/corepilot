@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "cases": [
+    { "case_id": "n0", "parameters": { "n": 0, "incx": 1, "incy": 1, "alpha": 1, "seed": 101 }, "threads": 1 },
+    { "case_id": "n1", "parameters": { "n": 1, "incx": 1, "incy": 1, "alpha": 1, "seed": 102 }, "threads": 1 },
+    { "case_id": "odd_17", "parameters": { "n": 17, "incx": 1, "incy": 1, "alpha": 0.75, "seed": 103 }, "threads": 1 },
+    { "case_id": "incx2", "parameters": { "n": 31, "incx": 2, "incy": 1, "alpha": -0.5, "seed": 104 }, "threads": 1 },
+    { "case_id": "incy3", "parameters": { "n": 33, "incx": 1, "incy": 3, "alpha": 1.25, "seed": 105 }, "threads": 1 },
+    { "case_id": "alpha_zero", "parameters": { "n": 64, "incx": 1, "incy": 1, "alpha": 0, "seed": 106 }, "threads": 1 },
+    { "case_id": "vector_boundary", "parameters": { "n": 4097, "incx": 1, "incy": 1, "alpha": 0.875, "seed": 107 }, "threads": 1 }
+  ]
+}

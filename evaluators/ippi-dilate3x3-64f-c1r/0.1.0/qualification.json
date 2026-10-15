@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "ippi-dilate3x3-64f-c1r",
+  "version": "0.1.0",
+  "subject_digest": "de9d376571a51a0e0a36dac9fee85e99cce57dc0340e90ad4476b34f143a868d",
+  "status": "QUALIFIED",
+  "target": {
+    "platform": "S5000C",
+    "build_target": "AArch64 GCC 10.3.1 C++17 Release OpenMP ON, one runtime thread",
+    "compatibility_scope": "IPPI-FT main@23a39f8de2272c150e168a824b7839de3844661c on the identified S5000C",
+    "machine_identity_sha256": "2db275c83133a31561f0f04412839a483cf0ac71d0d33c0b4c130f8ccf83609f"
+  },
+  "qualification_run": { "run_id": "ippi-dilate-self-baseline-2026-10-10-owner-policy-v4", "result": "TARGET_EXECUTION_PASSED", "started_at": "2026-10-10T07:30:19.008Z", "completed_at": "2026-10-10T07:30:25.788Z" },
+  "owner": "human-review-required",
+  "reviewer": "owner-directive-2026-10-10",
+  "approved_at": "2026-10-10T07:30:42Z",
+  "evidence": { "report_sha256": "137af260ac6fb4fc42fd1902697808e2b7a562b34bdacd2ae5199c46eac8986d", "raw_measurements_sha256": "4be5f620ec31b4c82b2c28190ed826372f224d03716bcc5e476f800a78a08f04" },
+  "updated_at": "2026-10-10T07:30:42Z",
+  "checks": [
+    { "check_id": "static.bundle", "scope": "STATIC", "status": "PASS", "summary": "Evaluator manifest, digest, required assets, inventories, and command contracts pass local validation." },
+    { "check_id": "target.correctness", "scope": "TARGET", "status": "PASS", "summary": "All 19 fixed cases passed against the original S5000C build and independent finite-value scalar oracle for the approved digest." },
+    { "check_id": "target.performance", "scope": "TARGET", "status": "PASS", "summary": "All six workloads completed one warmup and five positive finite raw samples on the original baseline." },
+    { "check_id": "target.resource", "scope": "TARGET", "status": "PASS", "summary": "Observed one thread, CPU 0 affinity, NUMA node 0 bind, and OMP_NUM_THREADS=1." },
+    { "check_id": "target.identity", "scope": "TARGET", "status": "PASS", "summary": "Every retained measurement recorded the pinned baseline SHA, dladdr-resolved path, and harness SHA." },
+    { "check_id": "target.immutability", "scope": "TARGET", "status": "PASS", "summary": "Baseline SHA matched before and after each step and after the qualification run." }
+  ]
+}

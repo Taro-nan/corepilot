@@ -1,0 +1,85 @@
+# Second-domain onboarding profile. The evaluator is intentionally
+# QUALIFICATION_PENDING and RPC formal preflight must reject it until a real
+# S5000C target run and explicit owner approval are complete.
+schema_version: 1
+testpack_id: saxpy-s5000c-draft
+function_name: cblas_saxpy
+function_family: axpy
+operation: y=alpha*x+y
+data_type: float32
+
+evaluator:
+  id: saxpy
+  version: 0.1.0
+  owner: phyopt-performance-validation
+  root: ../evaluators/saxpy/0.1.0
+  sha256: d989eb4fae96a316ecfc9cf460146a07b37b7d73be242f1119f3c9ff8370a73f
+
+resources:
+  cpu_set: "0-15"
+  numa_nodes: [0]
+  thread_counts: [1]
+
+correctness:
+  command: &correctness_command
+    executable: bash
+    args: [scripts/run-correctness.sh]
+    cwd: ../evaluators/saxpy/0.1.0
+    environment: {}
+    timeout_ms: 600000
+  pass_required: 7
+  cases:
+    - { case_id: n0, parameters: { n: 0, incx: 1, incy: 1, alpha: 1, seed: 101 }, threads: 1, critical: true, weight: 1 }
+    - { case_id: n1, parameters: { n: 1, incx: 1, incy: 1, alpha: 1, seed: 102 }, threads: 1, critical: true, weight: 1 }
+    - { case_id: odd_17, parameters: { n: 17, incx: 1, incy: 1, alpha: 0.75, seed: 103 }, threads: 1, critical: true, weight: 1 }
+    - { case_id: incx2, parameters: { n: 31, incx: 2, incy: 1, alpha: -0.5, seed: 104 }, threads: 1, critical: true, weight: 1 }
+    - { case_id: incy3, parameters: { n: 33, incx: 1, incy: 3, alpha: 1.25, seed: 105 }, threads: 1, critical: true, weight: 1 }
+    - { case_id: alpha_zero, parameters: { n: 64, incx: 1, incy: 1, alpha: 0, seed: 106 }, threads: 1, critical: true, weight: 1 }
+    - { case_id: vector_boundary, parameters: { n: 4097, incx: 1, incy: 1, alpha: 0.875, seed: 107 }, threads: 1, critical: true, weight: 1 }
+
+performance:
+  command: &performance_command
+    executable: bash
+    args: [scripts/run-performance.sh]
+    cwd: ../evaluators/saxpy/0.1.0
+    environment: {}
+    timeout_ms: 600000
+  cases:
+    - { case_id: saxpy_1024_t1, parameters: { n: 1024, incx: 1, incy: 1, alpha: 0.75, loops: 20000, seed: 1001 }, threads: 1, critical: false, weight: 1 }
+    - { case_id: saxpy_65536_t1, parameters: { n: 65536, incx: 1, incy: 1, alpha: 0.75, loops: 1000, seed: 1002 }, threads: 1, critical: true, weight: 1 }
+    - { case_id: saxpy_1048576_t1, parameters: { n: 1048576, incx: 1, incy: 1, alpha: 0.75, loops: 80, seed: 1003 }, threads: 1, critical: true, weight: 2 }
+    - { case_id: saxpy_1048576_incx2_t1, parameters: { n: 1048576, incx: 2, incy: 1, alpha: -0.5, loops: 50, seed: 1004 }, threads: 1, critical: true, weight: 1 }
+  sampling:
+    warmup: 1
+    samples: 3
+    interleave_seed: 20260930
+    bootstrap_iterations: 10000
+  baselines:
+    current:
+      id: phyblas-source-baseline-5e55d5419
+      library: PhyBLAS
+      version: 5e55d54192e3f9b9c876f989b78a43e937ad670d
+      sha256: 48add03e5f2339d7a187a59fec957f5a1a81441df2fe2a4ac1b8ca3554fd0b3a
+      path: ${PHYOPT_CANDIDATE_ROOT}/libblas_ft_ft2000p-r0.3.33.so
+    comparison:
+      id: openblas-release033
+      library: OpenBLAS
+      version: 0.3.33
+      sha256: 6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257
+      path: /home/chenmn/phyopt-runner/workspace/control-plane-e2e-20260929-01/baselines/openblas-release033/0.3.33/6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257/artifact.so
+  thresholds:
+    weighted_geomean_min: 1.01
+    overall_ci_lower_min: 1.0
+    key_case_ci_lower_min: 0.99
+    confidence_level: 0.95
+  key_cases: [saxpy_65536_t1, saxpy_1048576_t1, saxpy_1048576_incx2_t1]
+
+revalidation:
+  formal:
+    required: true
+    timeout_ms: 600000
+    command: *correctness_command
+  independent:
+    required: false
+    timeout_ms: 600000
+    command: *performance_command

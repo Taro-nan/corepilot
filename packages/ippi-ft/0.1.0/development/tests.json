@@ -1,0 +1,3022 @@
+{
+  "status": "DISCOVERED_TEST",
+  "command": null,
+  "formal_correctness": false,
+  "assets": [
+    {
+      "path": "ctest/.gitkeep",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/.gitkeep",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprCopyConstBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprCopyReplicateBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprFilter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprFilterBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprFilterMedian.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprGetResizeCuboid.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprRemap.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprResize.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprResizeGetBufSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprWarpAffine.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/3D-data-processing/ipprWarpAffineGetBufSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/LastTest.log",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/haarcascade_frontalface_alt.xml",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/imag1.png",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiApplyHaarClassifier.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiApplyMixedHaarClassifier.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiBoundSegments.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiCanny.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiCannyBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiCannyBorderGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiCannyGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiCreateMapCameraUndistort.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiDistanceTransform.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiEigenValsVecs.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiEigenValsVecsBorder.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiEigenValsVecsGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFGMMFore_Background.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFastMarching.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFastMarchingGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFastN.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFastN2DToVec.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFastNGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFastNGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFastNInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFloodFill.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFloodFillGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFloodFillGetSize_Grad.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFloodFill_Grad.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiFloodFill_Range.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGetDistanceTransformMask.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGetHaarClassifierSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGetPyramidDownROI.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGetPyramidUpROI.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGradientColorToGray.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGradientVectorGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGradientVectorPrewitt.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGradientVectorScharr.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiGradientVectorSobel.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHOG-bk.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHOG.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHOGGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHOGGetDescriptorSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHOGGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHOGInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHaarClassifier.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHaarClassifierGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHaarClassifierInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHarrisCorner.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHarrisCornerGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHoughLine.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHoughLineGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHoughLine_Region.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHoughProbLine.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHoughProbLineGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiHoughProbLineInit.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiInpaint.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiInpaintGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiInpaintInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiLBPImageHorizCorr.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiLBPImageMode.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiLabelMarkers.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiLabelMarkersGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiLineSuppression.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiLineSuppressionGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiMarkSpeckles.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiMarkSpecklesGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiMinEigenVal.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiMinEigenValBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiMinEigenValGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiOpticalFlowPyrLK.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiPyramidGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiPyramidInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiPyramidLayerDown.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiPyramidLayerDownGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiPyramidLayerDownInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiPyramidLayerUp.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiPyramidLayerUpGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiPyramidLayerUpInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiSegmentGradient.cpp",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiSegmentGradientGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiSegmentWatershed.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiSegmentWatershedGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiTiltHaarFeatures.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiTiltedHaarClassifierInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiTrueDistanceTransform.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiTrueDistanceTransformGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiUndistortGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiUndistortRadial.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippiUpdateMotionHistory.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/computer-vision/ippi_face.txt",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/.gitkeep",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/header/.gitkeep",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/header/extract_numbers.h",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/lib/.gitkeep",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/lib/libexnum.so",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/makefile",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/src/.gitkeep",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/src/extract_numbers.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/extract_numbers/src/extract_numbers.o",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/.gitkeep",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiConv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiConvGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiDecimateFilter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiDeconvolution.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiDeconvolutionLR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiDeinterlaceFilter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBilateral.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBilateralBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBilateralBorderGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBilateralBorderInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBilateralGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBilateralInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBorder_General.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBox.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBoxBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterBoxBorderGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterColumnPipeline.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterGaussian.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterILS.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterLinear.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterLinear_tl.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMaxBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMaxBorderGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMedian.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMedianBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMedianColor.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMedianCross.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMedianWeightedCenter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMinBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterMinBorderGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterRowBorderPipeline.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterSeparable.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiFilterWiener.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiGenSobelKernel.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiSumWindow.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiSumWindowColumn.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiSumWindowGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/ippiSumWindowRow.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/filtering-functions/test_arm.h",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAbs.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAbsDiff.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAbsDiffC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAdd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAddC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAddProduct.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAddSquare.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAddWeighted.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAlphaComp.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAlphaCompC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAlphaPremul.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAlphaPremulC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAnd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiAndC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiComplement.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiDiv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiDivC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiDiv_Round.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiDotProd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiDotProdCol.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiExp.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiLShiftC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiLn.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiMul.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiMulC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiMulC64f.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiMulCScale.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiMulScale.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiNot.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiOr.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiOrC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiRShiftC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiSqr.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiSqrt.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiSub.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiSubC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiXor.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-arith-logical-op/ippiXorC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToCbYCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToCbYCr422_709HDTV.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToHLS.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToLab.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCbCr411.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCbCr420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCbCr420_709CSC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCbCr420_709HDTV.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCoCg.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCoCg_Rev.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCrCb420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYCrCb420_709CSC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiBGRToYUV420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCFAToBGRA_VNG.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCFAToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCbYCr422ToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCbYCr422ToBGR_709HDTV.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCbYCr422ToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCbYCr422ToYCbCr411.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCbYCr422ToYCbCr420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCbYCr422ToYCbCr420_Interlace.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCbYCr422ToYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCbYCr422ToYCrCb420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiColorToGray.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiColorTwist.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiColorTwist32f.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiCompColorKey.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiDemosaicAHD.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiGammaFwd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiGammaInv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiGrayToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiHLSToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiHLSToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiHSVToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiLUT.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiLUTPalette.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiLUT_GetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiLUT_Init.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiLUVToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiLabToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToCbYCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToGray.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToHLS.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToHSV.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToLUV.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToXYZ.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYCC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYCbCr.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYCbCr420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYCoCg.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYCrCb420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYCrCb422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYUV.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYUV420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiRGBToYUV422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiReduceBits.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiReduceBitsGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiSBGRToYCoCg.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiSBGRToYCoCg_Rev.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiToneMapLinear.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiXYZToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCCToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr411.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr411ToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr411ToYCbCr420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr411ToYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr411ToYCrCb420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr411ToYCrCb422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420To422_Interlace.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToBGR_709CSC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToBGR_709HDTV.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToCbYCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToCbYCr422_Interlace.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToYCbCr411.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToYCbCr422_Filter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToYCrCb420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr420ToYCrCb420_Filter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422To420_Interlace.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422ToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422ToCbYCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422ToGray.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422ToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422ToYCbCr411.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422ToYCbCr420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422ToYCrCb420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCr422ToYCrCb422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCrToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCrToBGR_709CSC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCbCrToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCoCgToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCoCgToBGR_Rev.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCoCgToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCoCgToSBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCoCgToSBGR_Rev.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb420ToCbYCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb420ToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb420ToYCbCr411.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb420ToYCbCr420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb420ToYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb420ToYCbCr422_Filter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb422ToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb422ToYCbCr411.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb422ToYCbCr420.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYCrCb422ToYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYUV420ToBGR.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYUV420ToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYUV422ToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYUV422v210ToGray.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYUV422v210ToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-color-conversion/ippiYUVToRGB.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiAddRandGauss.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiAddRandUniform.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiBinToGray.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiConvert.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiCopy.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiCopyConstBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiCopyManaged.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiCopyMirrorBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiCopyReplicateBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiCopySubpix.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiCopySubpixIntersect.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiCopyWrapBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiDup.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiImageJaehne.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiImageRamp.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiSampleLine.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiScale.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiScaleC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiSet.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiSwapChannels.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiTranspose.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiZigzagFwd8x8.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-data-ex-init/ippiZigzagInv8x8.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetAffineBound.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetAffineQuad.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetAffineSrcRoi.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetAffineTransform.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetBilinearBound.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetBilinearQuad.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetBilinearTransform.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetPerspectiveBound.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetPerspectiveQuad.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetPerspectiveTransform.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetRotateShift.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiGetRotateTransform.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiMirror.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiRemap.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeAntialiasing.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeAntialiasingCubicInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeAntialiasingLanczosInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeAntialiasingLinearInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeCubic.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeCubicInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeFilter.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeFilterGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeFilterInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeGetBorderSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeGetSrcOffset.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeGetSrcRoi.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeLanczos.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeLanczosInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeLinear.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeLinearInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeNearest.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeNearestInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeSetMode.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeSuper.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeSuperInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeSuperShiftInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYCbCr422.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYCbCr422GetBufSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420GetBorderSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420GetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420GetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420GetSrcOffset.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420GetSrcRoi.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420Lanczos.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420LanczosInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420Super.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV420SuperInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422GetBorderSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422GetBufSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422GetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422GetSrcOffset.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422GetSrcRoi.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422Linear.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422LinearInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422Nearest.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiResizeYUV422NearestInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpAffineCubic.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpAffineCubicInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpAffineGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpAffineLinear.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpAffineLinearInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpAffineNearest.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpAffineNearestInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpBilinear.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpBilinearBack.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpBilinearGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpBilinearQuad.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpBilinearQuadGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpGetRectInfinite.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpPerspectiveCubic.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpPerspectiveCubicInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpPerspectiveGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpPerspectiveLinear.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpPerspectiveLinearInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpPerspectiveNearest.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpPerspectiveNearestInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpQuadCubicInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpQuadGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpQuadLinearInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-geometry-transforms/ippiWarpQuadNearestInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/.gitkeep",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/bk-ippiDCT8x8Inv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiCplxExtendToPack.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCT8x8Fwd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCT8x8FwdLS.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCT8x8Inv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCT8x8InvLSClip.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCT8x8Inv_2x2.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCT8x8To2x2Inv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCTFwd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCTGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCTInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDCTInv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDFTFwd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDFTGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDFTInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiDFTInv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiFFTFwd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiFFTGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiFFTInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiFFTInv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiMagnitude.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiMagnitudePack.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiMagnitudePackGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiMulPack.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiMulPackConj.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiPackToCplxExtend.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiPhase.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiPhasePack.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiPhasePackGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiPolarToCart.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiWinBartlett.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiWinBartlettGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiWinHamming.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-linear-transforms/ippiWinHammingGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiBlockMinMax.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiCountInRange.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiCrossCorrNorm.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiCrossCorrNormGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiFindPeaks3x3.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiFindPeaks3x3GetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiGetCentralMoment.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiGetHuMoments.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiGetNormalizedCentralMoment.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiGetNormalizedSpatialMoment.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiGetSpatialMoment.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiHistogram.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiHistogramGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiHistogramGetLevels.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiHistogramInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiHistogramUniformInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiIntegral.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMax.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMaxEvery.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMaxIndx.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMean.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMean_StdDev.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMin.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMinEvery.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMinIndx.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMinMax.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMinMaxIndx.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMomentGetStateSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMomentInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiMoments.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNormDiff_Inf.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNormDiff_L1.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNormDiff_L2.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNormRel_Inf.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNormRel_L1.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNormRel_L2.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNorm_Inf.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNorm_L1.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiNorm_L2.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiQualityIndex.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiQualityIndexGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiRectStdDev.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiSAD.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiSADGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiSqrDistanceNorm.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiSqrDistanceNormGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiSqrIntegral.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiSum.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiTiltedIntegral.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiTiltedRectStdDev.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/image-statistics-functions/ippiTiltedSqrIntegral.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/miscellaneous-image-transforms/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/miscellaneous-image-transforms/ippiThresholdAdaptiveBox.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/miscellaneous-image-transforms/ippiThresholdAdaptiveBoxGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/miscellaneous-image-transforms/ippiThresholdAdaptiveGauss.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/miscellaneous-image-transforms/ippiThresholdAdaptiveGaussGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/miscellaneous-image-transforms/ippiThresholdAdaptiveGaussInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/Dilate.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/Dilate3x3.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/DilateBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/DilateGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/DilateGetSpecSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/DilateInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/Erode.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/Erode3x3.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/ErodeBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/ErodeGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/ErodeGetSpecSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/ErodeInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/GrayDilateBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/GrayErodeBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphAdvGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphAdvInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphBlackhat.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphBlackhatBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphClose.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphCloseBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphGetSpecSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphGradient.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphGradientBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphGrayGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphGrayInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphOpen.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphOpenBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphReconstructDilate.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphReconstructErode.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphReconstructGetBufferSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphSetMode.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphTophat.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphTophatBorder.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphologyBorderGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/morphological-operations/MorphologyBorderInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippGetStatusString.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippGetThreadIdx.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippGetThreadingType.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippParallelFor.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippiFree.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippiGetLibVersion.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippiGetTileParamsByIndex.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippiGetTilePointer.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippiMalloc.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/support-function/ippiSplitUniform2D.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiCompare.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiCompareC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiCompareEqualEps.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiCompareEqualEpsC.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiComputeThreshold_Otsu.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiThreshold.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiThreshold_GT.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiThreshold_GTVal.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiThreshold_LT.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiThreshold_LTVal.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiThreshold_LTValGTVal.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/threshold-compare-operation/ippiThreshold_Val.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/wavelet-transforms/CMakeLists.txt",
+      "assertion_clues": [
+        "comparison"
+      ],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/wavelet-transforms/ippiWTFwd.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/wavelet-transforms/ippiWTFwdGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/wavelet-transforms/ippiWTFwdInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/wavelet-transforms/ippiWTInv.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/wavelet-transforms/ippiWTInvGetSize.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ctest/wavelet-transforms/ippiWTInvInit.cpp",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    },
+    {
+      "path": "ippi_result/filtering-functions/test_arm.h",
+      "assertion_clues": [],
+      "status": "DISCOVERED_TEST"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "asset_family": "benchmark-assets/sgemv-n",
+  "invalidated_version": "1.0.0",
+  "invalidated_digest": "14479b4122fb716b7f3f6072c8547470437c18033ce78d1ad12db0a9086fe002",
+  "invalidation_reason": "manifest错误地把自身纳入files；digest存在自引用语义缺陷；CRLF工作树SHA不是远端构建使用的权威LF blob SHA；该版本不得用于远端构建或正式测试",
+  "invalidated_at": "2026-09-08T00:00:00.000Z"
+}

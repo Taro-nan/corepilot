@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "invalidated_test_plan_version": "1.0.2",
+  "invalidated_aggregate_digest": "efd9362f039b13434d5b9f4e10f3f65a9744c4119cbb148661b01dea95e50dfb",
+  "invalidation_reason": "引用的BenchmarkAssetVersion 1.0.1存在argc off-by-one（冻结源码检查argc != 16，正确应为argc != 15），正式benchmark无法使用冻结命令运行。",
+  "invalidated_at": "2026-09-08T16:40:00+08:00",
+  "states": [
+    "BENCHMARK_ARGUMENT_CONTRACT_FAILED",
+    "BENCHMARK_ASSET_INVALID",
+    "TESTPLAN_INVALID"
+  ],
+  "grant_binding_note": "grant d6c-sgemv-s5000c-performance-001 binds TestPlan 1.0.2 digest efd9362f..., which is now invalidated; the grant must not be reused."
+}

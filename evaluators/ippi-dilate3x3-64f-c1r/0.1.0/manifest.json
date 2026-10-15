@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "evaluator_id": "ippi-dilate3x3-64f-c1r",
+  "version": "0.1.0",
+  "owner": "human-review-required",
+  "domain": {
+    "name": "IPPI-FT image morphology",
+    "api": "ippiDilate3x3_64f_C1R",
+    "layout": "single-channel finite float64 image with caller-provided one-pixel source halo, non-overlapping source/destination, and API-valid byte strides aligned to double elements",
+    "operation": "for every ROI output pixel, select the maximum of its 3x3 source neighborhood",
+    "datatype": "float64"
+  },
+  "target": {
+    "platform": "S5000C",
+    "build_target": "AArch64 GCC 10.3.1 C++17 Release OpenMP ON, one runtime thread",
+    "compatibility_scope": "IPPI-FT main@23a39f8de2272c150e168a824b7839de3844661c on the identified S5000C"
+  },
+  "digest_algorithm": "phyopt-evaluator-content-sha256-v1",
+  "digest": "de9d376571a51a0e0a36dac9fee85e99cce57dc0340e90ad4476b34f143a868d",
+  "qualification": {
+    "record": "qualification.json",
+    "requires_target_qualification": true,
+    "requires_owner_approval": true
+  },
+  "correctness": {
+    "definition": "Each case calls the declared artifact once. Successful finite outputs and untouched destination padding are compared with exact numeric equality against a separate scalar 3x3 reference; documented argument errors require their exact status.",
+    "inventory": "correctness/cases.json",
+    "case_ids": ["minimum_1x1", "small_2x3", "odd_random_7x5", "square_equal_16", "wide_31x3", "tall_3x31", "padded_13x9", "ascending_11x7", "descending_9x11", "positive_8x6", "negative_6x8", "mixed_17x13", "finite_extreme_5x5", "null_src", "null_dst", "zero_width", "zero_height", "short_src_step", "short_dst_step"],
+    "command": {
+      "executable": "bash",
+      "script": "scripts/run-correctness.sh",
+      "arguments": ["case_id", "artifact_path", "width", "height", "src_padding", "dst_padding", "pattern", "seed", "error_mode", "expected_status", "threads", "runtime_root"],
+      "measurement_prefix": "PHYOPT_MEASUREMENT"
+    },
+    "reference": {
+      "implementation": "correctness/scalar_oracle.c",
+      "accumulation": "none; finite float64 values are selected without arithmetic",
+      "qualification_required": true
+    },
+    "tolerance": {
+      "rule": "exact numeric equality for finite float64 values; signed-zero sign is not constrained; NaN and infinity are outside this evaluator's declared input domain",
+      "absolute": 0,
+      "relative": 0,
+      "qualification_required": true
+    }
+  },
+  "performance": {
+    "definition": "The same dynamically loaded harness measures the frozen source baseline and future candidates with identical image data, halo, ROI, strides, and call count; only calls are timed.",
+    "inventory": "benchmark/workloads.json",
+    "workload_ids": ["square_64_contiguous", "image_640x480_contiguous", "image_1280x720_padded", "image_1920x1080_contiguous", "wide_2048x512_padded", "tall_512x2048_contiguous"],
+    "command": {
+      "executable": "bash",
+      "script": "scripts/run-performance.sh",
+      "arguments": ["phase", "role", "workload_id", "artifact_path", "width", "height", "src_padding", "dst_padding", "loops", "seed", "threads", "iteration_index", "runtime_root"],
+      "measurement_prefix": "PHYOPT_MEASUREMENT"
+    },
+    "sampling": {
+      "warmup_count": 1,
+      "sample_count": 5,
+      "statistic": "median",
+      "process_model": "one-process-per-sample"
+    },
+    "measurement": {
+      "unit": "seconds",
+      "value": "latency_seconds",
+      "derived": ["median", "speedup"],
+      "raw_samples_retained": true,
+      "output_schema": "benchmark/output-schema.json"
+    }
+  },
+  "resource_requirements": {
+    "cpu_set": "0",
+    "numa_node": 0,
+    "thread_counts": [1],
+    "enforcement": { "threads": "ENFORCED", "cpu_set": "ENFORCED", "numa_node": "ENFORCED" }
+  },
+  "baseline_definition": {
+    "mode": "live-symmetric-execution",
+    "historical_measurements_are_formal_evidence": false,
+    "identity_required": ["source_commit", "baseline_artifact_sha256", "runtime_path", "resolved_symbol_path", "evaluator_digest"],
+    "symmetry_required": ["toolchain", "build_policy", "benchmark_binary", "workload", "input_seed", "sampling", "resource_policy", "machine_context"]
+  },
+  "acceptance_policy": {
+    "correctness": "all 19 declared cases must PASS within the owner-approved finite float64 claim scope; NaN, Inf, overlap, and non-double-aligned strides are out of scope",
+    "performance": "owner-approved weighted aggregate median speedup at least 1.03 and overall 95% confidence lower bound at least 1.00, with five positive finite raw samples per workload and role",
+    "regression": "owner-approved critical workload 95% confidence lower bound at least 0.97"
+  },
+  "artifact_identity_policy": {
+    "required_files": ["qualification.json", "correctness/cases.json", "correctness/policy.json", "correctness/scalar_oracle.c", "correctness/scalar_oracle.h", "correctness/run-case.sh", "benchmark/workloads.json", "benchmark/policy.json", "benchmark/output-schema.json", "benchmark/run-sample.sh", "harness/dilate_evaluator.c", "scripts/build-evaluator.sh", "scripts/run-correctness.sh", "scripts/run-performance.sh"],
+    "source_files": ["correctness/scalar_oracle.c", "correctness/scalar_oracle.h", "harness/dilate_evaluator.c"],
+    "benchmark_binary": "SHA-256 of evaluator-built harness recorded in every target sample",
+    "candidate_binary": "explicit artifact path and SHA-256 plus dladdr-resolved symbol path are required",
+    "baseline_binary": "pinned SHA-256 of original libftppi.so and dladdr-resolved symbol path are required",
+    "runtime_resolution": "dlopen exact path, dlsym _Z21ippiDilate3x3_64f_C1RPKdiPdi8IppiSize, dladdr, realpath equality",
+    "mutable_dependencies": "explicit-artifact-inputs-only"
+  }
+}

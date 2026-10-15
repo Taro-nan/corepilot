@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "package_id": "example-vector",
+  "version": "0.1.0",
+  "owner": "phyopt-test-fixtures",
+  "library": {
+    "name": "Vector scale-add fixture",
+    "source_compatibility": ["fixtures/vector.c exports cblas_saxpy"],
+    "target_compatibility": ["Linux / AArch64", "S5000C evaluator fixture; not qualified for formal execution"]
+  },
+  "qualification": {"state": "DRAFT", "reviewer": null, "reviewed_at": null},
+  "functions": [{"function_id": "vector-scale-add", "api": "cblas_saxpy"}],
+  "build_definitions": [{"build_id": "fixture-shared", "definition": "build/shared.json"}],
+  "formal_evaluators": [{
+    "evaluator_id": "saxpy",
+    "version": "0.1.0",
+    "owner": "phyopt-performance-validation",
+    "digest": "d989eb4fae96a316ecfc9cf460146a07b37b7d73be242f1119f3c9ff8370a73f",
+    "catalog_path": "saxpy/0.1.0"
+  }],
+  "targets": [{
+    "target_id": "vector-scale-add",
+    "function_id": "vector-scale-add",
+    "build_id": "fixture-shared",
+    "evaluator": {"evaluator_id": "saxpy", "evaluator_version": "0.1.0"},
+    "candidate_scope": {"include": ["fixtures/vector.c"], "exclude": []},
+    "development_benchmark": {
+      "evaluator": {"evaluator_id": "saxpy", "evaluator_version": "0.1.0"},
+      "workload_ids": ["saxpy_1024_t1"]
+    },
+    "artifacts": {
+      "candidate": {"artifact_id": "vector-fixture", "relative_path": "libfixture.so"},
+      "baseline": {
+        "id": "fixture-baseline-unbuilt",
+        "library": "Vector scale-add fixture",
+        "version": "test-only-unbuilt",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "performance_acceptance": {"weighted_geomean_min": 1.0, "overall_ci_lower_min": 1.0, "key_case_ci_lower_min": 1.0, "confidence_level": 0.95},
+    "analysis_sampling": {"interleave_seed": 1, "bootstrap_iterations": 100},
+    "domain_payload": {"fixture_only": true, "operation": "scaled vector addition"}
+  }]
+}

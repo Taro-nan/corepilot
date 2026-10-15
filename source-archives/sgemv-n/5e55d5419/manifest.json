@@ -1,0 +1,14 @@
+{
+  "filename": "blas_ft_sgemv_n_5e55d5419.tar.gz",
+  "sha256": "3a688b27229126d6c9f6ec11d4c5b76e7eb97363178d7a127d4bbc77a0f1b83a",
+  "commit": "5e55d54192e3f9b9c876f989b78a43e937ad670d",
+  "prefix": "blas_ft_sgemv_n_5e55d5419/",
+  "archive_method": "git -c core.autocrlf=false archive --format=tar.gz --prefix=<prefix>/ <commit>",
+  "submodules": [],
+  "untracked_files_dependency": false,
+  "generated_files_dependency": false,
+  "file_count": 12629,
+  "manifest_digest": "24ded918cea641f0a268b3c31c18c084b06bbd27b8d1f5c2b3ac1eceb9ef8fe7",
+  "note": "No submodules; no untracked files; no generated files needed by make. git archive (autocrlf disabled) reproduces the LF blobs, whose SHA-256 match the authoritative source identity above.",
+  "frozen_at": "2026-09-08T07:36:58.573Z"
+}

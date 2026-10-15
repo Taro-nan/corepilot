@@ -1,0 +1,9 @@
+.vscode/**
+dist/extensions/**
+dist/src/**
+src/**
+test/**
+tsconfig.json
+**/*.map
+dist/test/**
+build.mjs

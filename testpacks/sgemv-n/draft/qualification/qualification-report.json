@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "status": "PROVISIONALLY_QUALIFIED",
+  "checks": [
+    {
+      "check_id": "schema_version",
+      "name": "schema_version supported",
+      "status": "pass"
+    },
+    {
+      "check_id": "draft_not_frozen",
+      "name": "testpack is a draft (not frozen)",
+      "status": "pass"
+    },
+    {
+      "check_id": "assets_present",
+      "name": "all assets present",
+      "status": "pass"
+    },
+    {
+      "check_id": "forbidden_artifacts",
+      "name": "forbidden artifacts recorded",
+      "status": "pass",
+      "detail": "1 BLOCKING forbidden artifact(s)"
+    },
+    {
+      "check_id": "correct_candidate",
+      "name": "correct reference candidate passes all cases",
+      "status": "pass"
+    },
+    {
+      "check_id": "ignore_beta",
+      "name": "ignore-beta fault",
+      "status": "pass",
+      "detail": "detected by: m5_n0, beta_nonzero, alpha_neg"
+    },
+    {
+      "check_id": "omit_tail",
+      "name": "omit-tail fault",
+      "status": "pass",
+      "detail": "detected by: m5_n0, m1_n1, m3_n5, m7_n9_odd, lda_padded, inc2, inc_neg, beta_nonzero, alpha_neg, vec_width, block_boundary, medium_127x129, b16_m15, b16_m16, b16_m17, b16_m31, b16_m32, b16_m33, b32_m31, b32_m32, b32_m33, b32_m63, b32_m64, b32_m65, n_block_3, n_block_4, n_block_5"
+    },
+    {
+      "check_id": "wrong_stride",
+      "name": "wrong-stride fault",
+      "status": "pass",
+      "detail": "detected by: m5_n0, inc2, inc_neg"
+    },
+    {
+      "check_id": "wrong_lda",
+      "name": "wrong-lda fault",
+      "status": "pass",
+      "detail": "detected by: m5_n0, lda_padded, block_boundary, medium_127x129"
+    },
+    {
+      "check_id": "wrong_incy",
+      "name": "wrong-incy fault",
+      "status": "pass",
+      "detail": "detected by: m5_n0, inc2, inc_neg"
+    },
+    {
+      "check_id": "buffer_underrun",
+      "name": "buffer underrun fault",
+      "status": "pass",
+      "detail": "guard corruption detected"
+    },
+    {
+      "check_id": "buffer_overrun",
+      "name": "buffer overrun fault",
+      "status": "pass",
+      "detail": "guard corruption detected"
+    }
+  ],
+  "generated_at": "2026-09-07T09:18:44.176Z",
+  "note": "locally qualified; target ARM execution still pending (no real FT-BLAS run yet)"
+}

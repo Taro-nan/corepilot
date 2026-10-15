@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "argument_contract": ["phase", "role", "workload_id", "artifact_path", "m", "n", "lda", "incx", "incy", "alpha", "beta", "threads", "loops", "seed", "iteration_index", "runtime_root"],
+  "sampling": {
+    "warmup_count": 3,
+    "sample_count": 7,
+    "statistic": "median",
+    "process_model": "one-process-per-sample",
+    "raw_samples_retained": true
+  },
+  "roles": ["BASELINE", "CANDIDATE"],
+  "symmetry": ["executable_sha256", "workload_parameters", "sampling", "resource_declaration", "machine_context"],
+  "historical_measurements_are_formal_evidence": false
+}

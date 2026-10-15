@@ -1,0 +1,182 @@
+{
+  "name": "phyopt-agent-vscode",
+  "displayName": "CorePilot",
+  "description": "Minimal IDE task client for CorePilot (thin client over the existing backend).",
+  "version": "0.4.0",
+  "publisher": "phyopt",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "phyopt.newExperiment",
+        "title": "CorePilot: 新建任务",
+        "category": "CorePilot"
+      },
+      {
+        "command": "phyopt.initTask",
+        "title": "CorePilot: 优化所选文件",
+        "category": "CorePilot"
+      },
+      {
+        "command": "phyopt.showTasks",
+        "title": "CorePilot: 显示任务",
+        "category": "CorePilot"
+      },
+      {
+        "command": "phyopt.cancelTask",
+        "title": "CorePilot: 取消任务",
+        "category": "CorePilot"
+      },
+      {
+        "command": "phyopt.openReport",
+        "title": "CorePilot: 打开任务报告",
+        "category": "CorePilot"
+      },
+      {
+        "command": "phyopt.exportTask",
+        "title": "CorePilot: 导出报告",
+        "category": "CorePilot"
+      },
+      {
+        "command": "phyopt.showCandidateDiff",
+        "title": "CorePilot: 查看候选变更",
+        "category": "CorePilot"
+      },
+      {
+        "command": "phyopt.refreshTasks",
+        "title": "CorePilot: 刷新任务",
+        "icon": "$(refresh)",
+        "category": "CorePilot"
+      },
+      {
+        "command": "phyopt.optimize",
+        "title": "CorePilot: 开始优化",
+        "category": "CorePilot"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "phyopt.optimize",
+          "when": "resourceScheme == file",
+          "group": "phyopt@1"
+        },
+        {
+          "command": "phyopt.newExperiment",
+          "when": "resourceScheme == file",
+          "group": "phyopt@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "phyopt.optimize",
+          "when": "editorHasSelection",
+          "group": "phyopt@1"
+        },
+        {
+          "command": "phyopt.newExperiment",
+          "when": "editorHasSelection",
+          "group": "phyopt@2"
+        },
+        {
+          "command": "phyopt.initTask",
+          "when": "editorTextFocus",
+          "group": "phyopt@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "phyopt.exportTask",
+          "when": "view == phyopt.tasks && viewItem == phyopt.task",
+          "group": "phyopt@1"
+        },
+        {
+          "command": "phyopt.cancelTask",
+          "when": "view == phyopt.tasks && viewItem == phyopt.task",
+          "group": "phyopt@2"
+        },
+        {
+          "command": "phyopt.openReport",
+          "when": "view == phyopt.tasks && viewItem == phyopt.task",
+          "group": "phyopt@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "phyopt.newExperiment"
+        },
+        {
+          "command": "phyopt.initTask"
+        },
+        {
+          "command": "phyopt.showTasks"
+        },
+        {
+          "command": "phyopt.optimize"
+        },
+        {
+          "command": "phyopt.showCandidateDiff"
+        },
+        {
+          "command": "phyopt.cancelTask",
+          "when": "false"
+        },
+        {
+          "command": "phyopt.openReport",
+          "when": "false"
+        },
+        {
+          "command": "phyopt.exportTask"
+        },
+        {
+          "command": "phyopt.refreshTasks",
+          "when": "false"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "phyopt",
+          "title": "CorePilot",
+          "icon": "media/corepilot.svg"
+        }
+      ]
+    },
+    "views": {
+      "phyopt": [
+        {
+          "id": "phyopt.tasks",
+          "name": "Tasks"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "CorePilot",
+      "properties": {
+        "phyopt.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:7346",
+          "description": "Backend task service base URL."
+        },
+        "phyopt.target": {
+          "type": "string",
+          "default": "",
+          "description": "Configured target name (from existing config)."
+        },
+        "phyopt.serveCommand": {
+          "type": "string",
+          "default": "corepilot",
+          "description": "Command used to start a managed backend (e.g. \"corepilot\", or a JSON array like [\"node\", \"/abs/path/dist/cli.js\"])."
+        }
+      }
+    }
+  }
+}

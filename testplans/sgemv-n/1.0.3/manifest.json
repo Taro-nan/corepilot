@@ -1,0 +1,298 @@
+{
+  "schema_version": 1,
+  "test_plan_version": "1.0.3",
+  "function_family": "GEMV",
+  "operation": "N",
+  "data_type": "single precision",
+  "api": "cblas_sgemv",
+  "comparison": {
+    "candidate": {
+      "name": "FT-BLAS SGEMV-N v1 (rebuilt from 5e55d5419)",
+      "path": "/tmp/phyopt-chenmn/d6c-r2/d6c-r2-20260908160848/blas_ft_sgemv_n_5e55d5419/libblas_ft_ft2000p-r0.3.33.so",
+      "sha256": "48add03e5f2339d7a187a59fec957f5a1a81441df2fe2a4ac1b8ca3554fd0b3a"
+    },
+    "baseline_openblas": {
+      "name": "OpenBLAS release033",
+      "path": "/tmp/gemv_n_release033/libopenblas_ft2000p-r0.3.33.so",
+      "sha256": "6c5246e4c2aee253064a5b5e25b8292faacb8147c824c136606d76dad00c9257"
+    },
+    "baseline_pre_opt_ft": null,
+    "note": "No pre-optimization FT-BLAS baseline; only evaluate relative to OpenBLAS release033. Candidate provenance is a deterministic rebuild of commit 5e55d5419. The baseline (and candidate) runtime identity must still be confirmed via dladdr+dlsym before sampling; a known file SHA cannot skip the runtime confirmation."
+  },
+  "matrix": {
+    "alpha": 1,
+    "beta": 0,
+    "incx": 1,
+    "incy": 1,
+    "lda_mode": "m",
+    "points": [
+      {
+        "point_id": "square_4096_t1",
+        "m": 4096,
+        "n": 4096,
+        "threads": 1,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "square_4096_t8",
+        "m": 4096,
+        "n": 4096,
+        "threads": 8,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "square_4096_t16",
+        "m": 4096,
+        "n": 4096,
+        "threads": 16,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "wide_1024x16384_t1",
+        "m": 1024,
+        "n": 16384,
+        "threads": 1,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "wide_1024x16384_t8",
+        "m": 1024,
+        "n": 16384,
+        "threads": 8,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "wide_1024x16384_t16",
+        "m": 1024,
+        "n": 16384,
+        "threads": 16,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "tall_16384x1024_t1",
+        "m": 16384,
+        "n": 1024,
+        "threads": 1,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "tall_16384x1024_t8",
+        "m": 16384,
+        "n": 1024,
+        "threads": 8,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "tall_16384x1024_t16",
+        "m": 16384,
+        "n": 1024,
+        "threads": 16,
+        "weight": 1,
+        "category": "standard",
+        "critical": true
+      },
+      {
+        "point_id": "small_512_t1",
+        "m": 512,
+        "n": 512,
+        "threads": 1,
+        "weight": 1,
+        "category": "small",
+        "critical": false
+      },
+      {
+        "point_id": "large_8192_t16",
+        "m": 8192,
+        "n": 8192,
+        "threads": 16,
+        "weight": 1,
+        "category": "large",
+        "critical": true
+      },
+      {
+        "point_id": "large_16384_t8",
+        "m": 16384,
+        "n": 16384,
+        "threads": 8,
+        "weight": 1,
+        "category": "large",
+        "critical": true
+      },
+      {
+        "point_id": "b16_15",
+        "m": 15,
+        "n": 16,
+        "threads": 1,
+        "weight": 1,
+        "category": "boundary16",
+        "critical": true
+      },
+      {
+        "point_id": "b16_16",
+        "m": 16,
+        "n": 16,
+        "threads": 1,
+        "weight": 1,
+        "category": "boundary16",
+        "critical": true
+      },
+      {
+        "point_id": "b16_17",
+        "m": 17,
+        "n": 16,
+        "threads": 1,
+        "weight": 1,
+        "category": "boundary16",
+        "critical": true
+      },
+      {
+        "point_id": "b32_2047",
+        "m": 2047,
+        "n": 2048,
+        "threads": 16,
+        "weight": 1,
+        "category": "boundary32",
+        "critical": true
+      },
+      {
+        "point_id": "b32_2048",
+        "m": 2048,
+        "n": 2048,
+        "threads": 16,
+        "weight": 1,
+        "category": "boundary32",
+        "critical": true
+      },
+      {
+        "point_id": "b32_2049",
+        "m": 2049,
+        "n": 2048,
+        "threads": 16,
+        "weight": 1,
+        "category": "boundary32",
+        "critical": true
+      }
+    ]
+  },
+  "sampling": {
+    "samples_per_point": 7,
+    "interleave_seed": 20260907,
+    "statistic": "median",
+    "ci_method": "percentile_bootstrap",
+    "ci_level": 0.95,
+    "bootstrap_iterations": 10000,
+    "warmup": 3,
+    "loops": 60
+  },
+  "thresholds": {
+    "weighted_geomean_min": 1.03,
+    "overall_ci_lower_min": 1,
+    "key_case_ci_lower_min": 0.98,
+    "report_all_regressions": true
+  },
+  "execution": {
+    "cpu_set": "0-15",
+    "numa_nodes": "0",
+    "max_threads": 16,
+    "taskset": "taskset -c 0-15",
+    "numactl": "numactl --cpunodebind=0 --membind=0",
+    "omp_env": {
+      "OMP_DYNAMIC": "FALSE",
+      "OMP_PLACES": "cores",
+      "OMP_PROC_BIND": "spread",
+      "OMP_WAIT_POLICY": "ACTIVE"
+    }
+  },
+  "weight_semantics": {
+    "kind": "synthetic_equal_weight",
+    "boundary_point_share": 0.3333333333333333,
+    "note": "Equal weight over all points is a synthetic score, not a real business workload distribution; it must not be presented as overall real-workload benefit."
+  },
+  "benchmark_spec": {
+    "source_sha256": "a9d41cc5f7bbe841b9ccac3b06fe75d567e9235e483991c802f14beb5e6fdc7b",
+    "cblas_h_sha256": "bcf3ce328b96398daecc042d748bd64fad8f4eb678c01c1e5c834380d538df53",
+    "build_command": [
+      "gcc",
+      "-O2",
+      "-fopenmp",
+      "-I",
+      "<benchmark-assets/sgemv-n/1.0.1>/include",
+      "<benchmark-assets/sgemv-n/1.0.1>/sgemv_bench_formal.c",
+      "-o",
+      "<workdir>/sgemv_bench_<role>",
+      "-L",
+      "<libdir>",
+      "-Wl,-rpath,<libdir>",
+      "-l<libname>",
+      "-lm",
+      "-lpthread"
+    ],
+    "note": "candidate and baseline share the same sgemv_bench_formal.c (argument contract fixed: EXPECTED_POSITIONAL_ARGS=14, EXPECTED_ARGC=15); only -L/-Wl,-rpath/-l differ. Benchmark binary SHA is computed by the Runner after build."
+  },
+  "dladdr_probe_sha256": "1422b0959733dff4875927a3a30b412f6e5a7ed27285425158c5b561b45a6e5a",
+  "statistics_spec": {
+    "sample_parser_sha256": "7f7ffefe09dff86fddc1af4089d829c7ba2e69998be5119dd32a7bb37e1157d4",
+    "median_sha256": "61e0b1b632c44ada247688f5a0732194ed6af203bd32658928e2826a8c574068",
+    "bootstrap_sha256": "a54da3c9090d173ca388aa7856b99160d1e800413a06f47c2181ef37d649b050",
+    "speedup_sha256": "3645fe3c2b3fb2bf6d2f588ce5ce695ff89c97116aa304fde276e4fe3f9f566a",
+    "geomean_sha256": "2126f0757b38aa15aecdad7155fcb231bd39e6321e43b026af26a06daf087f8a",
+    "note": "median + percentile-bootstrap + speedup-time/gflops + weighted geomean"
+  },
+  "supersedes": "1.0.2",
+  "invalidation_reason": null,
+  "candidate_provenance": {
+    "sha256": "48add03e5f2339d7a187a59fec957f5a1a81441df2fe2a4ac1b8ca3554fd0b3a",
+    "source_commit": "5e55d54192e3f9b9c876f989b78a43e937ad670d",
+    "source_archive_sha256": "3a688b27229126d6c9f6ec11d4c5b76e7eb97363178d7a127d4bbc77a0f1b83a",
+    "build_input_version": "1.0.1",
+    "build_input_digest": "8942723073fb7511e402da4362ee2220299c80a8bd9bcdb0a0a42bd27652e5f3",
+    "build_command": [
+      "make",
+      "-j16",
+      "shared",
+      "NO_LAPACK=1",
+      "TARGET=FT2000",
+      "USE_OPENMP=1",
+      "NUM_THREADS=32"
+    ],
+    "compiler": "gcc 10.3.1",
+    "build_id": "6f37d62771c04017d8f4766d8a9fdf76b957546e",
+    "build_log_sha256": "c18114a89480688b0f18c84936b5a4c255e0c7508a8b27e9e2a5443a96f8bc51",
+    "deterministic_rebuild": true
+  },
+  "test_suite_identity": {
+    "version": "1.0.1",
+    "aggregate_digest": "0069a43937c1a2139e598b8e352e0340137d4febf61fb34a50e18d9b7e41d9aa"
+  },
+  "benchmark_asset_identity": {
+    "version": "1.0.2",
+    "aggregate_digest": "a1f20c6afc1128c5a5fd437c599c8e31c6109d1eeafa11bacfce6e335eb636e7"
+  },
+  "correctness_record": {
+    "cases_total": 18,
+    "cases_passed": 18,
+    "cases_failed": 0,
+    "max_abs_error": 0.0003653526306152,
+    "max_error_ratio": 0.010603,
+    "runtime_link_confirmed": true,
+    "artifact_receipt_version": "1.0.0"
+  },
+  "frozen_at": "2026-09-08T08:45:05.280Z",
+  "aggregate_digest": "2c245285a0c41da9051ba65d221a9e70248407e433ca87c337f4ddba532a7e44"
+}

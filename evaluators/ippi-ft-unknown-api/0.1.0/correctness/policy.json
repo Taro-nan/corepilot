@@ -1,0 +1,10 @@
+{
+  "status": "DRAFT",
+  "argument_contract": [
+    "case_id",
+    "artifact_path",
+    "threads",
+    "runtime_root"
+  ],
+  "oracle": "UNKNOWN_REVIEW_REQUIRED"
+}

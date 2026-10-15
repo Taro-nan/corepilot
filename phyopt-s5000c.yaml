@@ -1,0 +1,31 @@
+# PhyOpt SGEMV-N 示例配置。
+# API Key 可以直接填写，也可以通过完整的 ${ENV_VAR} 引用从环境变量读取。
+model:
+  model_id: kimi-k2.7-code
+  api_key: "${PHYOPT_KIMI_API_KEY}"
+  # Pi 使用 API 基础地址，不包含 /chat/completions。
+  endpoint: https://api.moonshot.cn/v1
+  timeout_ms: 1200000
+
+target:
+  ssh_alias: phytium-s5000c
+  # 远端候选源码、构建产物和测试结果的临时目录。
+  workspace_root: /tmp/phyopt
+
+build:
+  executable: make
+  args:
+    - -j32
+    - NO_LAPACK=1
+    - TARGET=FT2000
+    - USE_OPENMP=1
+    - NUM_THREADS=32
+  cwd: .
+  environment: {}
+  timeout_ms: 600000
+
+validation:
+  # CPU 绑定、NUMA 节点、线程数、矩阵规模和性能阈值由 testpack 定义。
+  testpack: ./testpacks/sgemv-n.yaml
+
+output_dir: ./.phyopt/runs

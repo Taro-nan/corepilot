@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "target_id": "ippi-dilate3x3-64f-c1r",
+  "source_commit": "23a39f8de2272c150e168a824b7839de3844661c",
+  "machine_identity_sha256": "2db275c83133a31561f0f04412839a483cf0ac71d0d33c0b4c130f8ccf83609f",
+  "baseline_artifact": {
+    "path": "/home/chenmn/phyopt-baselines/ippi-ft-main-23a39f8d-openmp1/libftppi.so",
+    "sha256": "87805e10942159d8cf28b2cc48efe0cc690c1297631ee8f302d16f2e23c57b6a",
+    "dladdr_resolved_path": "/home/chenmn/phyopt-baselines/ippi-ft-main-23a39f8d-openmp1/libftppi.so",
+    "unchanged_after_run": true
+  },
+  "evaluator": {
+    "id": "ippi-dilate3x3-64f-c1r",
+    "version": "0.1.0",
+    "content_sha256": "3f9486c5924b2d889d14cefe23ead5d09f97918142f1037588c9a35cfcd1f46e",
+    "harness_sha256": "26ce499dcdc3c370a54ac6e34fb76e26b5cd29a23b427b07b1da081f6326a475",
+    "state": "TARGET_VALIDATED",
+    "owner_approved": false
+  },
+  "target_run": {
+    "run_id": "ippi-dilate-self-baseline-2026-10-08-v2",
+    "started_at": "2026-10-08T10:26:25.314Z",
+    "completed_at": "2026-10-08T10:26:31.925Z",
+    "correctness": "19/19 PASS",
+    "performance": "6 workloads x 5 positive finite samples, with one warmup each",
+    "raw_measurements_count": 49,
+    "report_path": "/home/chenmn/phyopt-qualifications/ippi-dilate3x3-self-baseline-20261008-v2/report.json",
+    "report_sha256": "d4326f00e98614b75835e90a9a46ecab6c53c84737bd46eed0c0ada1145ab58d",
+    "raw_measurements_path": "/home/chenmn/phyopt-qualifications/ippi-dilate3x3-self-baseline-20261008-v2/raw-measurements.jsonl",
+    "raw_measurements_sha256": "ddeeab9392724922f649dcca7e083e6e0a9012b68edfcee392fa43153a9fed1d"
+  },
+  "resource_observation": {
+    "threads": 1,
+    "cpu_set": "0",
+    "numa_policy": "bind",
+    "numa_node_bind": "0",
+    "numa_memory_bind": "0",
+    "omp_num_threads": "1"
+  },
+  "known_unknowns": ["overlap behavior", "NaN/Inf behavior", "non-element-aligned byte strides"],
+  "owner_decisions_pending": ["approve scalar oracle and finite input domain", "approve source halo and overlap preconditions", "approve workload set and acceptance thresholds", "approve package and evaluator qualification separately"]
+}

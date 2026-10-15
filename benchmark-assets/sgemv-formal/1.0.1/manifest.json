@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "benchmark_asset_version": "1.0.1",
+  "supersedes": "1.0.0",
+  "files": [
+    {
+      "relative_path": "build_baseline.sh",
+      "sha256": "a7da0c18c5b4fe3041f5504cf3c2b67716306b748929b98e027b846a0de9777d"
+    },
+    {
+      "relative_path": "build_candidate.sh",
+      "sha256": "9adf88dfcae67a7f28686681ade1f7fdc0019e9f7335b3c0a2b2361655eb4481"
+    },
+    {
+      "relative_path": "dladdr_evidence_schema.json",
+      "sha256": "86a7b7cfaa42f875fa16ed54f4ad9f2725e0c732038856b73a8250cca2c612ac"
+    },
+    {
+      "relative_path": "include/cblas.h",
+      "sha256": "bcf3ce328b96398daecc042d748bd64fad8f4eb678c01c1e5c834380d538df53"
+    },
+    {
+      "relative_path": "output_schema.json",
+      "sha256": "5ad2bf8f3e8fcbab069913d2a9aa346682bf0b31a19866e416ddb4f57d418fa2"
+    },
+    {
+      "relative_path": "sample_parser.js",
+      "sha256": "c7fc5e74a5b20523994e71c3422f013a534d863f06349e777c18b68f2c23f441"
+    },
+    {
+      "relative_path": "sgemv_bench_formal.c",
+      "sha256": "77e10357d69aec5e3c82baa6f83a01368e56e2df2fe5dbe7b69dc6d0ba0bca83"
+    }
+  ],
+  "cblas_h_provenance": {
+    "source": "blas_ft/source/include/cblas.h",
+    "source_version": "OpenBLAS 0.3.33 (blas_ft fork)",
+    "source_commit": "5e55d54192e3f9b9c876f989b78a43e937ad670d",
+    "sha256": "bcf3ce328b96398daecc042d748bd64fad8f4eb678c01c1e5c834380d538df53",
+    "worktree_sha256": "60199acfbd2d9fe666f1f48cdd68424ea9b9e09ba8da9b06ae02e6b1eb5ad984",
+    "declares": [
+      "CBLAS_ORDER {CblasRowMajor=101, CblasColMajor=102}",
+      "CBLAS_TRANSPOSE {CblasNoTrans=111, CblasTrans=112, CblasConjTrans=113, CblasConjNoTrans=114}",
+      "void cblas_sgemv(OPENBLAS_CONST enum CBLAS_ORDER order, OPENBLAS_CONST enum CBLAS_TRANSPOSE trans, OPENBLAS_CONST blasint m, OPENBLAS_CONST blasint n, OPENBLAS_CONST float alpha, OPENBLAS_CONST float *a, OPENBLAS_CONST blasint lda, OPENBLAS_CONST float *x, OPENBLAS_CONST blasint incx, OPENBLAS_CONST float beta, float *y, OPENBLAS_CONST blasint incy)"
+    ]
+  },
+  "aggregate_digest": "c3a5ac7c6d33b0a04557271f226053c3c704c01cdd12f4e0b3d52038d4f9c68e",
+  "frozen_at": "2026-09-08T07:50:30.869Z"
+}

@@ -1,0 +1,10 @@
+{
+  "executable": "cmake",
+  "args": [
+    "--build",
+    "build"
+  ],
+  "cwd": ".",
+  "environment": {},
+  "timeout_ms": 120000
+}

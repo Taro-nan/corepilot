@@ -1,0 +1,7 @@
+{
+  "asset_family": "benchmark-assets/sgemv-n",
+  "invalidated_version": "1.0.1",
+  "invalidated_digest": "c3a5ac7c6d33b0a04557271f226053c3c704c01cdd12f4e0b3d52038d4f9c68e",
+  "invalidation_reason": "sgemv_bench_formal.c接受14个位置参数，正确argc应为15，但冻结源码错误检查argc != 16，导致所有合法命令触发usage退出。",
+  "invalidated_at": "2026-09-08T00:00:00.000Z"
+}

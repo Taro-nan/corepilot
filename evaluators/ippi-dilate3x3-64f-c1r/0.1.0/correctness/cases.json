@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "cases": [
+    { "case_id": "minimum_1x1", "parameters": { "width": 1, "height": 1, "src_padding": 0, "dst_padding": 0, "pattern": "mixed", "seed": 101, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "small_2x3", "parameters": { "width": 2, "height": 3, "src_padding": 0, "dst_padding": 0, "pattern": "random", "seed": 102, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "odd_random_7x5", "parameters": { "width": 7, "height": 5, "src_padding": 0, "dst_padding": 0, "pattern": "random", "seed": 103, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "square_equal_16", "parameters": { "width": 16, "height": 16, "src_padding": 0, "dst_padding": 0, "pattern": "equal", "seed": 104, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "wide_31x3", "parameters": { "width": 31, "height": 3, "src_padding": 2, "dst_padding": 1, "pattern": "random", "seed": 105, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "tall_3x31", "parameters": { "width": 3, "height": 31, "src_padding": 1, "dst_padding": 2, "pattern": "random", "seed": 106, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "padded_13x9", "parameters": { "width": 13, "height": 9, "src_padding": 5, "dst_padding": 7, "pattern": "random", "seed": 107, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "ascending_11x7", "parameters": { "width": 11, "height": 7, "src_padding": 3, "dst_padding": 2, "pattern": "ascending", "seed": 108, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "descending_9x11", "parameters": { "width": 9, "height": 11, "src_padding": 1, "dst_padding": 3, "pattern": "descending", "seed": 109, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "positive_8x6", "parameters": { "width": 8, "height": 6, "src_padding": 0, "dst_padding": 0, "pattern": "positive", "seed": 110, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "negative_6x8", "parameters": { "width": 6, "height": 8, "src_padding": 0, "dst_padding": 0, "pattern": "negative", "seed": 111, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "mixed_17x13", "parameters": { "width": 17, "height": 13, "src_padding": 4, "dst_padding": 3, "pattern": "mixed", "seed": 112, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "finite_extreme_5x5", "parameters": { "width": 5, "height": 5, "src_padding": 2, "dst_padding": 2, "pattern": "extreme", "seed": 113, "error_mode": "none", "expected_status": 0 }, "threads": 1 },
+    { "case_id": "null_src", "parameters": { "width": 5, "height": 3, "src_padding": 0, "dst_padding": 0, "pattern": "random", "seed": 114, "error_mode": "null_src", "expected_status": -8 }, "threads": 1 },
+    { "case_id": "null_dst", "parameters": { "width": 5, "height": 3, "src_padding": 0, "dst_padding": 0, "pattern": "random", "seed": 115, "error_mode": "null_dst", "expected_status": -8 }, "threads": 1 },
+    { "case_id": "zero_width", "parameters": { "width": 0, "height": 3, "src_padding": 1, "dst_padding": 1, "pattern": "random", "seed": 116, "error_mode": "zero_width", "expected_status": -6 }, "threads": 1 },
+    { "case_id": "zero_height", "parameters": { "width": 5, "height": 0, "src_padding": 0, "dst_padding": 0, "pattern": "random", "seed": 117, "error_mode": "zero_height", "expected_status": -6 }, "threads": 1 },
+    { "case_id": "short_src_step", "parameters": { "width": 5, "height": 3, "src_padding": 0, "dst_padding": 0, "pattern": "random", "seed": 118, "error_mode": "short_src_step", "expected_status": -16 }, "threads": 1 },
+    { "case_id": "short_dst_step", "parameters": { "width": 5, "height": 3, "src_padding": 0, "dst_padding": 0, "pattern": "random", "seed": 119, "error_mode": "short_dst_step", "expected_status": -16 }, "threads": 1 }
+  ]
+}
