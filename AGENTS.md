@@ -56,6 +56,7 @@ git rev-parse HEAD
 - 应用用例负责接入、任务编排、预算、恢复及交付；领域规则负责 Task、Candidate、Experiment、验证、Evidence 和 Approval 的语义。模型、SDK、CPU 平台、传输、Git 与数据库细节留在适配边界。
 - Package/Evaluator 管理库语义、输入、基线、容差、采样和验收规则；Runner 执行固定计划并记录资源与事实，不选择候选、调用模型或批准结果。
 - WorkflowService 管理工作流进度，OptimizationRuntime 管理领域对象；Runner 持久化远端执行事实，Control 以稳定 ID 同步。报告是读取事实得到的视图，不能成为权威状态。它们目前存在分离写入和对账缺口，不能宣称已是一个原子状态机。
+- 新任务创建、执行终态、启动恢复和复现实验创建使用各自的 SQLite 事务关联 Workflow 与领域事实；跨 Runner、Git、会话及其他状态更新仍须按 ID 对账，不假设有分布式事务。
 - 领域批准、人工交付决定和 Git 交付分别表达。公开路径先冻结与当前候选及实验绑定的 Evidence，再由人明确批准；新交付必须引用匹配的批准与证据。历史记录维持原样，不得补造批准。
 - 公开 Git 交付先持久化请求及固定身份，再更新目标并按操作 ID 对账；结果未知时不自动重复合并。撤回只作用于核对后尚未确认的请求，保留历史且不回退现有 Git 提交。
 - 当前 `src/core/candidate-verification.ts` 是报告与公开交付共用的纯事实核对，只依赖 `contracts/`；`npm run check:repo` 检查此约束。其他 `core/` 模块已有跨层依赖，新增能力沿目标方向收敛，不宣称全仓已达成。
