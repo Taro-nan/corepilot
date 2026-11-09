@@ -75,9 +75,15 @@ export function trialSummary(record: TrialSummaryInput, measurements: Measuremen
       .filter(validSample).map(slot => one(slot)!.value as number);
     const baseline = samples('BASELINE'), candidate = samples('CANDIDATE');
     const complete = baseline.length === sampleCount && candidate.length === sampleCount;
+    let baselineMedian = complete ? median(baseline) : null;
+    let candidateMedian = complete ? median(candidate) : null;
+    let speedup = baselineMedian !== null && candidateMedian !== null ? baselineMedian / candidateMedian : null;
+    if (complete && [baselineMedian, candidateMedian, speedup].some(value => value === null || !Number.isFinite(value) || value <= 0)) {
+      issues.push(`负载 ${id} 的样本数值超出可计算范围；请检查原始计时与单位。`);
+      baselineMedian = candidateMedian = speedup = null;
+    }
     return { workload_id: id, ...record.workload_conditions?.find(item => item.workload_id === id), baseline_samples: baseline, candidate_samples: candidate,
-      baseline_median: complete ? median(baseline) : null, candidate_median: complete ? median(candidate) : null,
-      speedup: complete ? median(baseline) / median(candidate) : null };
+      baseline_median: baselineMedian, candidate_median: candidateMedian, speedup };
   }) : [];
   const calibration = record.mode === 'calibration' && record.test_plan?.statistics && record.workload_specs ? calibratePerformance({ performance: {
     statistics: record.test_plan.statistics, cases: record.workload_specs, sampling: { warmup: record.test_plan.sampling.warmup_count,
@@ -86,12 +92,13 @@ export function trialSummary(record: TrialSummaryInput, measurements: Measuremen
   } }, comparisons.map(row => ({ case_id: row.workload_id, baseline_samples: row.baseline_samples, candidate_samples: row.candidate_samples,
     sample_indices: { baseline: measurements.filter(m => m.kind === 'PERFORMANCE_SAMPLE' && m.subject_id === row.workload_id && m.role === 'BASELINE').map(m => m.sample_index!).sort((a,b) => a-b),
       candidate: measurements.filter(m => m.kind === 'PERFORMANCE_SAMPLE' && m.subject_id === row.workload_id && m.role === 'CANDIDATE').map(m => m.sample_index!).sort((a,b) => a-b) } }))) : undefined;
+  if (calibration?.status === 'INVALID' && !issues.length) issues.push('A/A 统计无法可靠计算；请检查原始计时和测量范围。');
   if (calibration && issues.length) {
     calibration.status = 'INVALID';
     calibration.statistics = { ...calibration.statistics, verdict: 'INVALID', overall_interval: null, worst_case_lower: null,
       issues: [...calibration.statistics.issues, ...issues] };
     calibration.workloads = calibration.workloads.map(row => ({ ...row, interval: null }));
-    calibration.note = '本次测量记录不符合固定计划，不能判断 A/A 偏差；请检查原始记录后重新试跑。';
+    calibration.note = '本次测量或计算不满足固定方案，不能判断 A/A 偏差；请检查原始记录后重新试跑。';
   }
   return {
     correctness: { planned: correctness.length, passed: correctness.filter(slot => validCorrectness(slot) && one(slot)!.value === 'PASS').length,

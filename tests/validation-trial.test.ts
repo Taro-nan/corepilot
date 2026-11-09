@@ -161,6 +161,7 @@ for (const matrix of [false, true]) test(`comparison pins ${matrix ? 'matrix' : 
   let submitted: ExperimentExecutionPlan | null = null;
   let runnerStatus = 'RUNNING';
   let completedMeasurements = 1;
+  let extremeMeasurements = false;
   const bytes = Buffer.from('frozen comparison bytes');
   const digest = createHash('sha256').update(bytes).digest('hex');
   const runner = http.createServer((req, res) => {
@@ -181,7 +182,7 @@ for (const matrix of [false, true]) test(`comparison pins ${matrix ? 'matrix' : 
       const contexts = submitted!.steps.map(item => item.formal_context).filter(item => item && item.phase !== 'PERFORMANCE_WARMUP');
       res.end(JSON.stringify({ measurements: contexts.slice(0, completedMeasurements).map(item => ({ experiment_id: submitted!.experiment.experiment_id, kind: item!.phase === 'CORRECTNESS_CASE' ? 'CORRECTNESS_CASE' : 'PERFORMANCE_SAMPLE',
         role: item!.role, subject_id: item!.subject_id, sample_index: item!.iteration_index,
-        value: item!.phase === 'CORRECTNESS_CASE' ? 'PASS' : item!.role === 'BASELINE' ? 2 : 1,
+        value: item!.phase === 'CORRECTNESS_CASE' ? 'PASS' : extremeMeasurements ? 1e308 : item!.role === 'BASELINE' ? 2 : 1,
         unit: item!.phase === 'CORRECTNESS_CASE' ? null : 'seconds', validity: 'VALID' })) }));
     } else res.end(JSON.stringify({ experiment_id: submitted?.experiment.experiment_id, status: runnerStatus, current_step: runnerStatus === 'RUNNING' ? 'CORRECTNESS' : null, failure: null }));
   });
@@ -267,6 +268,16 @@ for (const matrix of [false, true]) test(`comparison pins ${matrix ? 'matrix' : 
     if (matrix) assert.deepEqual(result.summary.comparisons.map(row => [row.profile_name, row.threads, row.cpu_set]), [['按线程分配', 1, '0'], ['按线程分配', 2, '0-1'], ['固定 CPU 池', 1, '2-3'], ['固定 CPU 池', 2, '2-3']]);
     assert.equal(result.summary.comparisons[0].speedup, 2);
     assert.deepEqual(result.summary.comparisons[0].baseline_samples, [2, 2]);
+    if (!matrix) {
+      extremeMeasurements = true;
+      const invalid = await api.projectAction(project.project_id, `validation-trials/${encodeURIComponent(start.trial_id)}`) as typeof result;
+      assert.equal(invalid.status.status, 'SUCCEEDED', 'the Runner completion remains a separate fact');
+      assert.equal(invalid.passed, false, 'a completed trial with non-representable arithmetic cannot qualify');
+      assert.ok(invalid.summary.issues.length);
+      assert.equal(invalid.summary.comparisons[0].speedup, null);
+      assert.deepEqual(invalid.summary.comparisons[0].baseline_samples, [1e308, 1e308]);
+      extremeMeasurements = false;
+    }
     const snapshot = await api.downloadProjectTests(project.project_id, `validation-trials/${encodeURIComponent(start.trial_id)}/download`);
     assert.ok(snapshot.length > 0);
     const files = await api.projectAction(project.project_id, `validation-trials/${encodeURIComponent(start.trial_id)}/files`) as { evaluator_digest: string; files: Array<{ path: string; content: string }> };

@@ -37,14 +37,20 @@ export function evaluateStatisticalPerformance(testpack: StatisticalInput, input
       issues.push(`missing or invalid paired samples: ${spec.case_id}`); invalid = true; continue;
     }
     if (baseline.length < policy.min_samples) { issues.push(`${spec.case_id}: ${baseline.length} samples; frozen plan requires at least ${policy.min_samples}`); insufficient = true; }
-    const bm = median(baseline), cm = median(candidate);
+    const bm = median(baseline), cm = median(candidate), speedup = bm / cm;
+    if (!Number.isFinite(bm) || !Number.isFinite(cm) || !Number.isFinite(speedup) || speedup <= 0) {
+      issues.push(`non-representable median or ratio: ${spec.case_id}`); invalid = true; continue;
+    }
     workloads.push({ case_id: spec.case_id, baseline_samples: [...baseline], candidate_samples: [...candidate], baseline_median: bm, candidate_median: cm,
-      speedup: bm / cm, critical: spec.critical || testpack.performance.key_cases.includes(spec.case_id), regression: false });
+      speedup, critical: spec.critical || testpack.performance.key_cases.includes(spec.case_id), regression: false });
   }
   const weightTotal = declared.reduce((sum, row) => sum + row.weight, 0);
   if (!workloads.length || weightTotal <= 0 || !Number.isFinite(weightTotal)) { issues.push('No positive-weight complete workload inventory'); invalid = true; }
   const geomean = (values: number[]) => Math.exp(values.reduce((sum, value, i) => sum + Math.log(value) * declared[i].weight, 0) / weightTotal);
-  const weighted = workloads.length === declared.length && weightTotal > 0 ? geomean(workloads.map(row => row.speedup)) : 0;
+  let weighted = workloads.length === declared.length && weightTotal > 0 && Number.isFinite(weightTotal) ? geomean(workloads.map(row => row.speedup)) : 0;
+  if (workloads.length === declared.length && weightTotal > 0 && (!Number.isFinite(weighted) || weighted <= 0)) {
+    issues.push('non-representable weighted geometric mean'); invalid = true; weighted = 0;
+  }
   const sampleDigest = createHash('sha256').update(JSON.stringify({ policy, declared, samples: workloads.map(row => ({ id: row.case_id, baseline: row.baseline_samples, candidate: row.candidate_samples,
     ...(input.find(item => item.case_id === row.case_id)?.sample_indices ? { indices: input.find(item => item.case_id === row.case_id)!.sample_indices } : {}) })) })).digest('hex');
   const thresholds = testpack.performance.thresholds;
@@ -52,6 +58,7 @@ export function evaluateStatisticalPerformance(testpack: StatisticalInput, input
     worst_case_lower: null, issues, sample_digest: sampleDigest, resampling_unit: 'consecutive paired process samples within each workload', case_interval_adjustment: 'Bonferroni across declared workloads' };
   if (!invalid && !insufficient) {
     const rng = random(policy.seed), distributions = workloads.map(() => [] as number[]), totals: number[] = [];
+    let calculationInvalid = false;
     for (let iteration = 0; iteration < policy.iterations; iteration++) {
       const ratios = workloads.map((row, index) => {
         const n = row.baseline_samples.length, indices: number[] = [];
@@ -59,21 +66,29 @@ export function evaluateStatisticalPerformance(testpack: StatisticalInput, input
         const ratio = median(indices.map(i => row.baseline_samples[i])) / median(indices.map(i => row.candidate_samples[i]));
         distributions[index].push(ratio); return ratio;
       });
-      totals.push(geomean(ratios));
+      if (ratios.some(ratio => !Number.isFinite(ratio) || ratio <= 0)) { calculationInvalid = true; break; }
+      const total = geomean(ratios);
+      if (!Number.isFinite(total) || total <= 0) { calculationInvalid = true; break; }
+      totals.push(total);
     }
-    const alpha = 1 - policy.confidence_level;
-    statistics.overall_interval = interval(totals, alpha);
-    workloads.forEach((row, index) => {
-      const ci = interval(distributions[index], alpha / workloads.length);
-      row.ci_lower = ci.lower; row.ci_upper = ci.upper;
-      row.regression = ci.upper < (row.critical ? thresholds.key_case_ci_lower_min : thresholds.overall_ci_lower_min);
-      row.conclusion = ci.lower > 1 ? 'IMPROVED' : ci.upper < 1 ? 'REGRESSED' : 'INCONCLUSIVE';
-    });
-    statistics.worst_case_lower = Math.min(...workloads.map(row => row.ci_lower!));
-    const passes = weighted >= thresholds.weighted_geomean_min && statistics.overall_interval.lower >= Math.max(thresholds.weighted_geomean_min, thresholds.overall_ci_lower_min)
-      && workloads.every(row => row.ci_lower! >= thresholds.overall_ci_lower_min && (!row.critical || row.ci_lower! >= thresholds.key_case_ci_lower_min));
-    const fails = statistics.overall_interval.upper < thresholds.weighted_geomean_min || workloads.some(row => row.regression);
-    statistics.verdict = passes ? 'PASSED' : fails ? 'FAILED' : 'INCONCLUSIVE';
+    if (calculationInvalid) {
+      issues.push('non-representable bootstrap ratio or weighted geometric mean');
+      statistics.verdict = 'INVALID';
+    } else {
+      const alpha = 1 - policy.confidence_level;
+      statistics.overall_interval = interval(totals, alpha);
+      workloads.forEach((row, index) => {
+        const ci = interval(distributions[index], alpha / workloads.length);
+        row.ci_lower = ci.lower; row.ci_upper = ci.upper;
+        row.regression = ci.upper < (row.critical ? thresholds.key_case_ci_lower_min : thresholds.overall_ci_lower_min);
+        row.conclusion = ci.lower > 1 ? 'IMPROVED' : ci.upper < 1 ? 'REGRESSED' : 'INCONCLUSIVE';
+      });
+      statistics.worst_case_lower = Math.min(...workloads.map(row => row.ci_lower!));
+      const passes = weighted >= thresholds.weighted_geomean_min && statistics.overall_interval.lower >= Math.max(thresholds.weighted_geomean_min, thresholds.overall_ci_lower_min)
+        && workloads.every(row => row.ci_lower! >= thresholds.overall_ci_lower_min && (!row.critical || row.ci_lower! >= thresholds.key_case_ci_lower_min));
+      const fails = statistics.overall_interval.upper < thresholds.weighted_geomean_min || workloads.some(row => row.regression);
+      statistics.verdict = passes ? 'PASSED' : fails ? 'FAILED' : 'INCONCLUSIVE';
+    }
   }
   const critical = workloads.filter(row => row.critical);
   return { gate_version: 3, passed: statistics.verdict === 'PASSED', weighted_geomean: weighted,

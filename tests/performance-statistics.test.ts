@@ -71,3 +71,27 @@ test('A/A calibration describes equality and bias separately from optimization a
   const invalid = measurements(12, 1); invalid[0].candidate_samples.pop();
   assert.equal(calibratePerformance(pack(), invalid).status, 'INVALID');
 });
+
+test('non-representable intermediate statistics cannot be reported as an A/A equality or a performance verdict', () => {
+  const overflow = measurements(12, 1).map(row => ({ ...row,
+    baseline_samples: Array(12).fill(1e308), candidate_samples: Array(12).fill(1e308) }));
+  const calibration = calibratePerformance(pack(), overflow);
+  assert.equal(calibration.status, 'INVALID');
+  assert.equal(calibration.statistics.overall_interval, null);
+
+  const underflow = measurements(12, 1).map(row => ({ ...row,
+    baseline_samples: Array(12).fill(1e-300), candidate_samples: Array(12).fill(1e300) }));
+  const result = evaluatePerformanceGate(pack(), underflow);
+  assert.equal(result.statistics?.verdict, 'INVALID');
+  assert.equal(result.passed, false);
+  assert.equal(result.overall_ci_lower, null);
+
+  // The original median is finite, but some bootstrap blocks select only the
+  // extreme tail: their paired ratio exceeds the finite number range.
+  const extremeTail = measurements(12, 1).map(row => ({ ...row,
+    baseline_samples: [...Array(7).fill(1), ...Array(5).fill(1e200)],
+    candidate_samples: [...Array(7).fill(1), ...Array(5).fill(1e-200)] }));
+  const resampled = evaluatePerformanceGate(pack(), extremeTail);
+  assert.equal(resampled.statistics?.verdict, 'INVALID');
+  assert.equal(resampled.statistics?.overall_interval, null);
+});
