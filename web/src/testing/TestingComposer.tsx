@@ -10,6 +10,7 @@ import { TestingSubjectPicker } from './TestingSubjectPicker';
 import { TestingAssetUpload } from './TestingAssetUpload';
 import { TestingConditions } from './TestingConditions';
 import { emptySubject, testingSubject, type SubjectDraft } from './testing-draft';
+import { newRequestId } from '../request-id';
 
 interface TestingDraft { name: string; machineId: string; planKey: string; mode: TestingMode; correctnessBaseline: boolean; candidate: SubjectDraft; baseline: SubjectDraft }
 const planKey = (ref: TestingPlanRef) => JSON.stringify(ref);
@@ -35,7 +36,7 @@ export function TestingComposer({ projects, catalog, machines, assets, projectId
   const [uploadFor, setUploadFor] = useState<'candidate' | 'baseline' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const requestId = useRef(crypto.randomUUID());
+  const requestId = useRef<string | null>(null);
   const formId = React.useId();
   const options = catalog.flatMap(item => item.targets.map(target => ({ ref: { package_id: item.package_id, package_version: item.version, target_id: target.target_id },
     label: `${item.functions.find(fn => fn.function_id === target.function_id)?.api ?? target.function_id} · ${item.library_name ?? item.package_id} · ${item.version}` })));
@@ -43,7 +44,7 @@ export function TestingComposer({ projects, catalog, machines, assets, projectId
   const compare = form.mode !== 'correctness' || form.correctnessBaseline;
   const missingCode = !!plan && (!plan.code.setup || form.mode !== 'performance' && !plan.code.correctness || form.mode !== 'correctness' && !plan.code.performance);
   const planProject = projects.find(item => plan?.ref.package_id === 'project-' + item.project_id.slice(0, 8)) ?? projects.find(item => item.project_id === form.candidate.projectId);
-  function change(patch: Partial<TestingDraft>) { setForm(current => ({ ...current, ...patch })); setError(''); requestId.current = crypto.randomUUID(); }
+  function change(patch: Partial<TestingDraft>) { setForm(current => ({ ...current, ...patch })); setError(''); requestId.current = null; }
   useEffect(() => { try { sessionStorage.setItem(storageKey, JSON.stringify({ version: 1, form })); } catch { /* Optional browser draft. */ } }, [storageKey, form]);
   useEffect(() => {
     let active = true; setPlan(null); setPlanError('');
@@ -54,6 +55,7 @@ export function TestingComposer({ projects, catalog, machines, assets, projectId
     event.preventDefault(); setBusy(true); setError('');
     try {
       if (!plan || missingCode) throw new Error('请选择已有可执行测试方案，或先准备对应测试代码。');
+      requestId.current ??= newRequestId();
       const result = await api.testing.start({ name: form.name.trim() || `${plan.function_name} 测试`, machine_id: form.machineId, plan: plan.ref,
         expected_evaluator_digest: plan.evaluator.digest, expected_package_digest: plan.package_digest,
         candidate: testingSubject(form.candidate), ...(compare ? { baseline: testingSubject(form.baseline) } : {}), mode: form.mode }, requestId.current);

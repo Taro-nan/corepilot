@@ -32,6 +32,8 @@ import { readValidationQuality, qualityProbeSteps } from '../evaluator/validatio
 import type { ValidationQualityPlan } from '../contracts/validation-quality.js';
 import type { ValidationCase } from '../contracts/validation-testpack.js';
 import { trialSummary } from './validation-trial-summary.js';
+import { assertGeneratedHarnessApis, assertGeneratedHarnessResolution, generatedHarnessUsage } from '../evaluator/generated-harness-compatibility.js';
+import { publishTrialRecord, trialRequestDigest, trialRequestIdentity } from '../storage/validation-trial-intake.js';
 
 interface TrialRecord {
   schema_version: 1;
@@ -65,6 +67,24 @@ interface TrialRecord {
   quality?: ValidationQualityPlan;
   correctness_inputs?: Array<{ input_id: string }>;
   workload_specs?: ValidationCase[];
+  request_key_digest?: string;
+  request_digest?: string;
+}
+
+interface TrialRequestReceipt { schema_version: 1; project_id: string; trial_id: string; key_digest: string; request_digest: string }
+interface ClosedTrialRequest { schema_version: 1; kind: 'CLOSED_TRIAL_REQUEST'; project_id: string; trial_id: string; request_key_digest: string }
+type TrialStartOptions = { mode?: 'correctness' | 'comparison' | 'smoke' | 'calibration'; expected_digest?: string;
+  build?: unknown; expected_package_digest?: unknown; requestId?: string };
+interface TrialStartResponse { trial_id: string; status: string; source_commit: string; evaluator_digest: string;
+  remote_workspace?: ReturnType<typeof remoteRunLayout>; machine_name?: string; build?: ValidationCommand }
+const activeIntakes = new Map<string, { digest: string; result: Promise<TrialStartResponse> }>();
+
+function intakeDigest(project: ProjectRecord, packageId: string, version: string, targetId: string, branch: string | undefined,
+  purpose: TrialRecord['purpose'], options: TrialStartOptions): string {
+  return trialRequestDigest({ schema_version: 1, project_id: project.project_id, package_id: packageId,
+    package_version: version, target_id: targetId, source_branch: branch ?? null, purpose, mode: options.mode ?? 'smoke',
+    expected_digest: options.expected_digest ?? null, expected_package_digest: { provided: options.expected_package_digest !== undefined, value: options.expected_package_digest ?? null },
+    build: { provided: options.build !== undefined, value: options.build ?? null } });
 }
 
 /** Draft smoke runs use the existing Runner DEVELOPMENT_FEEDBACK experiment protocol. */
@@ -81,6 +101,48 @@ export class ValidationTrialService {
     return path.join(this.dataDir, 'projects', project.project_id, 'validation-trials', `${trialId.slice('validation:'.length)}.json`);
   }
 
+  private requestReceiptPath(project: ProjectRecord, trialId: string) {
+    return path.join(path.dirname(this.trialPath(project, trialId)), 'requests', `${trialId.slice('validation:'.length)}.json`);
+  }
+
+  private decision(project: ProjectRecord, requestId: string): TrialRecord | ClosedTrialRequest | null {
+    const identity = trialRequestIdentity(project.project_id, requestId), filename = this.trialPath(project, identity.trialId);
+    if (!fs.existsSync(filename)) return null;
+    const record = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRecord | ClosedTrialRequest;
+    if (record.project_id !== project.project_id || record.trial_id !== identity.trialId || record.request_key_digest !== identity.keyDigest) {
+      throw new ApiError(409, 'TRIAL_REQUEST_IDENTITY_CONFLICT', '请求身份与已有记录不一致，请联系维护者核对。');
+    }
+    return record;
+  }
+
+  requestStatus(project: ProjectRecord, requestId: string) {
+    const identity = trialRequestIdentity(project.project_id, requestId);
+    const decision = this.decision(project, requestId);
+    if (decision) return 'kind' in decision ? { state: 'CLOSED' as const } : { state: 'CREATED' as const, trial_id: decision.trial_id };
+    const filename = this.requestReceiptPath(project, identity.trialId);
+    if (!fs.existsSync(filename)) return { state: 'NOT_FOUND' as const };
+    const receipt = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRequestReceipt;
+    if (receipt.project_id !== project.project_id || receipt.trial_id !== identity.trialId || receipt.key_digest !== identity.keyDigest) {
+      throw new ApiError(409, 'TRIAL_REQUEST_IDENTITY_CONFLICT', '请求身份与已有记录不一致，请联系维护者核对。');
+    }
+    return { state: 'PREPARING' as const };
+  }
+
+  /** Fence only an uncreated request. A created job is returned, never cancelled. */
+  closeRequest(project: ProjectRecord, requestId: string) {
+    const identity = trialRequestIdentity(project.project_id, requestId);
+    const closed: ClosedTrialRequest = { schema_version: 1, kind: 'CLOSED_TRIAL_REQUEST', project_id: project.project_id,
+      trial_id: identity.trialId, request_key_digest: identity.keyDigest };
+    publishTrialRecord(this.trialPath(project, identity.trialId), closed);
+    return this.requestStatus(project, requestId);
+  }
+
+  private startResponse(record: TrialRecord) {
+    const state = record.preparation?.state ?? 'UNKNOWN';
+    return { trial_id: record.trial_id, status: state, source_commit: record.source_commit, evaluator_digest: record.evaluator_digest,
+      remote_workspace: record.remote_workspace, machine_name: record.machine_name, build: record.build };
+  }
+
   private connection(project: ProjectRecord, machineId?: string | null) {
     const config = loadOptimizationConfig(project.config_path).config;
     const id = machineId === undefined ? (isRegisteredRunner(config.runner) ? config.runner.machine_id : null) : machineId;
@@ -92,8 +154,49 @@ export class ValidationTrialService {
   }
 
   async start(project: ProjectRecord, packageId: string, version: string, targetId: string, branch?: string,
-    purpose: TrialRecord['purpose'] = 'VALIDATION_DRAFT', options: { mode?: 'correctness' | 'comparison' | 'smoke' | 'calibration'; expected_digest?: string;
-      build?: unknown; expected_package_digest?: unknown } = {}) {
+    purpose: TrialRecord['purpose'] = 'VALIDATION_DRAFT', options: TrialStartOptions = {}): Promise<TrialStartResponse> {
+    if (options.requestId === undefined) return this.create(project, packageId, version, targetId, branch, purpose, options);
+    const identity = trialRequestIdentity(project.project_id, options.requestId);
+    const key = `${path.resolve(this.dataDir)}\0${identity.keyDigest}`;
+    const digest = intakeDigest(project, packageId, version, targetId, branch, purpose, options);
+    const active = activeIntakes.get(key);
+    if (active) {
+      if (active.digest !== digest) throw new ApiError(409, 'TRIAL_REQUEST_CONFLICT', '同一请求标识已用于其他试跑条件，请核对原请求。');
+      return active.result;
+    }
+    const result = this.create(project, packageId, version, targetId, branch, purpose, options);
+    activeIntakes.set(key, { digest, result });
+    try { return await result; }
+    finally { if (activeIntakes.get(key)?.result === result) activeIntakes.delete(key); }
+  }
+
+  private async create(project: ProjectRecord, packageId: string, version: string, targetId: string, branch: string | undefined,
+    purpose: TrialRecord['purpose'], options: TrialStartOptions): Promise<TrialStartResponse> {
+    const request = options.requestId === undefined ? null : trialRequestIdentity(project.project_id, options.requestId);
+    const digest = request ? intakeDigest(project, packageId, version, targetId, branch, purpose, options) : null;
+    const existing = () => {
+      if (!request || options.requestId === undefined) return null;
+      const decision = this.decision(project, options.requestId);
+      if (!decision) return null;
+      if ('kind' in decision) throw new ApiError(409, 'TRIAL_REQUEST_CLOSED', '原请求已关闭，不能再使用此请求标识。');
+      if (decision.request_digest !== digest) throw new ApiError(409, 'TRIAL_REQUEST_CONFLICT', '同一请求标识已用于其他试跑条件，请核对原请求。');
+      return this.startResponse(decision);
+    };
+    const previous = existing();
+    if (previous) return previous;
+    if (request) {
+      const receipt: TrialRequestReceipt = { schema_version: 1, project_id: project.project_id, trial_id: request.trialId,
+        key_digest: request.keyDigest, request_digest: digest! };
+      const filename = this.requestReceiptPath(project, request.trialId);
+      if (!publishTrialRecord(filename, receipt)) {
+        const current = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRequestReceipt;
+        if (current.project_id !== project.project_id || current.trial_id !== request.trialId || current.key_digest !== request.keyDigest || current.request_digest !== digest) {
+          throw new ApiError(409, 'TRIAL_REQUEST_CONFLICT', '同一请求标识已用于其他试跑条件，请核对原请求。');
+        }
+      }
+      const decided = existing();
+      if (decided) return decided;
+    }
     if (packageId !== `project-${project.project_id.slice(0, 8)}`) throw new Error('只能试跑本项目生成的验证草稿');
     const resolved = this.catalog.resolveSelection({ package_id: packageId, package_version: version, target_id: targetId });
     if (!['DRAFT', 'REVIEWED'].includes(resolved.loaded.manifest.qualification.state) || resolved.bundle.qualification.status !== 'DRAFT') throw new Error('试跑仅适用于尚未获资格的验证草稿');
@@ -110,12 +213,22 @@ export class ValidationTrialService {
     }
     const requestedBuild = buildDefinition;
     buildDefinition = isolatedWorkspaceBuild(buildDefinition);
+    const mode = options.mode ?? 'smoke';
+    if (purpose !== 'BASELINE_BUILD') {
+      assertGeneratedHarnessResolution(resolved.bundle);
+      assertGeneratedHarnessApis(resolved.bundle, { correctness: true, performance: mode !== 'correctness',
+        baseline: mode === 'comparison' || mode === 'calibration' });
+      if (mode === 'calibration' && generatedHarnessUsage(resolved.bundle).performance) {
+        const conditions = readValidationTestPlan(resolved.bundle.root, resolved.bundle.manifest, resolved.functionDefinition.api);
+        if (conditions.candidate_api !== conditions.baseline_api) throw new ApiError(400, 'CALIBRATION_API_MISMATCH',
+          'A/A 校准需要两端使用同一库的同一个 API；请建立两端 API 一致的校准方案。');
+      }
+    }
     const connection = this.connection(project);
     const client = new RunnerClient({ baseUrl: connection.runner.endpoint, token: connection.runner.token,
       requestTimeoutMs: connection.runner.requestTimeoutMs });
     const probe = await client.probe();
     if (probe.health.capabilities?.source_archive_upload !== 1) throw new Error('请更新执行机器的 Runner：此版本需要支持源码归档上传，在目标机直接解包和构建');
-    const mode = options.mode ?? 'smoke';
     const testPlan = readValidationTestPlan(resolved.bundle.root, resolved.bundle.manifest, resolved.functionDefinition.api);
     if (mode === 'calibration' && (!testPlan.statistics || testPlan.sampling.sample_count < testPlan.statistics.min_samples)) throw new Error('A/A 校准需要固定统计方案；请在测试条件选择「重复测量」并保存，样本数需满足统计最少样本要求');
     const comparison = purpose !== 'BASELINE_BUILD' && mode === 'comparison';
@@ -145,7 +258,7 @@ export class ValidationTrialService {
     const sourceBranch = branch ?? project.source_branch ?? null;
     if (purpose === 'BASELINE_BUILD' && !branch) throw new Error('请选择要作为比较基线的本地 Git 分支');
     const identity = await gitSourceVersion(project.repository_root, sourceBranch ? `refs/heads/${sourceBranch}` : 'HEAD');
-    const trialId = `validation:${randomUUID()}`;
+    const trialId = request?.trialId ?? `validation:${randomUUID()}`;
     const runId = trialId.slice('validation:'.length);
     const transport = this.transportFactory(connection.target);
     const runnerRoot = connection.target.workspace_root.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -180,7 +293,8 @@ export class ValidationTrialService {
       artifact_path: artifact, created_at: now, machine_name: connection.machineName ?? probe.machine.hostname,
       remote_workspace: layout, build: { ...build, cwd: buildCwd }, build_definition: buildDefinition,
       ...(requestedBuild !== buildDefinition ? { requested_build_definition: requestedBuild } : {}),
-      preparation: { state: 'PREPARING', phase: 'ARCHIVING', message: '正在按选定 commit 导出源码归档，无需在本机检出文件' } };
+      preparation: { state: 'PREPARING', phase: 'ARCHIVING', message: '正在按选定 commit 导出源码归档，无需在本机检出文件' },
+      ...(request ? { request_key_digest: request.keyDigest, request_digest: digest! } : {}) };
     record.mode = mode;
     record.test_plan = testPlan;
     record.quality = readValidationQuality(resolved.bundle.root, cases);
@@ -195,10 +309,22 @@ export class ValidationTrialService {
     const filename = this.trialPath(project, trialId);
     fs.mkdirSync(path.dirname(filename), { recursive: true });
     const saveRecord = () => { const temporary = filename + '.tmp'; fs.writeFileSync(temporary, JSON.stringify(record, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(temporary, filename); };
-    saveRecord();
+    if (request) {
+      if (!publishTrialRecord(filename, record)) {
+        const decided = existing();
+        if (decided) return decided;
+        throw new Error('trial request decision disappeared');
+      }
+    } else saveRecord();
     // Only small evaluator files are snapshotted on Control; the source is never checked out here.
-    const localAssets = snapshotValidationAssets(resolved.bundle.root, filename.replace(/\.json$/, '.assets'), resolved.bundle.content_digest);
     this.preparing.add(trialId);
+    let localAssets: string;
+    try { localAssets = snapshotValidationAssets(resolved.bundle.root, filename.replace(/\.json$/, '.assets'), resolved.bundle.content_digest); }
+    catch (error) {
+      record.preparation = { state: 'FAILED', phase: 'SNAPSHOTTING', message: '固定测试文件失败，请检查后创建新试跑。' };
+      try { saveRecord(); } finally { this.preparing.delete(trialId); }
+      throw error;
+    }
     // The response owns only the stable ID. Preparing/transport and Runner execution outlive the browser request.
     const prepare = async () => {
       let submitting = false;
@@ -270,28 +396,31 @@ export class ValidationTrialService {
     const root = path.join(this.dataDir, 'projects', project.project_id, 'validation-trials');
     if (!fs.existsSync(root)) return [];
     return fs.readdirSync(root).filter(filename => /^[a-f0-9-]{36}\.json$/.test(filename))
-      .map(filename => JSON.parse(fs.readFileSync(path.join(root, filename), 'utf8')) as TrialRecord)
-      .filter(record => record.project_id === project.project_id)
+      .map(filename => JSON.parse(fs.readFileSync(path.join(root, filename), 'utf8')) as TrialRecord | ClosedTrialRequest)
+      .filter((record): record is TrialRecord => record.project_id === project.project_id && !('kind' in record && record.kind === 'CLOSED_TRIAL_REQUEST'))
       .sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 50);
   }
 
   async download(project: ProjectRecord, trialId: string) {
     const filename = this.trialPath(project, trialId);
-    const record = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRecord;
+    const record = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRecord | ClosedTrialRequest;
+    if ('kind' in record) throw new ApiError(404, 'TRIAL_NOT_FOUND', '此请求尚未创建试跑。');
     if (record.project_id !== project.project_id) throw new Error('validation trial identity mismatch');
     return archiveValidationAssets(filename.replace(/\.json$/, '.assets'), record);
   }
 
   files(project: ProjectRecord, trialId: string) {
     const filename = this.trialPath(project, trialId);
-    const record = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRecord;
+    const record = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRecord | ClosedTrialRequest;
+    if ('kind' in record) throw new ApiError(404, 'TRIAL_NOT_FOUND', '此请求尚未创建试跑。');
     if (record.project_id !== project.project_id) throw new Error('validation trial identity mismatch');
     return validationAssetFiles(filename.replace(/\.json$/, '.assets'));
   }
 
   async status(project: ProjectRecord, trialId: string) {
     const filename = this.trialPath(project, trialId);
-    const record = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRecord;
+    const record = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRecord | ClosedTrialRequest;
+    if ('kind' in record) throw new ApiError(404, 'TRIAL_NOT_FOUND', '此请求尚未创建试跑。');
     if (record.project_id !== project.project_id || record.trial_id !== trialId) throw new Error('validation trial identity mismatch');
     const preparation = record.preparation;
     const interruptedSubmission = preparation?.state === 'PREPARING' && preparation.phase === 'SUBMITTING' && !this.preparing.has(trialId);
@@ -337,7 +466,8 @@ export class ValidationTrialService {
   }
 
   async freezeBranchArtifact(project: ProjectRecord, trialId: string, artifactRelativePath?: string) {
-    const record = JSON.parse(fs.readFileSync(this.trialPath(project, trialId), 'utf8')) as TrialRecord;
+    const record = JSON.parse(fs.readFileSync(this.trialPath(project, trialId), 'utf8')) as TrialRecord | ClosedTrialRequest;
+    if ('kind' in record) throw new ApiError(404, 'TRIAL_NOT_FOUND', '此请求尚未创建试跑。');
     if (record.project_id !== project.project_id || record.purpose !== 'BASELINE_BUILD' || !record.source_branch) {
       throw new Error('只有本项目成功完成的分支构建才能固定为比较基线');
     }

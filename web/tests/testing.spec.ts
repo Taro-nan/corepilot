@@ -42,6 +42,7 @@ async function mockTesting(page: Page) {
   const libraries = [asset('library-a', '对照库'), asset('library-b', '待测库')];
   let current: TestingTaskRecord | null = null;
   const submissions: CreateTestingTask[] = [];
+  const requestIds: string[] = [];
   const uploads: Array<{ name: string; bytes: number }> = [];
   await page.route('**/v1/catalog', route => route.fulfill({ json: { packages: [{ package_id: ref.package_id, version: '1', library_name: 'Fixture', qualification: { state: 'DRAFT' }, functions: [{ function_id: 'kernel', api: 'kernel' }], targets: [{ target_id: 'kernel', function_id: 'kernel', evaluator: { evaluator_id: 'fixture-rules', evaluator_version: '1', qualification: 'DRAFT' } }] }] } }));
   await page.route('**/v1/machines', route => route.fulfill({ json: { machines: [{ machine_id: 'machine-fixture', name: '隔离 CPU', enabled: true, status: 'ONLINE', setup_complete: true }] } }));
@@ -56,11 +57,11 @@ async function mockTesting(page: Page) {
   await page.route('**/v1/testing-tasks**', async route => {
     const request = route.request(), url = new URL(request.url());
     if (url.pathname.endsWith('/cancel')) { current!.execution.cancel_requested = true; await route.fulfill({ json: details(current!) }); }
-    else if (request.method() === 'POST') { submissions.push(request.postDataJSON()); current = record(request.postDataJSON()); await route.fulfill({ status: 202, json: { task: current } }); }
+    else if (request.method() === 'POST') { submissions.push(request.postDataJSON()); requestIds.push(request.headers()['idempotency-key']); current = record(request.postDataJSON()); await route.fulfill({ status: 202, json: { task: current } }); }
     else if (url.pathname === '/v1/testing-tasks') await route.fulfill({ json: { tasks: current ? [current] : [] } });
     else await route.fulfill({ json: details(current!) });
   });
-  return { libraries, submissions, uploads, current: () => current };
+  return { libraries, submissions, requestIds, uploads, current: () => current };
 }
 
 test('historical testing results show unchecked library identity without claiming an improvement', async ({ page }) => {
@@ -85,6 +86,7 @@ test('historical testing results show unchecked library identity without claimin
 });
 
 test('standalone library comparison preserves conditions and separates execution from correctness and performance', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(window.crypto, 'randomUUID', { value: undefined, configurable: true }); });
   const data = await mockTesting(page); await login(page);
   await page.getByRole('navigation').getByRole('button', { name: '测试任务', exact: true }).click();
   await page.getByRole('button', { name: '创建测试任务' }).click();
@@ -115,7 +117,25 @@ test('standalone library comparison preserves conditions and separates execution
   await page.setViewportSize({ width: 1440, height: 1000 }); await page.screenshot({ path: path.join(repositoryRoot, 'build/ux-review/testing-result.png'), fullPage: true });
   expect(data.submissions[0].candidate).toEqual({ kind: 'binary', asset_id: 'library-b' }); expect(data.submissions[0].baseline).toEqual({ kind: 'binary', asset_id: 'library-a' });
   expect(data.submissions[0]).toMatchObject({ expected_evaluator_digest: digest, expected_package_digest: digest });
+  expect(data.requestIds[0]).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
   expect(fixture.modelRequests.inference).toBe(0); expect(fixture.service.list()).toHaveLength(0);
+});
+
+test('missing browser entropy leaves the independent testing form usable and does not submit', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.crypto, 'randomUUID', { value: undefined, configurable: true });
+    Object.defineProperty(window.crypto, 'getRandomValues', { value: undefined, configurable: true });
+  });
+  const data = await mockTesting(page); await login(page); await page.goto(fixture.url + '/#/testing/new');
+  const composer = page.getByRole('dialog', { name: '创建测试任务' });
+  await composer.getByLabel('执行机器').selectOption('machine-fixture');
+  await composer.getByRole('group', { name: '待测对象 B', exact: true }).getByLabel('测试库包').selectOption('library-b');
+  await composer.getByRole('group', { name: '比较对象 A', exact: true }).getByLabel('测试库包').selectOption('library-a');
+  await composer.getByLabel('测试方案', { exact: true }).selectOption(JSON.stringify(ref));
+  await composer.getByRole('button', { name: '开始测试' }).click();
+  await expect(composer.getByRole('alert')).toContainText('无法提供安全随机数');
+  await expect(composer.getByLabel('执行机器')).toHaveValue('machine-fixture');
+  expect(data.submissions).toHaveLength(0);
 });
 
 test('normal source selection fills both branches and pins the reviewed build settings', async ({ page }) => {

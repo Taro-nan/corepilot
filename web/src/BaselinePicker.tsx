@@ -8,6 +8,8 @@ import type { ValidationCommand } from '../../src/contracts/validation-testpack'
 import type { RunnerExecutionOutput } from '../../src/contracts/runner-rpc';
 import type { ValidationPreparationContext } from '../../src/contracts/validation-assets';
 import { ExternalBaselineImport } from './ExternalBaselineImport';
+import { useTrialRequest } from './useTrialRequest';
+import { TrialRequestRecovery } from './TrialRequestRecovery';
 
 interface BuildRecord { trial_id: string; package_id: string; package_version: string; target_id: string; purpose: string;
   source_branch: string | null; source_commit: string; created_at: string; machine_name?: string;
@@ -36,6 +38,7 @@ export function BaselinePicker({ projectId, packageId, version, targetId, baseli
   const assetsUrl = `/v1/projects/${encodeURIComponent(projectId)}/validation-assets/${encodeURIComponent(packageId)}/${encodeURIComponent(version)}/${encodeURIComponent(targetId)}`;
   const [working, setWorking] = useState('');
   const [feedback, setFeedback] = useState<{ text: string; bad: boolean } | null>(null);
+  const trialRequest = useTrialRequest(projectId, packageId, version, targetId, 'BASELINE_BUILD');
   function applyBuildDefinition(definition: ValidationCommand) {
     const build = isolatedWorkspaceBuild(definition);
     setBuildCommand(displayBuildCommand(build)); setBuildCwd(build.cwd);
@@ -97,10 +100,12 @@ export function BaselinePicker({ projectId, packageId, version, targetId, baseli
     if (!buildSettings) throw new Error('请等待构建设置读取完成');
     const command = isolateCmakeBuildCommand(buildCommand, buildCwd);
     setBuildCommand(command);
+    const requestId = trialRequest.begin();
     const result = await request<{ trial_id: string }>(`/v1/projects/${encodeURIComponent(projectId)}/validation-trials`, 'POST',
       { package_id: packageId, package_version: version, target_id: targetId, source_branch: branch, purpose: 'BASELINE_BUILD',
-        build: { command, cwd: buildCwd }, expected_package_digest: buildSettings.package_digest });
+        build: { command, cwd: buildCwd }, expected_package_digest: buildSettings.package_digest }, undefined, { 'idempotency-key': requestId });
     setTrialId(result.trial_id); setTrial(null);
+    trialRequest.clear(requestId);
     setArtifact('');
     setHistory((await request<{ trials: BuildRecord[] }>(`/v1/projects/${encodeURIComponent(projectId)}/validation-trials`)).trials
       .filter(item => item.package_id === packageId && item.package_version === version && item.target_id === targetId && item.purpose === 'BASELINE_BUILD'));
@@ -142,12 +147,16 @@ export function BaselinePicker({ projectId, packageId, version, targetId, baseli
     {configured && <p className="hint">准备和检查新来源期间继续使用当前基线，点击固定后才替换。</p>}
     <div hidden={source !== 'branch'} className="baseline-branch-panel">
     <p className="hint">选定分支后，通过 Runner RPC 在执行机器上构建。每次构建保留独立源码、输出和日志目录。</p>
+    <TrialRequestRecovery requestState={trialRequest} label="分支构建" sending={working === 'build'} onFound={id => {
+      setTrialId(id); setTrial(null);
+      void request<{ trials: BuildRecord[] }>(`/v1/projects/${encodeURIComponent(projectId)}/validation-trials`).then(result => setHistory(result.trials.filter(item => item.package_id === packageId && item.package_version === version && item.target_id === targetId && item.purpose === 'BASELINE_BUILD'))).catch(error => setFeedback({ text: error.message, bad: true }));
+    }} onMessage={(text, bad = false) => setFeedback({ text, bad })} />
     <details className="baseline-build-settings"><summary>本次基线构建设置</summary><p className="hint">默认复用该分支最近一次构建命令，首次使用接入方案命令。标准 CMake 命令自动使用本次运行的独立构建目录，切换分支和重试时同样生效。自定义脚本可使用 COREPILOT_SOURCE_ROOT、COREPILOT_BUILD_ROOT、COREPILOT_ARTIFACT_ROOT。编译选项与修改随本次构建保存。</p>
       <Field label="基线构建命令"><textarea aria-label="基线构建命令" rows={6} spellCheck={false} disabled={!buildSettings || !!working} value={buildCommand} onChange={event => setBuildCommand(event.target.value)} onBlur={() => setBuildCommand(current => isolateCmakeBuildCommand(current, buildCwd))} /></Field><Field label="基线构建工作目录"><input aria-label="基线构建工作目录" disabled={!buildSettings || !!working} value={buildCwd} onChange={event => setBuildCwd(event.target.value)} /></Field>
       <div className="form-actions"><button type="button" disabled={!buildSettings || !!working} onClick={() => applyBuildDefinition(buildSettings!.build)}>使用接入方案的构建命令</button></div></details>
     <div className="baseline-controls"><Field label="用作基线的本地 Git 分支"><select aria-label="用作基线的本地 Git 分支" value={branch} onChange={event => chooseBranch(event.target.value)} disabled={!!working}>
       <option value="" disabled hidden>选择分支</option>{repository?.branches.map(item => <option key={item.name} value={item.name}>{item.name} · {item.commit.slice(0, 8)}</option>)}
-    </select></Field><button type="button" disabled={!branch || !buildSettings || !buildCommand.trim() || !!working} onClick={() => void run('build', buildBranch)}>{working === 'build' ? '正在提交构建…' : '在执行机器上构建这个分支'}</button></div>
+    </select></Field><button type="button" disabled={!branch || !buildSettings || !buildCommand.trim() || !!working || !!trialRequest.pending || !!trialRequest.storageError} onClick={() => void run('build', buildBranch)}>{working === 'build' ? '正在提交构建…' : '在执行机器上构建这个分支'}</button></div>
     {!!history.length && <Field label="查看构建记录"><select aria-label="查看构建记录" value={trialId} onChange={event => { setTrial(null); setTrialId(event.target.value); setArtifact(''); }}><option value="" disabled hidden>选择构建记录</option>{history.map(item => <option key={item.trial_id} value={item.trial_id}>{new Date(item.created_at).toLocaleString()} · {item.source_branch ?? 'HEAD'} · {item.source_commit.slice(0, 8)}</option>)}</select></Field>}
     {trialId && <div className="validation-trial" role="status"><strong>分支构建 · {({ PREPARING: '准备源码', PENDING: '等待 Runner 执行', RUNNING: '正在构建', SUCCEEDED: '构建完成', FAILED: '构建失败', UNKNOWN: '状态待核对', CANCELLED: '已取消' } as Record<string, string>)[trial?.status.status ?? ''] ?? '正在读取'}</strong><small>{trialId}</small>
       {trial?.status.status === 'PREPARING' && <p>{trial.trial?.preparation?.message}</p>}

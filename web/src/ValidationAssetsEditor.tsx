@@ -11,6 +11,8 @@ import { ValidationTestCode, testProgramFile } from './ValidationTestCode';
 import { ValidationTrialProgress, TRIAL_TERMINAL_STATUSES, type TrialProgressState, type TrialSubmission } from './ValidationTrialProgress';
 import { ValidationReviewPanel } from './ValidationReviewPanel';
 import { ValidationQualityEditor, ValidationQualitySummary } from './ValidationQualityEditor';
+import { useTrialRequest } from './useTrialRequest';
+import { TrialRequestRecovery } from './TrialRequestRecovery';
 import type { ValidationQualityResult } from '../../src/contracts/validation-quality';
 import type { PerformanceCalibration } from '../../src/contracts/performance-statistics';
 import { parseValidationInputs } from '../../src/evaluator/validation-inputs';
@@ -63,6 +65,7 @@ export function ValidationAssetsEditor({ projectId, packageId, version, targetId
   const [trial, setTrial] = useState<TrialResult | null>(null);
   const [trialRefresh, setTrialRefresh] = useState(0);
   const [trialSubmission, setTrialSubmission] = useState<TrialSubmission | null>(null);
+  const trialRequest = useTrialRequest(projectId, packageId, version, targetId, 'VALIDATION_DRAFT');
   const [showFiles, setShowFiles] = useState(false);
   const [expandedCode, setExpandedCode] = useState<'correctness' | 'performance' | null>(null);
   const [trialFiles, setTrialFiles] = useState<ValidationSourceFile[] | null>(null);
@@ -266,9 +269,11 @@ export function ValidationAssetsEditor({ projectId, packageId, version, targetId
     try {
       await prepare();
       setTrialSubmission(current => current && ({ ...current, message: '正在创建试运行，固定源码、测试条件与比较基线…' }));
+      const requestId = trialRequest.begin();
       const result = await request<{ trial_id: string }>(`/v1/projects/${encodeURIComponent(projectId)}/validation-trials`, 'POST', {
-        package_id: packageId, package_version: version, target_id: targetId, mode, expected_digest: draft?.evaluator_digest });
+        package_id: packageId, package_version: version, target_id: targetId, mode, expected_digest: draft?.evaluator_digest }, undefined, { 'idempotency-key': requestId });
       setTrial(null); setTrialId(result.trial_id); setStep('run');
+      trialRequest.clear(requestId);
       setFeedback({ text: `已提交${mode === 'calibration' ? 'A/A 同产物校准' : mode === 'comparison' ? '两库对比' : '正确性'}试运行。下方持续更新编译、资源执行与测试结果。`, bad: false });
     } finally { setTrialSubmission(null); }
   }
@@ -313,6 +318,7 @@ export function ValidationAssetsEditor({ projectId, packageId, version, targetId
     {(dirty || hasPendingPrompts || hasPendingScratch) && <div className="config-state" role="status"><span>有未保存的测试修改或生成提示词{hasPendingScratch ? '；部分输入尚未应用' : ''}</span><button type="button" className="text-btn" disabled={!!working} onClick={() => void run('discard', discardChanges)}>放弃测试修改并重新读取</button></div>}
     {conflict && <div role="alert"><Feedback bad text="服务器上的测试方案已更新或已启用，未保存的内容仍在。保存时会检查原版本，避免覆盖他人的修改；请先查看并记录内容，之后选择放弃测试修改并重新读取。" /></div>}
     <div className="test-preparation-tabs" role="tablist" aria-label="测试准备步骤">{[['conditions', '1 测试条件'], ['code', '2 测试代码'], ['run', '3 试运行与对比']].map(([id, title]) => <button key={id} type="button" role="tab" aria-selected={step === id} onClick={() => setStep(id as typeof step)}>{title}</button>)}</div>
+    <TrialRequestRecovery requestState={trialRequest} label="试跑" sending={!!trialSubmission} onFound={id => { setTrial(null); setTrialId(id); setStep('run'); }} onMessage={(text, bad = false) => setFeedback({ text, bad })} />
     {feedback && <Feedback text={feedback.text} bad={feedback.bad} />}
     {generation && <div className={`validation-generation ${generation.status === 'NEEDS_INPUT' || generation.status === 'FAILED' ? 'needs-input' : ''}`} aria-live="polite">
       <div className="test-section-heading"><strong>{generationActive ? generation.purpose === 'CORRECTNESS_PLAN' ? 'AI 正在起草正确性方案' : 'AI 正在生成测试代码' : { SUCCEEDED: generation.proposal ? '方案已起草 · 待你采用' : '生成完成 · 待试运行', NEEDS_INPUT: '需要补充测试条件', FAILED: '生成失败', CANCELLED: '生成已取消', INTERRUPTED: '生成已中断', RUNNING: '正在生成', CANCELLING: '正在取消' }[generation.status]}</strong><span>{elapsed} 秒</span></div>
@@ -381,9 +387,9 @@ export function ValidationAssetsEditor({ projectId, packageId, version, targetId
       </>}
       {step === 'run' && <><div className="test-run-summary"><strong>本次执行条件</strong><p>{form.test_plan.execution_matrix ? `${form.test_plan.execution_matrix.thread_counts.join(' / ')} 线程 · ${form.test_plan.execution_matrix.profiles.length} 组绑核方案` : `CPU ${form.test_plan.resources.cpu_set || '待设置'} · NUMA ${form.test_plan.resources.numa_node}`} · {form.test_plan.sampling.warmup_count} 次预热 · 每端 {form.test_plan.sampling.sample_count} 次采样 · 随机种子 {form.test_plan.seed}</p><p>{form.cases.length} 个正确性用例，{form.workloads.length} 个性能输入；线程与绑核条件按第 1 步逐组执行。</p></div>
         <div className="form-actions">
-          <button type="button" disabled={dirty || hasPendingScratch || trialActive || !!trialSubmission} onClick={() => void run('trial', () => runTrial('correctness'))}>{trialSubmission?.mode === 'correctness' ? '正在提交正确性试运行…' : '仅试运行正确性测试'}</button>
-          <button type="button" className="primary" disabled={dirty || hasPendingScratch || trialActive || !!trialSubmission} onClick={() => void run('trial', () => runTrial('comparison'))}>{trialSubmission?.mode === 'comparison' ? '正在提交两库对比…' : '在 Runner 上试运行两库对比'}</button>
-          <button type="button" disabled={dirty || hasPendingScratch || trialActive || !!trialSubmission} onClick={() => void run('trial', () => runTrial('calibration'))}>运行 A/A 测量校准</button>
+          <button type="button" disabled={dirty || hasPendingScratch || trialActive || !!trialSubmission || !!trialRequest.pending || !!trialRequest.storageError} onClick={() => void run('trial', () => runTrial('correctness'))}>{trialSubmission?.mode === 'correctness' ? '正在提交正确性试运行…' : '仅试运行正确性测试'}</button>
+          <button type="button" className="primary" disabled={dirty || hasPendingScratch || trialActive || !!trialSubmission || !!trialRequest.pending || !!trialRequest.storageError} onClick={() => void run('trial', () => runTrial('comparison'))}>{trialSubmission?.mode === 'comparison' ? '正在提交两库对比…' : '在 Runner 上试运行两库对比'}</button>
+          <button type="button" disabled={dirty || hasPendingScratch || trialActive || !!trialSubmission || !!trialRequest.pending || !!trialRequest.storageError} onClick={() => void run('trial', () => runTrial('calibration'))}>运行 A/A 测量校准</button>
           <button type="button" disabled={dirty} onClick={() => void run('download', () => downloadPackage())}>下载完整测试包</button>
         </div>
         <p className="hint">A/A 校准用当前构建的同一个产物作为两端，检查测量偏差与区间宽度。先在测试条件选择「重复测量」并保存；校准不替代两库对比试跑。</p>

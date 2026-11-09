@@ -132,6 +132,11 @@ export class ApiClient {
     return this.request(method ?? (payload ? 'POST' : 'GET'), `/v1/projects/${encodeURIComponent(projectId)}${action ? '/' + action : ''}`, payload);
   }
 
+  startProjectTrial(projectId: string, payload: Record<string, unknown>, requestId?: string): Promise<unknown> {
+    return this.request('POST', `/v1/projects/${encodeURIComponent(projectId)}/validation-trials`, payload,
+      requestId === undefined ? {} : { 'idempotency-key': requestId });
+  }
+
   downloadProjectTests(projectId: string, action: string): Promise<Uint8Array> {
     return this.request('GET', `/v1/projects/${encodeURIComponent(projectId)}/${action}`, undefined, undefined, undefined, true) as Promise<Uint8Array>;
   }

@@ -230,8 +230,10 @@ async function check(args: string[]): Promise<number> {
 
 async function projectCommand(args: string[]): Promise<number> {
   try {
-    const parsed = parseArgs({ args, allowPositionals: true, options: { root: { type: 'string' }, name: { type: 'string' }, config: { type: 'string' }, branch: { type: 'string' }, function: { type: 'string' }, inspect: { type: 'boolean' }, file: { type: 'string' }, directory: { type: 'string' }, entry: { type: 'string' }, generate: { type: 'boolean' }, propose: { type: 'boolean' }, 'accept-plan': { type: 'string' }, scope: { type: 'string' }, prompt: { type: 'string' }, download: { type: 'string' }, compare: { type: 'boolean' }, calibrate: { type: 'boolean' }, 'library-name': { type: 'string' }, 'library-version': { type: 'string' }, 'build-script': { type: 'string' }, 'build-cwd': { type: 'string' }, artifact: { type: 'string' } } });
+    const parsed = parseArgs({ args, allowPositionals: true, options: { root: { type: 'string' }, name: { type: 'string' }, config: { type: 'string' }, branch: { type: 'string' }, function: { type: 'string' }, inspect: { type: 'boolean' }, file: { type: 'string' }, directory: { type: 'string' }, entry: { type: 'string' }, generate: { type: 'boolean' }, propose: { type: 'boolean' }, 'accept-plan': { type: 'string' }, scope: { type: 'string' }, prompt: { type: 'string' }, download: { type: 'string' }, compare: { type: 'boolean' }, calibrate: { type: 'boolean' }, 'library-name': { type: 'string' }, 'library-version': { type: 'string' }, 'build-script': { type: 'string' }, 'build-cwd': { type: 'string' }, 'request-id': { type: 'string' }, artifact: { type: 'string' } } });
     const [action, id] = parsed.positionals;
+    if (parsed.values['request-id'] !== undefined && !['trial', 'baseline-branch'].includes(action)) return fail('--request-id 只能用于 project trial 或 baseline-branch');
+    if (parsed.values['request-id'] !== undefined && (!parsed.values['request-id'].trim() || parsed.values['request-id'].length > 200)) return fail('--request-id 必须是 1 到 200 个字符');
     if (parsed.values.prompt !== undefined && !(action === 'validation' && (parsed.values.generate || parsed.values.propose))) return fail('--prompt 只能与 project validation --generate 或 --propose 一起使用');
     const api = new ApiClient(serverUrl());
     let result: unknown;
@@ -277,17 +279,17 @@ async function projectCommand(args: string[]): Promise<number> {
     else if (action === 'trial' && id && parsed.positionals.length === 5) {
       if (parsed.values.compare && parsed.values.calibrate) throw new Error('--compare 与 --calibrate 不能同时使用');
       const [, , packageId, version, targetId] = parsed.positionals;
-      result = await api.projectAction(id, 'validation-trials', { package_id: packageId, package_version: version,
-        target_id: targetId, mode: parsed.values.calibrate ? 'calibration' : parsed.values.compare ? 'comparison' : 'correctness', ...(parsed.values.branch ? { source_branch: parsed.values.branch } : {}) });
+      result = await api.startProjectTrial(id, { package_id: packageId, package_version: version,
+        target_id: targetId, mode: parsed.values.calibrate ? 'calibration' : parsed.values.compare ? 'comparison' : 'correctness', ...(parsed.values.branch ? { source_branch: parsed.values.branch } : {}) }, parsed.values['request-id']);
     }
     else if (action === 'trial-status' && id && parsed.positionals.length === 3) {
       result = await api.projectAction(id, `validation-trials/${encodeURIComponent(parsed.positionals[2])}`);
     }
     else if (action === 'baseline-branch' && id && parsed.positionals.length === 5 && parsed.values.branch) {
       const [, , packageId, version, targetId] = parsed.positionals;
-      result = await api.projectAction(id, 'validation-trials', { package_id: packageId, package_version: version,
+      result = await api.startProjectTrial(id, { package_id: packageId, package_version: version,
         target_id: targetId, source_branch: parsed.values.branch, purpose: 'BASELINE_BUILD',
-        ...(parsed.values['build-script'] ? { build: { command: fs.readFileSync(path.resolve(parsed.values['build-script']), 'utf8'), cwd: parsed.values['build-cwd'] ?? '.' } } : {}) });
+        ...(parsed.values['build-script'] ? { build: { command: fs.readFileSync(path.resolve(parsed.values['build-script']), 'utf8'), cwd: parsed.values['build-cwd'] ?? '.' } } : {}) }, parsed.values['request-id']);
     }
     else if (action === 'baseline-freeze' && id && parsed.positionals.length === 3) {
       result = await api.projectAction(id, `validation-trials/${encodeURIComponent(parsed.positionals[2])}/freeze-baseline`,

@@ -92,7 +92,7 @@ cmake --build "$COREPILOT_BUILD_ROOT" --parallel 8
 CLI 走同一 API，可使用本机脚本文件提供多行构建命令：
 
 ```text
-corepilot project baseline-branch <project-id> <package-id> <version> <target-id> --branch main --build-script baseline-build.sh --build-cwd .
+corepilot project baseline-branch <project-id> <package-id> <version> <target-id> --branch main --build-script baseline-build.sh --build-cwd . --request-id <本次唯一标识>
 corepilot project trial-status <project-id> <trial-id>
 corepilot project baseline-freeze <project-id> <trial-id> --artifact build/lib/libexample.so
 ```
@@ -180,6 +180,10 @@ corepilot project trial-status <project-id> <trial-id>
 浏览器与 CLI 都调用项目下的 `validation-assets` 和 `validation-trials` API，不另建运行时或事实数据库。Runner 需报告 `capabilities.controlled_validation = 1` 并启用资源约束，才能执行该受控试运行。
 
 网页点击试运行后立即显示提交状态；取得试跑 ID 后，每 2 秒读取准备阶段、Runner 当前步骤、已用时间、已完成的正确性结果和有效性能样本。可展开查看 Runner 最新输出；原始命令记录保留供排查。正在执行时，试运行按钮会暂时禁用，刷新或重新进入页面会恢复最近一次试跑。CLI 的 `trial-status` 通过同一接口读取执行中的已有测量，不必等待全部结束。
+
+分支构建或试跑的创建响应丢失时，网页保留随机请求标识，并提供“核对上次请求”。若原作业已经创建，页面打开原作业；若尚未找到，也不能假设原请求不会到达。可选择“关闭未创建的请求”：它会与在途创建原子竞争，只有作业尚未创建时才关闭，已创建的作业不会被取消。浏览器仅在本机 localStorage 保存请求标识及页面所属的项目、方案和用途，不保存构建命令或配置；清除浏览器站点数据、更换浏览器或设备会丢失这一恢复入口。多标签页同时各自发起的操作可能使用不同标识。
+
+CLI 的 `project trial` 和 `project baseline-branch` 可使用 `--request-id <唯一标识>`。首次执行前自行生成并保留标识，例如 `node -p "crypto.randomUUID()"`；响应丢失后以完全相同的参数和标识重试，返回原试跑，参数变化会报冲突。需要新试跑时使用新标识。未提供 `--request-id` 的旧调用仍按每次新建处理。请求登记和关闭栅栏需要数据目录所在文件系统支持原子硬链接；不支持时会报错，不会降级为可覆盖写入。
 
 试运行属于 `DEVELOPMENT_FEEDBACK`，完成后保持 DRAFT，不自动授予 qualification、正式 Evidence 或 Human Approval。
 

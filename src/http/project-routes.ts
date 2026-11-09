@@ -29,12 +29,22 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
   if (pathname === '/v1/catalog' && method === 'GET') { sendJson(res, 200, { packages: service.catalog() }); return true; }
   if (pathname === '/v1/directories' && method === 'GET') { sendJson(res, 200, await service.directories(url.searchParams.get('path') ?? '')); return true; }
   if (pathname === '/v1/repository' && method === 'GET') { sendJson(res, 200, await service.inspectRepository(url.searchParams.get('path') ?? '')); return true; }
+  const trialRequest = pathname.match(/^\/v1\/projects\/([^/]+)\/validation-trial-request(?:\/(close))?$/);
+  if (trialRequest) {
+    const requestId = req.headers['idempotency-key'];
+    if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供有效的请求标识。');
+    const project = service.get(decodeURIComponent(trialRequest[1]));
+    if (method === 'GET' && !trialRequest[2]) { sendJson(res, 200, service.validationTrials.requestStatus(project, requestId)); return true; }
+    if (method === 'POST' && trialRequest[2] === 'close') { await readJson(req); sendJson(res, 200, service.validationTrials.closeRequest(project, requestId)); return true; }
+  }
   const trial = pathname.match(/^\/v1\/projects\/([^/]+)\/validation-trials(?:\/([^/]+))?$/);
   if (trial) {
     const id = decodeURIComponent(trial[1]);
     if (method === 'GET' && !trial[2]) { sendJson(res, 200, { trials: service.validationTrials.list(service.get(id)) }); return true; }
     if (method === 'POST' && !trial[2]) {
       const body = await readJson(req);
+      const requestId = req.headers['idempotency-key'];
+      if (requestId !== undefined && (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200)) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供有效的请求标识。');
       for (const key of ['package_id', 'package_version', 'target_id'] as const) {
         if (typeof body[key] !== 'string' || !body[key].trim()) throw new ApiError(400, 'INVALID_ARGUMENT', `${key} is required`);
       }
@@ -48,7 +58,7 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
         body.package_version as string, body.target_id as string, body.source_branch as string | undefined,
         body.purpose as 'VALIDATION_DRAFT' | 'BASELINE_BUILD' | undefined,
         { mode: body.mode as 'correctness' | 'comparison' | 'smoke' | 'calibration' | undefined, expected_digest: body.expected_digest as string | undefined,
-          build: body.build, expected_package_digest: body.expected_package_digest })); return true;
+          build: body.build, expected_package_digest: body.expected_package_digest, ...(typeof requestId === 'string' ? { requestId } : {}) })); return true;
     }
     if (method === 'GET' && trial[2]) {
       sendJson(res, 200, await service.validationTrials.status(service.get(id), decodeURIComponent(trial[2]))); return true;

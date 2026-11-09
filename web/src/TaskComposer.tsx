@@ -9,11 +9,11 @@ import { CopyValue, Disclosure, Feedback, Field, Icon, Modal } from './component
 import { SourceBranchSelect } from './SourceProject';
 import { TaskTestReview, VerificationChoice, type VerificationMode } from './TaskVerification';
 import { SourceScopeField, sourceScopeFromText } from './SourceScopeField';
+import { newRequestId } from './request-id';
 
 export interface TaskComposerContext { config: OptimizationConfig; repository: RepositoryInspection; machines: ExecutionMachineSummary[]; functionName: string; validationFunctionName?: string; validationReady: boolean; hasUnsavedChanges?: boolean; selection?: { functionName: string; sourceBranch: string } }
 export interface TaskPreparationContext { projectId: string; functionName: string; sourceBranch: string; machineId: string; returnTo: 'task' | 'overview' | 'testing'; returnPath?: string }
 interface TaskDraft { functionName: string; sourceBranch: string; machineId: string; minutes: number; candidates: number; entryFile: string; sourceInclude: string; sourceExclude: string; performance: boolean; verificationMode: VerificationMode }
-const newRequestId = () => 'web-' + Date.now() + '-' + Math.random().toString(36).slice(2);
 
 /** An overview change updates only that field in an existing task draft. */
 export function updateTaskDraftSelection(projectId: string, patch: Partial<Pick<TaskDraft, 'functionName' | 'sourceBranch' | 'machineId'>>) {
@@ -46,7 +46,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
   const [plan, setPlan] = useState<ValidationAssetDraft | null>(null);
   const [planError, setPlanError] = useState('');
   const [planRetry, setPlanRetry] = useState(0);
-  const id = useRef(newRequestId());
+  const id = useRef<string | null>(null);
   const selection = context.config.validation.library_package;
   const owned = selection?.package_id === 'project-' + project.project_id.slice(0, 8);
   const machine = context.machines.find(item => item.machine_id === form.machineId);
@@ -64,11 +64,12 @@ export function TaskComposer({ project, context, close, created, configure, retu
       .then(value => { if (active) setPlan(value); }).catch(failure => { if (active) setPlanError(failure.message); });
     return () => { active = false; };
   }, [project.project_id, selection?.package_id, selection?.package_version, selection?.target_id, planRetry, sourceOnly]);
-  function change(patch: Partial<TaskDraft>) { setForm(current => ({ ...current, ...patch })); setError(''); setCheck(''); id.current = newRequestId(); }
+  function change(patch: Partial<TaskDraft>) { setForm(current => ({ ...current, ...patch })); setError(''); setCheck(''); id.current = null; }
   async function submit(event: React.FormEvent) {
     if (needsValidation) { event.preventDefault(); setError('请先为所选函数准备并确认匹配的测试方案。'); return; }
     event.preventDefault(); setBusy('submit'); setError('');
     try {
+      id.current ??= newRequestId();
       const result = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: form.functionName.trim() || undefined,
         source_branch: form.sourceBranch || undefined, ...(form.machineId ? { machine_id: form.machineId } : {}),
         entry_file: form.entryFile.trim() || null, verification_mode: form.verificationMode, enable_performance: !sourceOnly && form.performance,

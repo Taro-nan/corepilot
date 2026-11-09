@@ -297,6 +297,7 @@ test('Agent process records and continuation reuse the same workflow and evaluat
 });
 
 test('branch baseline builds through Runner RPC, shows server directories and logs, and reuses its recorded settings', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(window.crypto, 'randomUUID', { value: undefined, configurable: true }); });
   const f = fixture;
   const workspace = path.join(f.root, 'runner-workspace'); fs.mkdirSync(workspace);
   const runner = await startRunnerHttpServer({ host: '127.0.0.1', port: 0, token: 'branch-browser-fixture',
@@ -325,7 +326,26 @@ test('branch baseline builds through Runner RPC, shows server directories and lo
     const script = `const fs=require("fs"),path=require("path");console.log("compile-start");const timer=setInterval(()=>{if(!fs.existsSync(${JSON.stringify(release)}))return;clearInterval(timer);fs.writeFileSync(path.join(process.env.COREPILOT_BUILD_ROOT,"libfixture.so"),"browser-build-bytes");console.log("compile-done");},50)`;
     const command = `"${process.execPath.replaceAll('\\', '/')}" -e '${script}'`;
     await editor.fill(command);
+    const createUrl = `**/v1/projects/${project.project_id}/validation-trials`;
+    let postCount = 0;
+    await page.route(createUrl, async route => {
+      if (route.request().method() !== 'POST') { await route.fallback(); return; }
+      postCount++;
+      const response = await route.fetch(); expect(response.status()).toBe(202);
+      await route.abort('failed');
+    });
     await page.getByRole('button', { name: '在执行机器上构建这个分支', exact: true }).click();
+    await expect(page.getByText('上次分支构建请求尚未确认', { exact: true })).toBeVisible();
+    const savedRequests = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith('corepilot-trial-request-v1')));
+    expect(savedRequests).toHaveLength(1); expect(savedRequests[0][1]).toMatch(/^[a-f0-9-]{36}$/i);
+    expect(JSON.stringify(savedRequests)).not.toContain(command);
+    await page.reload();
+    await page.getByRole('button', { name: '模型与机器', exact: true }).click();
+    await openLegacyValidation(page);
+    await expect(page.getByText('上次分支构建请求尚未确认', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '核对上次请求', exact: true }).click();
+    expect(postCount).toBe(1);
+    await page.unroute(createUrl);
     const trial = page.locator('.baseline-picker .validation-trial');
     await expect(trial).toContainText('正在构建');
     await expect(trial).toContainText('compile-start');
@@ -868,6 +888,7 @@ test('test preparation preserves user conditions through AI generation and provi
 });
 
 test('comparison trial responds immediately, shows live stages and counts, and restores the active run after reload', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(window.crypto, 'randomUUID', { value: undefined, configurable: true }); });
   const f = fixture;
   const project = f.projects.add({ name: 'Trial progress', repository_root: f.repo, config_path: f.configPath });
   const d = await f.projects.discover(project.project_id, 'kernel');
@@ -878,17 +899,23 @@ test('comparison trial responds immediately, shows live stages and counts, and r
   const trialId = 'validation:browser-progress';
   const record = { trial_id: trialId, package_id: pkg, package_version: version, target_id: target,
     purpose: 'VALIDATION_DRAFT', evaluator_digest: draft.evaluator_digest, mode: 'comparison', created_at: new Date().toISOString() };
-  let phase = 'preparing', requests = 0, posted = false;
+  let phase = 'preparing', requests = 0, posted = false, firstKey = '';
   let release!: () => void;
   const submitting = new Promise<void>(resolve => { release = resolve; });
   const base = `**/v1/projects/${project.project_id}/validation-trials`;
   await page.route(base, async route => {
     if (route.request().method() === 'GET') { await route.fulfill({ json: { trials: posted ? [record] : [] } }); return; }
     requests++;
+    if (requests === 1) firstKey = route.request().headers()['idempotency-key'];
     expect(route.request().postDataJSON().mode).toBe('comparison');
     if (requests > 1) { await route.fulfill({ status: 400, json: { error: { message: 'Fixture submission rejected' } } }); return; }
     await submitting; posted = true;
-    await route.fulfill({ status: 202, json: { trial_id: trialId, status: 'PREPARING' } });
+    await route.abort('failed');
+  });
+  await page.route(`**/v1/projects/${project.project_id}/validation-trial-request*`, async route => {
+    const key = route.request().headers()['idempotency-key'];
+    if (key === firstKey) await route.fulfill({ json: { state: 'CREATED', trial_id: trialId } });
+    else await route.fulfill({ json: { state: route.request().method() === 'POST' ? 'CLOSED' : 'NOT_FOUND' } });
   });
   await page.route(`${base}/*`, async route => {
     const done = phase === 'succeeded';
@@ -910,6 +937,10 @@ test('comparison trial responds immediately, shows live stages and counts, and r
     await expect(page.getByRole('button', { name: '正在提交两库对比…', exact: true })).toBeDisabled();
     await expect.poll(() => requests).toBe(1);
     release();
+    await expect(page.getByText('上次试跑请求尚未确认', { exact: true })).toBeVisible();
+    await page.reload(); await page.getByRole('tab', { name: '3 试运行与对比' }).click();
+    await expect(page.getByText('上次试跑请求尚未确认', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '核对上次请求', exact: true }).click();
     const panel = page.locator('.validation-trial');
     await expect(panel).toContainText('正在上传并核验已固定的比较基线');
     await expect(panel).toContainText('已用时');
@@ -939,6 +970,8 @@ test('comparison trial responds immediately, shows live stages and counts, and r
     await comparison.click();
     await expect(page.getByText('Fixture submission rejected', { exact: true })).toBeVisible();
     await expect(panel).toContainText(trialId);
+    await expect(comparison).toBeDisabled();
+    await page.getByRole('button', { name: '关闭未创建的请求', exact: true }).click();
     await expect(comparison).toBeEnabled();
   } finally { release(); }
 });
@@ -1234,6 +1267,24 @@ test('maintainers register machines once and projects select shared resources wi
   } finally { await runner.close(); }
 });
 
+
+test('optimization creation reports missing secure entropy without losing its inputs', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.crypto, 'randomUUID', { value: undefined, configurable: true });
+    Object.defineProperty(window.crypto, 'getRandomValues', { value: undefined, configurable: true });
+  });
+  const f = fixture;
+  f.projects.add({ name: 'Entropy check', repository_root: f.repo, config_path: f.configPath });
+  await login(page); await page.getByRole('button', { name: '创建优化任务', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '创建优化任务' });
+  await dialog.getByRole('radio', { name: /仅生成优化代码/ }).check();
+  await dialog.getByLabel('优化函数').fill('kernel');
+  await dialog.getByLabel('允许修改的源码文件或目录').fill('kernel.c');
+  await dialog.getByRole('button', { name: '开始优化', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('无法提供安全随机数');
+  await expect(dialog.getByLabel('优化函数')).toHaveValue('kernel');
+  expect(f.service.list()).toHaveLength(0);
+});
 
 test('preflight checks the typed function and configuration read failures can be retried', async ({ page }) => {
   const f = fixture;
