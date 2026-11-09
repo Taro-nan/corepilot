@@ -15,8 +15,8 @@ while (!fs.existsSync(gate)) {
   await delay(10);
 }
 try {
-  const result = description.action === 'close' ? service.closeRequest(description.key)
-    : await service.start(description.input, { requestId: description.key });
+  const result = description.action === 'close' ? service.closeRequest(description.key, description.controlIdentity)
+    : await service.start(description.input, { requestId: description.key, controlIdentity: description.controlIdentity });
   await delay(100);
   process.stdout.write(JSON.stringify({ ok: true, result }) + '\n');
 } catch (error) {

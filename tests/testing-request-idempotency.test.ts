@@ -153,6 +153,23 @@ test('two independent processes cannot both start one keyed task and reject chan
   } finally { f.close(); }
 });
 
+test('different Control databases racing for one request cannot claim each other’s task', async () => {
+  const f = createTestingFixture();
+  try {
+    const candidate = await f.binary('candidate');
+    const input: CreateTestingTask = { machine_id: f.machine.identity.machine_id, plan: testingPlanRef, candidate, mode: 'correctness' };
+    const log = path.join(f.root, 'identity-probes.log'), dataRootId = randomUUID();
+    const identityA = { database_id: randomUUID(), data_root_id: dataRootId }, identityB = { database_id: randomUUID(), data_root_id: dataRootId };
+    const common = { root: f.root, machine: f.machine, input, log, action: 'start', key: 'same-key-different-controls' };
+    const results = await concurrentWorkers(f.root, [{ ...common, controlIdentity: identityA }, { ...common, controlIdentity: identityB }]);
+    assert.equal(results.filter(result => result.ok).length, 1);
+    assert.equal(results.find(result => !result.ok)?.code, 'TESTING_REQUEST_CONTROL_MISMATCH');
+    const winner = results.findIndex(result => result.ok), taskId = results[winner].result?.task_id;
+    assert.ok(taskId); assert.deepEqual(new TestingStore(f.root).task(taskId).request_control_identity, winner === 0 ? identityA : identityB);
+    assert.equal(fs.readFileSync(log, 'utf8').trim().split('\n').length, 1);
+  } finally { f.close(); }
+});
+
 test('two processes racing creation and closure leave either one task or one closed fence', async () => {
   const f = createTestingFixture();
   try {
