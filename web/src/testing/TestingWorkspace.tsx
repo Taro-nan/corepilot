@@ -8,6 +8,7 @@ import { TestingComposer } from './TestingComposer';
 import { TestingResult } from './TestingResult';
 import { subjectCaption } from './testing-draft';
 import { useTestingOptions } from './useTestingOptions';
+import { readTestingTaskIdentity } from './testing-request-storage';
 
 export function TestingWorkspace({ taskId, projects, projectId, navigate, prepare, notify, optimize }: {
   taskId: string; projects: ProjectRecord[]; projectId?: string;
@@ -20,6 +21,7 @@ export function TestingWorkspace({ taskId, projects, projectId, navigate, prepar
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
   const [localNotice, setLocalNotice] = useState('');
+  const [identityNotice, setIdentityNotice] = useState('');
   const [retry, setRetry] = useState(0);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
@@ -30,11 +32,15 @@ export function TestingWorkspace({ taskId, projects, projectId, navigate, prepar
       if (pending) return;
       pending = true;
       try {
-        const [list, result] = await Promise.all([api.testing.list(),
-          taskId && taskId !== 'new' ? api.testing.get(taskId) : Promise.resolve(null)]);
+        const binding = taskId && taskId !== 'new' ? await readTestingTaskIdentity(taskId) : null;
         if (!active) return;
-        setTasks(list.tasks); setDetails(result); setLocalNotice(list.observation?.message ?? ''); setError(''); setLoaded(true);
-      } catch (failure) { if (active) { setError((failure as Error).message); setLoaded(true); } }
+        const [list, result] = taskId && taskId !== 'new'
+          ? [null, await api.testing.get(taskId, binding ?? undefined)]
+          : [await api.testing.list(), null];
+        if (!active) return;
+        if (list) { setTasks(list.tasks); setLocalNotice(list.observation?.message ?? ''); setIdentityNotice(list.identity_notice ?? ''); }
+        setDetails(result); setError(''); setLoaded(true);
+      } catch (failure) { if (active) { if (taskId && taskId !== 'new') setDetails(null); setError((failure as Error).message); setLoaded(true); } }
       finally { pending = false; }
     }
     setDetails(null); void read();
@@ -53,6 +59,7 @@ export function TestingWorkspace({ taskId, projects, projectId, navigate, prepar
   return <>
     <div className="page-heading"><div><h1>测试任务</h1><p>比较源码或库包，独立查看正确性与性能。</p></div><button className="primary" disabled={!!localNotice} onClick={() => navigate('new')}><Icon name="plus" size={17} />创建测试任务</button></div>
     {localNotice && <p className="notice compact" role="status">{localNotice}</p>}
+    {identityNotice && <p className="notice compact" role="status">{identityNotice}</p>}
     {error && <><Feedback text={error} bad /><button onClick={refresh}>重新读取</button></>}
     {!loaded ? <p role="status" className="loading">正在读取测试任务…</p> : !tasks.length ? <Empty title="直接测试，不必先优化" description="选择源码分支或上传库包，复用测试方案，在同一机器上比较。无需调用模型。" />
       : <Panel title="独立测试" aside={<div className="workflow-filters"><label className="search"><Icon name="search" size={16} /><input aria-label="搜索测试任务" placeholder="搜索函数或任务名称" value={search} onChange={event => setSearch(event.target.value)} /></label>

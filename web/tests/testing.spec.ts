@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Request } from '@playwright/test';
 import { startWebFixture, repositoryRoot } from '../../tests/web-fixture.js';
 import type { CreateTestingTask, TestingAsset, TestingPlanPreview, TestingTaskDetails, TestingTaskRecord } from '../../src/contracts/testing.js';
 import { ApiClient } from '../../src/client/api-client.js';
@@ -30,6 +30,13 @@ function record(input: CreateTestingTask): TestingTaskRecord {
     workspace: { run_root: '/fixture/testing', logs_root: '/fixture/testing/logs', assets_root: '/fixture/testing/assets', runtime_root: '/fixture/testing/runtime' },
     execution: { status: 'SUCCEEDED', phase: 'FINISHED', message: null, cancel_requested: false, submission_attempted: true, failure: null }, created_at: '2026-11-04T00:00:00Z', updated_at: '2026-11-04T00:00:01Z', formal_evidence: false };
 }
+function createdRecord(request: Request): TestingTaskRecord {
+  const task = record(request.postDataJSON());
+  const identity = new URL(request.url()).pathname.match(/\/control-identities\/([^/]+)\/([^/]+)\/testing-tasks$/);
+  task.request_id = request.headers()['idempotency-key'];
+  if (identity) task.request_control_identity = { database_id: identity[1], data_root_id: identity[2] };
+  return task;
+}
 function details(task: TestingTaskRecord): TestingTaskDetails {
   return { task, status: null, formal_evidence: false, commands: [], measurements: [], output: null,
     summary: { correctness: { status: task.input.mode === 'performance' ? 'NOT_REQUESTED' : 'FAILED', planned: 1, passed: 0, failed: task.input.mode === 'performance' ? 0 : 1, missing: [], invalid: [] },
@@ -55,11 +62,11 @@ async function mockTesting(page: Page) {
     else if (request.method() === 'POST') await route.fulfill({ json: { asset: { ...asset('library-upload', request.postDataJSON().name), state: 'UPLOADING' } } });
     else await route.fulfill({ json: { assets: libraries } });
   });
-  await page.route('**/v1/testing-tasks**', async route => {
+  await page.route('**/testing-tasks**', async route => {
     const request = route.request(), url = new URL(request.url());
     if (url.pathname.endsWith('/cancel')) { current!.execution.cancel_requested = true; await route.fulfill({ json: details(current!) }); }
-    else if (request.method() === 'POST') { submissions.push(request.postDataJSON()); requestIds.push(request.headers()['idempotency-key']); current = record(request.postDataJSON()); await route.fulfill({ status: 202, json: { task: current } }); }
-    else if (url.pathname === '/v1/testing-tasks') await route.fulfill({ json: { tasks: current ? [current] : [] } });
+    else if (request.method() === 'POST') { submissions.push(request.postDataJSON()); requestIds.push(request.headers()['idempotency-key']); current = createdRecord(request); await route.fulfill({ status: 202, json: { task: current } }); }
+    else if (url.pathname.endsWith('/testing-tasks')) await route.fulfill({ json: { tasks: current ? [current] : [] } });
     else await route.fulfill({ json: details(current!) });
   });
   return { libraries, submissions, requestIds, uploads, current: () => current };
@@ -98,7 +105,7 @@ test('a dropped HTTP response is reconciled with the actual testing service afte
   const keys: string[] = [];
   try {
     await mockRealTestingChoices(page, testing.machine);
-    await page.route('**/v1/testing-tasks', async route => {
+    await page.route('**/testing-tasks', async route => {
       if (route.request().method() !== 'POST') return route.fallback();
       keys.push(route.request().headers()['idempotency-key']);
       expect((await route.fetch()).status()).toBe(202); await route.abort('failed');
@@ -125,7 +132,7 @@ test('temporary browser storage failure after creation keeps the original reques
   const keys: string[] = [];
   try {
     await mockRealTestingChoices(page, testing.machine);
-    await page.route('**/v1/testing-tasks', async route => {
+    await page.route('**/testing-tasks', async route => {
       if (route.request().method() !== 'POST') return route.fallback();
       keys.push(route.request().headers()['idempotency-key']);
       const response = await route.fetch(); expect(response.status()).toBe(202);
@@ -155,7 +162,7 @@ test('a second tab can fence an in-flight creation without cancelling or duplica
   const sent = new Promise<void>(resolve => { markSent = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
   try {
     await mockRealTestingChoices(page, testing.machine); await mockRealTestingChoices(second, testing.machine);
-    await page.route('**/v1/testing-tasks', async route => {
+    await page.route('**/testing-tasks', async route => {
       if (route.request().method() !== 'POST') return route.fallback();
       keys.push(route.request().headers()['idempotency-key']); markSent(); await gate;
       const response = await route.fetch(); expect(response.status()).toBe(409); await route.fulfill({ response });
@@ -184,13 +191,13 @@ test('a second tab can fence an in-flight creation without cancelling or duplica
 test('a lost creation response survives reload and opens the original request', async ({ page }) => {
   await mockTesting(page); await login(page);
   let saved: TestingTaskRecord | null = null; const posts: string[] = [], checks: string[] = [];
-  await page.route('**/v1/testing-tasks', async route => {
+  await page.route('**/testing-tasks', async route => {
     if (route.request().method() !== 'POST') return route.fallback();
-    posts.push(route.request().headers()['idempotency-key']); saved = record(route.request().postDataJSON());
+    posts.push(route.request().headers()['idempotency-key']); saved = createdRecord(route.request());
     await route.abort('failed');
   });
-  await page.route('**/v1/testing-tasks/**', route => route.fulfill({ json: details(saved!) }));
-  await page.route('**/v1/testing-requests', route => { checks.push(route.request().headers()['idempotency-key']);
+  await page.route('**/testing-tasks/**', route => route.fulfill({ json: details(saved!) }));
+  await page.route('**/testing-requests', route => { checks.push(route.request().headers()['idempotency-key']);
     return route.fulfill({ json: { state: 'CREATED', task_id: saved!.task_id } }); });
   await page.goto(fixture.url + '/#/testing/new');
   let composer = await fillLibraryComparison(page);
@@ -206,8 +213,8 @@ test('a lost creation response survives reload and opens the original request', 
     open.onsuccess = () => { const database = open.result, request = database.transaction('pending').objectStore('pending').get('active');
       request.onsuccess = () => { database.close(); resolve(request.result); }; request.onerror = () => reject(request.error); };
   }));
-  expect(stored).toBe(posts[0]);
-  expect(stored).toMatch(/^[a-f0-9-]{36}$/);
+  expect(stored).toMatchObject({ version: 2, id: posts[0], identity: fixture.controlIdentity.current() });
+  expect(posts[0]).toMatch(/^[a-f0-9-]{36}$/);
   await composer.getByRole('button', { name: '核对原请求' }).click();
   await expect(page.getByLabel('测试结果')).toBeVisible();
   expect(checks).toEqual(posts); expect(posts).toHaveLength(1);
@@ -216,13 +223,13 @@ test('a lost creation response survives reload and opens the original request', 
 for (const closeState of ['CLOSED', 'CREATED'] as const) test(`an absent request is not replaced until atomic close reports ${closeState}`, async ({ page }) => {
   await mockTesting(page); await login(page);
   const posts: string[] = [], checks: string[] = [], closes: string[] = []; let saved: TestingTaskRecord | null = null;
-  await page.route('**/v1/testing-tasks', async route => {
+  await page.route('**/testing-tasks', async route => {
     if (route.request().method() !== 'POST') return route.fallback();
-    posts.push(route.request().headers()['idempotency-key']); saved = record(route.request().postDataJSON());
+    posts.push(route.request().headers()['idempotency-key']); saved = createdRecord(route.request());
     if (posts.length === 1) await route.abort('failed'); else await route.fulfill({ status: 202, json: { task: saved } });
   });
-  await page.route('**/v1/testing-tasks/**', route => route.fulfill({ json: details(saved!) }));
-  await page.route('**/v1/testing-requests**', route => {
+  await page.route('**/testing-tasks/**', route => route.fulfill({ json: details(saved!) }));
+  await page.route('**/testing-requests**', route => {
     const id = route.request().headers()['idempotency-key'];
     if (route.request().method() === 'GET') { checks.push(id); return route.fulfill({ json: { state: 'NOT_FOUND' } }); }
     closes.push(id); return route.fulfill({ json: closeState === 'CREATED' ? { state: 'CREATED', task_id: saved!.task_id } : { state: 'CLOSED' } });
@@ -255,7 +262,7 @@ for (const channelAvailable of [true, false]) test(`two tabs reserve one pending
   await mockTesting(page); await login(page);
   const second = await page.context().newPage(); await mockTesting(second);
   const posts: string[] = [];
-  for (const tab of [page, second]) await tab.route('**/v1/testing-tasks', async route => {
+  for (const tab of [page, second]) await tab.route('**/testing-tasks', async route => {
     if (route.request().method() !== 'POST') return route.fallback();
     posts.push(route.request().headers()['idempotency-key']); await route.abort('failed');
   });
@@ -290,7 +297,7 @@ test('historical testing results show unchecked library identity without claimin
   result.summary.performance = { ...result.summary.performance, status: 'UNVERIFIED', speedup: null, interval: null };
   result.summary.comparisons[0] = { ...result.summary.comparisons[0], conclusion: 'UNVERIFIED', baseline_median: null, candidate_median: null, speedup: null, interval: null };
   result.summary.provenance_issues = ['部分历史测量缺少有效的 Runner 库路径核对，原始记录已保留；请升级 Runner 并创建新测试。'];
-  await page.route('**/v1/testing-tasks/**', route => route.fulfill({ json: result }));
+  await page.route('**/testing-tasks/**', route => route.fulfill({ json: result }));
   await login(page);
   await page.goto(fixture.url + '/#/testing/' + encodeURIComponent(task.task_id));
   await expect(page.getByLabel('测试结果')).toContainText('身份待核对');

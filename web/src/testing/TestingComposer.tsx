@@ -5,7 +5,7 @@ import type { TestingAsset, TestingMode, TestingPlanPreview, TestingPlanRef } fr
 import type { CatalogItem } from '../Configuration';
 import type { CandidateTestingContext } from '../SourceOptimizationWorkbench';
 import { api } from '../api';
-import { Disclosure, Feedback, Field, Icon, Modal } from '../components';
+import { CopyValue, Disclosure, Feedback, Field, Icon, Modal } from '../components';
 import { TestingSubjectPicker } from './TestingSubjectPicker';
 import { TestingAssetUpload } from './TestingAssetUpload';
 import { TestingConditions } from './TestingConditions';
@@ -60,25 +60,30 @@ export function TestingComposer({ projects, catalog, machines, assets, projectId
       const input = { name: form.name.trim() || `${plan.function_name} 测试`, machine_id: form.machineId, plan: plan.ref,
         expected_evaluator_digest: plan.evaluator.digest, expected_package_digest: plan.package_digest,
         candidate: testingSubject(form.candidate), ...(compare ? { baseline: testingSubject(form.baseline) } : {}), mode: form.mode };
-      const requestId = await pending.begin();
-      const result = await api.testing.start(input, requestId);
-      await pending.clear(requestId);
+      let identity: Awaited<ReturnType<typeof api.getControlIdentity>>;
+      try { identity = await api.getControlIdentity(); }
+      catch (failure) { throw new Error('无法核对控制端身份，请检查服务版本和数据目录。' + (failure as Error).message); }
+      const requestId = await pending.begin(identity);
+      const result = await api.testing.start(input, requestId, identity);
+      if (result.task.request_id !== requestId || result.task.request_control_identity?.database_id !== identity.database_id ||
+          result.task.request_control_identity?.data_root_id !== identity.data_root_id) throw new Error('测试回执与原请求或控制端身份不一致，请先核对原请求。');
+      await pending.complete(requestId, identity, result.task.task_id);
       try { sessionStorage.removeItem(storageKey); } catch { /* Optional browser draft. */ }
       created(result.task.task_id);
     } catch (failure) { setError((failure as Error).message); }
     finally { setBusy(false); }
   }
   async function reconcile(closeRequest: boolean) {
-    if (!pending.id) return;
-    const id = pending.id; setBusy(true); setError(''); setRequestMessage('');
+    if (!pending.id || !pending.identity) return;
+    const id = pending.id, identity = pending.identity; setBusy(true); setError(''); setRequestMessage('');
     try {
-      const result = closeRequest ? await api.testing.closeRequest(id) : await api.testing.requestStatus(id);
+      const result = closeRequest ? await api.testing.closeRequest(id, identity) : await api.testing.requestStatus(id, identity);
       if (result.state === 'CREATED') {
-        await pending.clear(id);
+        await pending.complete(id, identity, result.task_id);
         try { sessionStorage.removeItem(storageKey); } catch { /* Optional browser draft. */ }
         created(result.task_id);
       } else if (result.state === 'CLOSED') {
-        const remaining = await pending.clear(id);
+        const remaining = await pending.clear(id, identity);
         setRequestMessage(remaining ? '原请求已关闭；另一个页面还有待核对的请求，请先核对。' : '原请求已关闭，可以调整条件后创建新测试。');
       } else setRequestMessage('服务端暂未找到原请求，它仍可能在途中。请关闭未创建的请求后再创建新测试。');
     } catch (failure) { setError((failure as Error).message); }
@@ -90,9 +95,11 @@ export function TestingComposer({ projects, catalog, machines, assets, projectId
         {pending.loading && <p role="status" className="hint">正在核对浏览器中的创建请求…</p>}
         {pending.error && <Feedback text={pending.error} bad />}
         {pending.id && <div className="notice compact" role="status"><strong>上次测试创建请求尚未确认</strong>
-          <p>刷新或离开页面不会重新提交。请先核对原请求；关闭只会阻止尚未创建的请求，不会取消已有测试。</p>
-          <div className="actions"><button type="button" disabled={busy} onClick={() => void reconcile(false)}>核对原请求</button>
-            <button type="button" disabled={busy} onClick={() => void reconcile(true)}>关闭未创建的请求</button></div>
+          {pending.identity ? <><p>刷新或离开页面不会重新提交。请先核对原请求；关闭只会阻止尚未创建的请求，不会取消已有测试。</p>
+            <div className="actions"><button type="button" disabled={busy} onClick={() => void reconcile(false)}>核对原请求</button>
+              <button type="button" disabled={busy} onClick={() => void reconcile(true)}>关闭未创建的请求</button></div></>
+            : <><p>此请求没有记录原控制端身份，不能自动查询、关闭或清除。请维护者核对原数据库、数据目录和任务。</p>
+              <p>请求标识：<CopyValue value={pending.id} label="请求标识" /></p></>}
         </div>}
         {requestMessage && <Feedback text={requestMessage} />}
         <fieldset disabled={busy || pending.loading || !!pending.id} className="config-fields">

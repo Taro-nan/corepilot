@@ -5,8 +5,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
 import { ApiError } from '../core/api-error.js';
 import type { TestingAsset, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
+import { isControlIdentity, type ControlIdentity } from '../contracts/control-identity.js';
 
-interface ClosedTestingRequest { schema_version: 1; kind: 'CLOSED_TESTING_REQUEST'; task_id: string; request_key_digest: string }
+interface ClosedTestingRequest { schema_version: 1; kind: 'CLOSED_TESTING_REQUEST'; task_id: string; request_key_digest: string; request_control_identity?: ControlIdentity }
 type RequestDecision = { state: 'NOT_FOUND' } | { state: 'CLOSED' } | { state: 'CREATED'; task: TestingTaskRecord };
 
 export function testingRequestIdentity(requestId: string): { keyDigest: string; taskId: string } {
@@ -19,6 +20,16 @@ export function testingRequestIdentity(requestId: string): { keyDigest: string; 
 
 function closed(record: TestingTaskRecord | ClosedTestingRequest): record is ClosedTestingRequest {
   return 'kind' in record && record.kind === 'CLOSED_TESTING_REQUEST';
+}
+
+/** Historical requests have no identity and cannot be attributed to a Control retroactively. */
+export function requireTestingRequestControl(record: TestingTaskRecord | ClosedTestingRequest, expected?: ControlIdentity): void {
+  if (!expected) return;
+  const actual = record.request_control_identity;
+  if (!isControlIdentity(actual)) throw new ApiError(409, 'TESTING_REQUEST_CONTROL_UNKNOWN', '原测试请求没有可核验的控制端身份，请维护者核对原记录。');
+  if (actual.database_id !== expected.database_id || actual.data_root_id !== expected.data_root_id) {
+    throw new ApiError(409, 'TESTING_REQUEST_CONTROL_MISMATCH', '测试请求属于另一控制端数据库或数据目录，请恢复原控制端后核对。');
+  }
 }
 
 /** Independent test facts never overwrite project configuration or optimization evidence. */
@@ -118,7 +129,7 @@ export class TestingStore {
         if (record.task_id !== `testing:${id}`) throw new Error('testing task identity mismatch');
         return [record]; }).sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
-  requestDecision(requestId: string): RequestDecision {
+  requestDecision(requestId: string, expectedControl?: ControlIdentity): RequestDecision {
     const identity = testingRequestIdentity(requestId);
     const filename = path.join(this.taskRoot(identity.taskId), 'task.json');
     const gate = fs.existsSync(filename) ? this.read<TestingTaskRecord | ClosedTestingRequest>(filename) : null;
@@ -129,9 +140,9 @@ export class TestingStore {
     if (matches.length > 1 || gate && closed(gate) && matches.length) {
       throw new ApiError(409, 'TESTING_REQUEST_AMBIGUOUS', '同一请求标识对应多条历史记录，请维护者核对；原记录均已保留。');
     }
-    if (gate && closed(gate)) return { state: 'CLOSED' };
-    if (matches.length === 1) return { state: 'CREATED', task: matches[0] };
-    if (gate) return { state: 'CREATED', task: gate as TestingTaskRecord };
+    if (gate && closed(gate)) { requireTestingRequestControl(gate, expectedControl); return { state: 'CLOSED' }; }
+    if (matches.length === 1) { requireTestingRequestControl(matches[0], expectedControl); return { state: 'CREATED', task: matches[0] }; }
+    if (gate) { requireTestingRequestControl(gate, expectedControl); return { state: 'CREATED', task: gate as TestingTaskRecord }; }
     return { state: 'NOT_FOUND' };
   }
   private publishRequestDecision(filename: string, value: TestingTaskRecord | ClosedTestingRequest): boolean {
@@ -153,18 +164,19 @@ export class TestingStore {
     if (!task.request_id) throw new Error('a testing request key is required');
     const identity = testingRequestIdentity(task.request_id);
     if (task.task_id !== identity.taskId) throw new Error('testing request task identity mismatch');
-    const prior = this.requestDecision(task.request_id);
+    const prior = this.requestDecision(task.request_id, task.request_control_identity);
     if (prior.state !== 'NOT_FOUND') return { created: false, decision: prior };
     const created = this.publishRequestDecision(path.join(this.taskRoot(task.task_id), 'task.json'), task);
-    return { created, decision: this.requestDecision(task.request_id) };
+    return { created, decision: this.requestDecision(task.request_id, task.request_control_identity) };
   }
-  closeRequest(requestId: string): RequestDecision {
+  closeRequest(requestId: string, expectedControl?: ControlIdentity): RequestDecision {
     const identity = testingRequestIdentity(requestId);
-    const prior = this.requestDecision(requestId);
+    const prior = this.requestDecision(requestId, expectedControl);
     if (prior.state !== 'NOT_FOUND') return prior;
-    const marker: ClosedTestingRequest = { schema_version: 1, kind: 'CLOSED_TESTING_REQUEST', task_id: identity.taskId, request_key_digest: identity.keyDigest };
+    const marker: ClosedTestingRequest = { schema_version: 1, kind: 'CLOSED_TESTING_REQUEST', task_id: identity.taskId, request_key_digest: identity.keyDigest,
+      ...(expectedControl ? { request_control_identity: expectedControl } : {}) };
     this.publishRequestDecision(path.join(this.taskRoot(identity.taskId), 'task.json'), marker);
-    return this.requestDecision(requestId);
+    return this.requestDecision(requestId, expectedControl);
   }
   asset(id: string): TestingAsset {
     const record = this.read<TestingAsset>(path.join(this.assetRoot(id), 'asset.json'));

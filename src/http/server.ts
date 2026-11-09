@@ -121,11 +121,14 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
     const [, databaseId, dataRootId, suffix] = protectedPath;
     const allowed = method === 'POST' && suffix === '/workflows'
       || method === 'GET' && /^\/workflow-requests\/[^/]+$/.test(suffix)
-      || method === 'POST' && /^\/workflow-requests\/[^/]+\/close$/.test(suffix);
+      || method === 'POST' && /^\/workflow-requests\/[^/]+\/close$/.test(suffix)
+      || method === 'POST' && ['/testing-tasks', '/testing-requests/close'].includes(suffix)
+      || method === 'GET' && (suffix === '/testing-requests' || /^\/testing-tasks\/[^/]+$/.test(suffix));
     if (!allowed) throw new ApiError(404, 'NOT_FOUND', '此身份保护路径不可用。');
     expectedControl = { databaseId, dataRootId };
     requireControlIdentity(options, databaseId, dataRootId);
     pathname = '/v1' + suffix;
+    url.pathname = pathname;
   }
 
   if (method === 'GET' && pathname === '/v1/health') {
@@ -177,7 +180,10 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
     } catch (error) { throw intakeError(error); }
     return;
   }
-  if (options.testingService && await testingRoutes(req, res, url, options.testingService, () => host.assertExecutionOwnership())) return;
+  const testingControl = expectedControl ? { database_id: expectedControl.databaseId, data_root_id: expectedControl.dataRootId } : undefined;
+  if (options.testingService && await testingRoutes(req, res, url, options.testingService, () => host.assertExecutionOwnership(), testingControl,
+    () => { if (expectedControl) requireControlIdentity(options, expectedControl.databaseId, expectedControl.dataRootId); },
+    () => currentControlIdentity(options))) return;
   if (options.projectService) {
     try {
       if (await machineRoutes(req, res, url, options.projectService.machines)) return;

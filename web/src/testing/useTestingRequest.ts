@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { clearTestingRequest, readTestingRequest, reserveTestingRequest, testingRequestChannel } from './testing-request-storage';
+import type { ControlIdentity } from '../../../src/contracts/control-identity';
+import { clearTestingRequest, completeTestingRequest, readTestingRequest, reserveTestingRequest, testingRequestChannel } from './testing-request-storage';
 
-interface State { loading: boolean; id: string | null; error: string | null }
+interface State { loading: boolean; id: string | null; identity: ControlIdentity | null; error: string | null }
 
-/** Only the opaque request ID is durable; drafts remain in session storage. */
+/** Request and task identities are durable; drafts remain in session storage. */
 export function useTestingRequest() {
-  const [state, setState] = useState<State>({ loading: true, id: null, error: null });
+  const [state, setState] = useState<State>({ loading: true, id: null, identity: null, error: null });
   const mounted = useRef(false);
   async function refresh() {
-    try { const value = await readTestingRequest(); if (mounted.current) setState({ loading: false, id: value.id, error: null }); }
-    catch (error) { if (mounted.current) setState({ loading: false, id: null, error: (error as Error).message }); }
+    try { const value = await readTestingRequest(); if (mounted.current) setState({ loading: false, id: value.pending?.id ?? null, identity: value.pending?.identity ?? null, error: null }); }
+    catch (error) { if (mounted.current) setState({ loading: false, id: null, identity: null, error: (error as Error).message }); }
   }
   useEffect(() => {
     mounted.current = true; void refresh();
@@ -20,16 +21,20 @@ export function useTestingRequest() {
     const focused = () => { void refresh(); }; window.addEventListener('focus', focused);
     return () => { mounted.current = false; channel?.close(); window.removeEventListener('focus', focused); };
   }, []);
-  async function begin(): Promise<string> {
-    const value = await reserveTestingRequest();
-    if (mounted.current) setState({ loading: false, id: value.id, error: null });
-    if (!value.reserved || !value.id) throw new Error('上次测试创建请求尚未确认，请先核对或关闭未创建的请求。');
-    return value.id;
+  async function begin(identity: ControlIdentity): Promise<string> {
+    const value = await reserveTestingRequest(identity);
+    if (mounted.current) setState({ loading: false, id: value.pending?.id ?? null, identity: value.pending?.identity ?? null, error: null });
+    if (!value.reserved || !value.pending) throw new Error('上次测试创建请求尚未确认，请先核对或关闭未创建的请求。');
+    return value.pending.id;
   }
-  async function clear(id: string) {
-    const value = await clearTestingRequest(id);
-    if (mounted.current) setState({ loading: false, id: value.id, error: null });
-    return value.id;
+  async function clear(id: string, identity: ControlIdentity) {
+    const value = await clearTestingRequest(id, identity);
+    if (mounted.current) setState({ loading: false, id: value.pending?.id ?? null, identity: value.pending?.identity ?? null, error: null });
+    return value.pending?.id ?? null;
   }
-  return { ...state, begin, clear, refresh };
+  async function complete(id: string, identity: ControlIdentity, taskId: string) {
+    const value = await completeTestingRequest(id, identity, taskId);
+    if (mounted.current) setState({ loading: false, id: value.pending?.id ?? null, identity: value.pending?.identity ?? null, error: null });
+  }
+  return { ...state, begin, clear, complete, refresh };
 }

@@ -4,6 +4,7 @@ import type { ValidationTestPlan } from './validation-assets.js';
 import type { ValidationCommand } from './validation-testpack.js';
 import type { FormalCaseDefinition, FormalWorkloadDefinition } from './formal-evaluator.js';
 import type { ConfidenceInterval } from './performance-statistics.js';
+import type { ControlIdentity } from './control-identity.js';
 
 export type TestingMode = 'correctness' | 'performance' | 'both';
 export type TestingSubject =
@@ -69,6 +70,8 @@ export interface TestingTaskRecord {
   name: string;
   request_id: string | null;
   request_digest: string;
+  /** Present for requests created with a fixed Control identity; absent on older records. */
+  request_control_identity?: ControlIdentity;
   input: CreateTestingTask;
   plan: TestingPlanPreview;
   machine: { machine_id: string; name: string; revision: number; connection_key: string;

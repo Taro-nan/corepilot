@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { CreateTestingTask, TestingPlanRef, TestingPlanPreview, TestingRequestStatus, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
 import type { ResolvedExecutionMachine } from '../contracts/execution-machine.js';
+import type { ControlIdentity } from '../contracts/control-identity.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { TargetConfig } from '../config/target-config.js';
 import type { RemoteValidationTransport } from '../workspace/validation-runner.js';
@@ -13,7 +14,7 @@ import { resolveRunnerConfig } from '../config/optimization-config.js';
 import { AsyncSshTransport } from '../testpack/remote-transport.js';
 import { LibraryPackageLoader } from '../library-package/loader.js';
 import { stageAndInspectBaselineBundle } from '../workspace/baseline-bundle-staging.js';
-import { testingRequestIdentity, TestingStore } from '../storage/testing-store.js';
+import { requireTestingRequestControl, testingRequestIdentity, TestingStore } from '../storage/testing-store.js';
 import { TestingAssetService } from './testing-assets.js';
 import { previewTestingPlan } from './testing-plan.js';
 import { parseTestingInput, testingRequestDigest } from './testing-input.js';
@@ -74,15 +75,15 @@ export class TestingService {
     try { const runner = machine && resolveRunnerConfig({ runner: machine.runner }); if (runner?.mode === 'rpc' && runner.token) message = message.split(runner.token).join('[redacted]'); } catch { /* Preserve the original diagnostic. */ }
     return message.slice(0, 6000);
   }
-  requestStatus(requestId: string): TestingRequestStatus {
-    const decision = this.store.requestDecision(requestId);
+  requestStatus(requestId: string, controlIdentity?: ControlIdentity): TestingRequestStatus {
+    const decision = this.store.requestDecision(requestId, controlIdentity);
     return decision.state === 'CREATED' ? { state: 'CREATED', task_id: decision.task.task_id } : { state: decision.state };
   }
-  closeRequest(requestId: string): TestingRequestStatus {
-    const decision = this.store.closeRequest(requestId);
+  closeRequest(requestId: string, controlIdentity?: ControlIdentity): TestingRequestStatus {
+    const decision = this.store.closeRequest(requestId, controlIdentity);
     return decision.state === 'CREATED' ? { state: 'CREATED', task_id: decision.task.task_id } : { state: decision.state };
   }
-  async start(value: CreateTestingTask, options: { requestId?: string } = {}): Promise<TestingTaskRecord> {
+  async start(value: CreateTestingTask, options: { requestId?: string; controlIdentity?: ControlIdentity } = {}): Promise<TestingTaskRecord> {
     const input = parseTestingInput(value), digest = testingRequestDigest(input);
     const requestId = options.requestId ?? null;
     const identity = requestId === null ? null : testingRequestIdentity(requestId);
@@ -92,7 +93,7 @@ export class TestingService {
       if (decision.task.request_digest !== digest) throw new ApiError(409, 'TESTING_REQUEST_CONFLICT', '同一请求标识已用于其他测试条件，请核对原请求。');
       return this.localRecord(decision.task);
     };
-    const existing = requestId === null ? null : previous(this.store.requestDecision(requestId));
+    const existing = requestId === null ? null : previous(this.store.requestDecision(requestId, options.controlIdentity));
     if (existing) return existing;
     let resolved: ReturnType<LibraryPackageLoader['resolveSelection']>;
     let preview: TestingPlanPreview;
@@ -114,7 +115,7 @@ export class TestingService {
     const taskId = identity?.taskId ?? `testing:${randomUUID()}`, label = (input.name ?? preview.function_name).replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 48) || 'test';
     const run = path.posix.join(workspaceRoot, 'testing', `${createdAt.replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}-${label}-${taskId.slice(-8)}`);
     const task: TestingTaskRecord = { schema_version: 1, task_id: taskId, name: input.name ?? `${preview.function_name} 测试`, request_id: requestId,
-      request_digest: digest, input, plan: preview, machine: { ...machine.identity, connection_key: testingConnectionKey(machine), runner_id: null, hardware: null },
+      request_digest: digest, ...(options.controlIdentity ? { request_control_identity: options.controlIdentity } : {}), input, plan: preview, machine: { ...machine.identity, connection_key: testingConnectionKey(machine), runner_id: null, hardware: null },
       subjects: { candidate: null, baseline: null }, workspace: { run_root: run, logs_root: path.posix.join(run, 'logs'),
         assets_root: path.posix.join(run, 'development', 'assets'), runtime_root: path.posix.join(run, 'development', 'runtime') },
       execution: { status: 'PREPARING', phase: 'SNAPSHOTTING', message: '正在固定测试方案与两端版本', cancel_requested: false, submission_attempted: false, failure: null },
@@ -167,10 +168,20 @@ export class TestingService {
   list(): TestingTaskRecord[] { return this.store.tasks().map(task => this.localRecord(task)); }
   /** Read saved facts without contacting Runner or mutating the task. */
   localDetails(taskId: string): TestingTaskDetails { return this.details(this.localRecord(this.store.task(taskId))); }
+  assertRequestControl(taskId: string, expected: ControlIdentity | undefined, current: () => ControlIdentity): void {
+    const task = this.store.task(taskId);
+    if (expected) requireTestingRequestControl(task, expected);
+    else if ('request_control_identity' in task) requireTestingRequestControl(task, current());
+  }
+  canReconcile(task: TestingTaskRecord, current?: ControlIdentity): boolean {
+    if (!('request_control_identity' in task)) return true;
+    if (!current) return false;
+    try { requireTestingRequestControl(task, current); return true; } catch { return false; }
+  }
   /** Refresh persisted list projections without holding the browser request open. */
-  refreshActive(): void {
+  refreshActive(allowed: (task: TestingTaskRecord) => boolean = () => true): void {
     if (this.refreshing) return;
-    const ids = this.store.tasks().filter(task => task.execution.submission_attempted && !terminal.has(task.execution.status)).map(task => task.task_id);
+    const ids = this.store.tasks().filter(task => allowed(task) && task.execution.submission_attempted && !terminal.has(task.execution.status)).map(task => task.task_id);
     this.refreshing = (async () => {
       for (let offset = 0; offset < ids.length; offset += 4) await Promise.allSettled(ids.slice(offset, offset + 4).map(id => this.get(id)));
     })().finally(() => { this.refreshing = null; });

@@ -41,7 +41,7 @@ function initializeDataIdentity(filename: string): string {
   }
 }
 
-/** Identity applies to optimization request intake, not Runner or artifact contents. */
+/** Control identity is independent of Runner and artifact identities. */
 export class ControlIdentityGuard {
   private constructor(private readonly db: IdentityDatabase, private readonly marker: string, private readonly initial: ControlIdentity | null) {}
 

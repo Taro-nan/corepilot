@@ -4,6 +4,7 @@ import type { ProjectRecord } from '../contracts/project.js';
 import type { OptimizationSessionBudget, OptimizationSessionEvents } from '../contracts/optimization-session.js';
 import type { OptimizationIntakeStatus } from '../contracts/optimization-intake.js';
 import { CONTROL_GUARD_HEADER, isControlIdentity, type ControlIdentity } from '../contracts/control-identity.js';
+import { controlRoute } from './control-identity-route.js';
 import { TestingClient } from './testing-client.js';
 
 export class ApiClientError extends Error {
@@ -20,11 +21,6 @@ export class ApiClientError extends Error {
 
 interface ApiErrorBody {
   error?: { code?: string; message?: string; details?: Record<string, unknown> };
-}
-
-function controlRoute(identity: ControlIdentity, path: string): string {
-  if (!isControlIdentity(identity)) throw new Error('原请求缺少可核验的控制端身份，请联系维护者核对。');
-  return `/v1/control-identities/${identity.database_id}/${identity.data_root_id}${path}`;
 }
 
 export class ApiClient {

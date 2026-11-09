@@ -1,6 +1,7 @@
 import type http from 'node:http';
 import type { TestingService } from '../application/testing-service.js';
 import type { CreateTestingTask, TestingPlanRef } from '../contracts/testing.js';
+import type { ControlIdentity } from '../contracts/control-identity.js';
 import { ApiError } from '../core/api-error.js';
 import { readJson, sendJson } from './json.js';
 
@@ -12,7 +13,9 @@ function requestKey(req: http.IncomingMessage): string | undefined {
 }
 
 /** Authentication belongs to ServerAccess; all execution decisions belong to TestingService. */
-export async function testingRoutes(req: http.IncomingMessage, res: http.ServerResponse, url: URL, service: TestingService, assertOwnership: () => void): Promise<boolean> {
+export async function testingRoutes(req: http.IncomingMessage, res: http.ServerResponse, url: URL, service: TestingService,
+  assertOwnership: () => void, controlIdentity?: ControlIdentity, assertControl: () => void = () => {},
+  currentControl: () => ControlIdentity = () => { throw new ApiError(503, 'CONTROL_IDENTITY_UNAVAILABLE', '控制端身份不可用。'); }): Promise<boolean> {
   if (!url.pathname.startsWith('/v1/testing-')) return false;
   const method = req.method ?? 'GET';
   const localOnly = () => {
@@ -24,28 +27,38 @@ export async function testingRoutes(req: http.IncomingMessage, res: http.ServerR
   };
   if (url.pathname === '/v1/testing-requests' && method === 'GET') {
     const key = requestKey(req); if (key === undefined) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供请求标识。');
-    sendJson(res, 200, service.requestStatus(key)); return true;
+    sendJson(res, 200, service.requestStatus(key, controlIdentity)); return true;
   }
   if (url.pathname === '/v1/testing-requests/close' && method === 'POST') {
     const key = requestKey(req); if (key === undefined) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供请求标识。');
-    await readJson(req); assertOwnership(); sendJson(res, 200, service.closeRequest(key)); return true;
+    await readJson(req); assertControl(); assertOwnership(); sendJson(res, 200, service.closeRequest(key, controlIdentity)); return true;
   }
   if (url.pathname === '/v1/testing-plans/preview' && method === 'POST') {
     sendJson(res, 200, { plan: service.plan(await readJson(req) as unknown as TestingPlanRef) }); return true;
   }
   if (url.pathname === '/v1/testing-tasks') {
-    if (method === 'GET') { const observation = localOnly(); if (!observation) service.refreshActive(); sendJson(res, 200, { tasks: service.list(), ...(observation ? { observation } : {}) }); return true; }
+    if (method === 'GET') {
+      const observation = localOnly(), tasks = service.list();
+      let current: ControlIdentity | undefined;
+      if (!observation && tasks.some(task => 'request_control_identity' in task)) { try { current = currentControl(); } catch { /* Bound tasks remain local when identity cannot be checked. */ } }
+      const canObserve = (task: (typeof tasks)[number]) => service.canReconcile(task, current);
+      const skipped = !observation && tasks.some(task => !canObserve(task));
+      if (!observation) service.refreshActive(canObserve);
+      sendJson(res, 200, { tasks, ...(observation ? { observation } : {}), ...(skipped ? { identity_notice: '部分测试属于其他控制端或身份暂不可核对，列表仅显示其已保存状态。请连接原控制端查看详情。' } : {}) }); return true;
+    }
     if (method === 'POST') {
       const body = await readJson(req);
-      assertOwnership();
-      const task = await service.start(body as unknown as CreateTestingTask, { requestId: requestKey(req) });
+      assertControl(); assertOwnership();
+      const key = requestKey(req);
+      if (controlIdentity && !key) throw new ApiError(400, 'INVALID_REQUEST_ID', '受保护的测试创建需要请求标识。');
+      const task = await service.start(body as unknown as CreateTestingTask, { requestId: key, controlIdentity });
       sendJson(res, 202, { task }); return true;
     }
   }
   const task = url.pathname.match(/^\/v1\/testing-tasks\/([^/]+)(?:\/(cancel))?$/);
   if (task) {
     const id = decodeURIComponent(task[1]);
-    if (!task[2] && method === 'GET') { const observation = localOnly(); sendJson(res, 200, observation ? { ...service.localDetails(id), observation } : await service.get(id)); return true; }
+    if (!task[2] && method === 'GET') { service.assertRequestControl(id, controlIdentity, currentControl); const observation = localOnly(); sendJson(res, 200, observation ? { ...service.localDetails(id), observation } : await service.get(id)); return true; }
     if (task[2] === 'cancel' && method === 'POST') { await readJson(req); assertOwnership(); sendJson(res, 202, await service.cancel(id)); return true; }
   }
   if (url.pathname === '/v1/testing-assets') {
