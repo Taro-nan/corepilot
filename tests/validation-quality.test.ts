@@ -37,6 +37,21 @@ test('shared review API blocks a self-passing evaluator and stores a version-bou
     r.state.measurements.push(observation as typeof r.state.measurements[number]);
     const foreign = await review(); assert.equal(foreign.state, 'BLOCKED'); assert.equal(foreign.quality?.status, 'PENDING');
     observation.experiment_id = r.trialId;
+    const unverified = await review();
+    assert.equal(unverified.state, 'BLOCKED');
+    assert.ok(unverified.blockers.some(message => message.includes('Runner 库路径核对')));
+    const input = '/fixture/sensitivity/zero.so', fileId = { device: '1', inode: '43' };
+    const resolvedPath = { field: 'resolved_symbol_path', path: input, realpath: input, file_id: { device: '1', inode: '44' } };
+    Object.assign(observation.domain_payload, {
+      artifact_identity: { input_path: input, resolved_symbol_path: input, sha256: 'b'.repeat(64) },
+      runner_artifact_path_check: { planned_path: input, input_realpath: input, input_file_id: fileId,
+        reported_paths: [{ field: 'input_path', path: input, realpath: input, file_id: fileId },
+          resolvedPath] },
+    });
+    const conflicting = await review();
+    assert.equal(conflicting.state, 'BLOCKED');
+    assert.ok(conflicting.blockers.some(message => message.includes('Runner 库路径核对')));
+    resolvedPath.file_id = fileId;
     const ready = await review(); assert.equal(ready.state, 'READY_FOR_REVIEW'); assert.equal(ready.quality?.status, 'PASSED');
     const accepted = await f.projects.validationReview.approve(r.project, r.pkg, r.version, r.target, { expected_digest: ready.evaluator_digest,
       expected_package_digest: ready.package_digest, trial_id: r.trialId, reviewer: 'Fixture owner', confirm: true });

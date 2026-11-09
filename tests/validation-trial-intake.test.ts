@@ -12,6 +12,7 @@ import { RUNNER_PROTOCOL_VERSION } from '../src/contracts/runner-rpc.js';
 import { publishTrialRecord, trialRequestIdentity } from '../src/storage/validation-trial-intake.js';
 import { generatedTestEntrypoint, VALIDATION_PYTHON_HARNESS } from '../src/application/validation-python-harness.js';
 import { startWebFixture, runFixtureCli } from './web-fixture.js';
+import { fixtureRunnerStoreId, guardFixtureRunnerRequest } from './guarded-runner-fixture.js';
 
 test('HTTP trial intake survives concurrent requests, restart, mutable defaults and a close race', async () => {
   const f = await startWebFixture();
@@ -19,11 +20,12 @@ test('HTTP trial intake survives concurrent requests, restart, mutable defaults 
   let probeGate: Promise<void> | null = new Promise<void>(resolve => { release = resolve; });
   let healthRequests = 0, submissions = 0, cancels = 0;
   const runner = http.createServer((req, res) => {
+    if (!guardFixtureRunnerRequest(req, res)) return;
     const url = new URL(req.url ?? '/', 'http://runner'); res.setHeader('content-type', 'application/json');
     if (url.pathname === '/health') {
       healthRequests++;
       void (async () => { await probeGate; res.end(JSON.stringify({ runner_id: 'intake-runner', protocol_version: RUNNER_PROTOCOL_VERSION,
-        status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, source_archive_upload: 1 } })); })();
+        store_instance_id: fixtureRunnerStoreId, status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, source_archive_upload: 1, store_identity_guard: 1, artifact_path_check: 1 } })); })();
     } else if (url.pathname === '/machine') res.end(JSON.stringify({ hostname: 'fixture', architecture: 'x64', cpu_count: 2, machine_identity_sha256: 'a'.repeat(64) }));
     else if (url.pathname === '/source-archives' && req.method === 'PUT') {
       const chunks: Buffer[] = []; req.on('data', chunk => chunks.push(Buffer.from(chunk))); req.on('end', () => {
@@ -144,11 +146,17 @@ test('unsupported hard links fail closed without publishing a partial request', 
 });
 
 test('new generated trials validate only the executed APIs, while build-only and existing requests keep their semantics', async () => {
-  const f = await startWebFixture(); let submissions = 0;
+  const f = await startWebFixture(); let submissions = 0, identityGuard = true, artifactPathCheck = true;
   const runner = http.createServer((req, res) => {
+    if (!identityGuard && req.url === '/machine') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ hostname: 'fixture', architecture: 'x64', cpu_count: 2, machine_identity_sha256: 'a'.repeat(64) })); return;
+    }
+    if (!guardFixtureRunnerRequest(req, res)) return;
     const url = new URL(req.url ?? '/', 'http://runner'); res.setHeader('content-type', 'application/json');
     if (url.pathname === '/health') res.end(JSON.stringify({ runner_id: 'generated-fixture', protocol_version: RUNNER_PROTOCOL_VERSION,
-      status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, source_archive_upload: 1 } }));
+      store_instance_id: fixtureRunnerStoreId, status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, source_archive_upload: 1,
+        ...(identityGuard ? { store_identity_guard: 1 } : {}), ...(artifactPathCheck ? { artifact_path_check: 1 } : {}) } }));
     else if (url.pathname === '/machine') res.end(JSON.stringify({ hostname: 'fixture', architecture: 'x64', cpu_count: 2, machine_identity_sha256: 'a'.repeat(64) }));
     else if (url.pathname === '/source-archives' && req.method === 'PUT') {
       const chunks: Buffer[] = []; req.on('data', chunk => chunks.push(Buffer.from(chunk))); req.on('end', () => {
@@ -217,5 +225,15 @@ test('new generated trials validate only the executed APIs, while build-only and
     assert.equal(submissions, 4, 'custom evaluator scripts are not forced to use the generated adapter contract');
     await assert.rejects(api.startProjectTrial(project.project_id, { ...input, mode: 'calibration' }), /重复测量/,
       'custom evaluator inputs are not rejected by the generated API-name assumption');
+    identityGuard = false;
+    await assert.rejects(api.startProjectTrial(project.project_id, { ...input, purpose: 'BASELINE_BUILD' }),
+      (error: unknown) => error instanceof ApiClientError && error.code === 'RUNNER_STORE_IDENTITY_UNAVAILABLE');
+    identityGuard = true; artifactPathCheck = false;
+    await assert.rejects(api.startProjectTrial(project.project_id, input),
+      (error: unknown) => error instanceof ApiClientError && error.code === 'RUNNER_ARTIFACT_PATH_CHECK_UNAVAILABLE');
+    assert.equal(submissions, 4, 'an unsafe new trial is rejected before submitting a plan');
+    await api.startProjectTrial(project.project_id, { ...input, purpose: 'BASELINE_BUILD' });
+    for (let i = 0; i < 200 && submissions < 5; i++) await delay(20);
+    assert.equal(submissions, 5, 'a branch build requires store identity but does not evaluate artifact paths');
   } finally { await f.close(); await new Promise<void>(resolve => runner.close(() => resolve())); }
 });

@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isolatedWorkspaceBuild } from '../src/config/build-command.js';
 import { RUNNER_PROTOCOL_VERSION } from '../src/contracts/runner-rpc.js';
 import type { startWebFixture } from './web-fixture.js';
+import { fixtureRunnerStoreId, guardFixtureRunnerRequest } from './guarded-runner-fixture.js';
 
 /** Deterministic RPC receipts for review UX/identity tests; no hardware or performance claim. */
 export async function prepareReviewFixture(f: Awaited<ReturnType<typeof startWebFixture>>, multiple = false) {
@@ -34,9 +35,10 @@ export async function prepareReviewFixture(f: Awaited<ReturnType<typeof startWeb
       subject_id: 'small', sample_index: index, value: role === 'BASELINE' ? 2 : 1, unit: 'seconds', validity: 'VALID', domain_payload: payload(role) }))),
   ] };
   const runner = http.createServer((req, res) => {
+    if (!guardFixtureRunnerRequest(req, res)) return;
     res.setHeader('content-type', 'application/json');
     if (req.url === '/health') res.end(JSON.stringify({ runner_id: 'review-fixture', protocol_version: RUNNER_PROTOCOL_VERSION,
-      status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1 } }));
+      store_instance_id: fixtureRunnerStoreId, status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, store_identity_guard: 1, artifact_path_check: 1 } }));
     else if (req.url === '/machine') res.end(JSON.stringify(machine));
     else if (req.url?.endsWith('/commands')) res.end(JSON.stringify({ command_executions: ['BUILD', 'EVALUATOR_SETUP', 'CORRECTNESS', ...Array(4).fill('PERFORMANCE')].map((step, sequence) => ({
       step, sequence, command: 'fixture-test', args: [], exit_code: 0, stdout: '', stderr: '', duration_ms: 1,
@@ -66,7 +68,7 @@ export async function prepareReviewFixture(f: Awaited<ReturnType<typeof startWeb
     const resolved = f.projects.packageLoader.resolveSelection({ package_id: pkg, package_version: version, target_id: target });
     const record = { schema_version: 1, trial_id: trialId, purpose: 'VALIDATION_DRAFT', project_id: project.project_id,
       package_id: pkg, package_version: version, target_id: target, evaluator_digest: resolved.bundle.content_digest,
-      source_commit: f.git('rev-parse', 'HEAD'), source_branch: 'main', machine_id: null, machine_name: 'Review fixture CPU',
+      source_commit: f.git('rev-parse', 'HEAD'), source_branch: 'main', machine_id: null, machine_name: 'Review fixture CPU', runner_store_instance_id: fixtureRunnerStoreId,
       case_ids: ['kernel-check'], workload_ids: ['small'], artifact_path: '/fixture/libfixture.so', created_at: now,
       mode: 'comparison', test_plan: f.projects.validationAssets.get(project, pkg, version, target).test_plan,
       baseline_digest: sha256, build_definition: isolatedWorkspaceBuild(resolved.build), preparation: { state: 'READY', phase: 'SUBMITTED', message: null } };

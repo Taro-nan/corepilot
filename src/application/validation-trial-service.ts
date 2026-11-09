@@ -12,7 +12,7 @@ import { ApiError } from '../core/api-error.js';
 import { isRunnerSubmissionRejected } from '../core/experiment-execution-backend.js';
 import { isRegisteredRunner } from '../config/runner-config.js';
 import { LibraryPackageLoader } from '../library-package/loader.js';
-import { RunnerClient, RunnerClientError } from '../client/runner-client.js';
+import { RunnerClient, RunnerClientError, requireRunnerArtifactPathCheck, requireRunnerStoreIdentity } from '../client/runner-client.js';
 import { AsyncSshTransport } from '../testpack/remote-transport.js';
 import type { TargetConfig } from '../config/target-config.js';
 import type { RemoteValidationTransport } from '../workspace/validation-runner.js';
@@ -47,6 +47,7 @@ interface TrialRecord {
   source_commit: string;
   source_branch: string | null;
   machine_id: string | null;
+  runner_store_instance_id?: string;
   case_ids: string[];
   workload_ids: string[];
   artifact_path: string;
@@ -227,7 +228,17 @@ export class ValidationTrialService {
     const connection = this.connection(project);
     const client = new RunnerClient({ baseUrl: connection.runner.endpoint, token: connection.runner.token,
       requestTimeoutMs: connection.runner.requestTimeoutMs });
-    const probe = await client.probe();
+    let probe: Awaited<ReturnType<RunnerClient['probe']>>;
+    let runnerStoreInstanceId: string;
+    try {
+      probe = await client.probe();
+      runnerStoreInstanceId = requireRunnerStoreIdentity(probe.health);
+      client.bindStoreIdentity(runnerStoreInstanceId);
+      if (purpose !== 'BASELINE_BUILD') requireRunnerArtifactPathCheck(probe.health);
+    } catch (error) {
+      if (error instanceof RunnerClientError && error.code.startsWith('RUNNER_')) throw new ApiError(409, error.code, error.message);
+      throw error;
+    }
     if (probe.health.capabilities?.source_archive_upload !== 1) throw new Error('请更新执行机器的 Runner：此版本需要支持源码归档上传，在目标机直接解包和构建');
     const testPlan = readValidationTestPlan(resolved.bundle.root, resolved.bundle.manifest, resolved.functionDefinition.api);
     if (mode === 'calibration' && (!testPlan.statistics || testPlan.sampling.sample_count < testPlan.statistics.min_samples)) throw new Error('A/A 校准需要固定统计方案；请在测试条件选择「重复测量」并保存，样本数需满足统计最少样本要求');
@@ -281,13 +292,13 @@ export class ValidationTrialService {
       status: 'PENDING', validity: 'UNKNOWN', failure_category: null, evaluator: { id: resolved.bundle.manifest.evaluator_id,
         version, digest: resolved.bundle.content_digest }, baseline: comparison ? { id: resolved.target.artifacts.baseline.id, digest: binding!.artifactDigest } : { id: 'none' },
       declared_context: { classification: 'DEVELOPMENT_ONLY', purpose,
-        project_id: project.project_id, source_commit: identity.commit, evaluator_digest: resolved.bundle.content_digest,
+        project_id: project.project_id, source_commit: identity.commit, evaluator_digest: resolved.bundle.content_digest, runner_store_instance_id: runnerStoreInstanceId,
         test_plan: testPlan, machine_identity_sha256: probe.machine.machine_identity_sha256, comparison, calibration: mode === 'calibration' ? 'AA_SAME_ARTIFACT' : null,
         project_name: project.name, source_branch: sourceBranch, workspace: layout },
       observed_context: null, evaluation: null, started_at: null, ended_at: null, created_at: now, updated_at: now };
     const record: TrialRecord = { schema_version: 1, trial_id: trialId, purpose, project_id: project.project_id,
       package_id: packageId, package_version: version, target_id: targetId, evaluator_digest: resolved.bundle.content_digest,
-      source_commit: identity.commit, source_branch: sourceBranch, machine_id: connection.machineId,
+      source_commit: identity.commit, source_branch: sourceBranch, machine_id: connection.machineId, runner_store_instance_id: runnerStoreInstanceId,
       case_ids: purpose === 'BASELINE_BUILD' ? [] : cases.map(item => item.case_id),
       workload_ids: purpose === 'BASELINE_BUILD' ? [] : workloads.map(item => item.workload_id),
       artifact_path: artifact, created_at: now, machine_name: connection.machineName ?? probe.machine.hostname,
@@ -348,7 +359,7 @@ export class ValidationTrialService {
           const remoteRoot = path.posix.join(layout.run_root, 'baselines');
           baseline = binding!.bundle && binding!.bundleRoot && binding!.entryPath
             ? await stageVerifiedBinaryBaseline({ bundle: binding!.bundle, bundleRoot: binding!.bundleRoot, entryPath: binding!.entryPath,
-              expectedDigest: binding!.artifactDigest, remoteRoot, target: connection.target, runner: connection.runner })
+              expectedDigest: binding!.artifactDigest, remoteRoot, target: connection.target, runner: { ...connection.runner, storeInstanceId: runnerStoreInstanceId } })
             : await stageRemoteBaseline({ sourceArtifact: baselinePath, sourceLocation: 'control', expectedDigest: binding!.artifactDigest,
               transport, remoteWorkspace: remoteRoot });
         }
@@ -430,6 +441,12 @@ export class ValidationTrialService {
         message: status === 'UNKNOWN' ? 'Control 服务在准备期间中断，请核对原试跑 ID；系统不会自动重复提交。' : preparation.message } },
         commands: [], measurements: [], summary: trialSummary(record, []), passed: false, formal_evidence: false };
     }
+    if (!record.runner_store_instance_id) {
+      return { trial: record, status: { status: 'UNKNOWN', failure: {
+        code: 'RUNNER_STORE_IDENTITY_UNAVAILABLE',
+        message: '历史试跑未记录 Runner 数据库身份，请维护者核对原机器和作业；系统不会自动重复提交。' } },
+        commands: [], measurements: [], summary: trialSummary(record, []), passed: false, formal_evidence: false };
+    }
     let status: Awaited<ReturnType<RunnerClient['getExperiment']>>;
     let commandResult: Awaited<ReturnType<RunnerClient['getCommandExecutions']>>;
     let measurementResult: Awaited<ReturnType<RunnerClient['getMeasurements']>>;
@@ -438,19 +455,26 @@ export class ValidationTrialService {
       const connection = this.connection(project, record.machine_id);
       const client = new RunnerClient({ baseUrl: connection.runner.endpoint, token: connection.runner.token,
         requestTimeoutMs: connection.runner.requestTimeoutMs });
+      client.bindStoreIdentity(record.runner_store_instance_id);
       status = await client.getExperiment(trialId);
       if (status.experiment_id !== trialId) throw new ApiError(409, 'TRIAL_RUNNER_IDENTITY_MISMATCH', 'Runner 返回了其他实验的状态');
       [commandResult, measurementResult, output] = await Promise.all([
         client.getCommandExecutions(trialId), client.getMeasurements(trialId),
-        record.remote_workspace ? client.getExecutionOutput(trialId).catch(() => null) : Promise.resolve(null),
+        record.remote_workspace ? client.getExecutionOutput(trialId).catch(error => {
+          if (error instanceof RunnerClientError && ['RUNNER_STORE_MISMATCH', 'RUNNER_STORE_GUARD_UNAVAILABLE'].includes(error.code)) throw error;
+          return null;
+        }) : Promise.resolve(null),
       ]);
     } catch (error) {
       const rawCode = error instanceof RunnerClientError || error instanceof ApiError ? error.code : '';
       const code = /^[A-Z0-9_]{1,100}$/.test(rawCode) ? rawCode : 'TRIAL_RECONCILIATION_FAILED';
-      const reason = error instanceof RunnerClientError && error.status === 404
-        ? 'Runner 未找到原试跑，不能据此认定未执行；请核对原机器、Runner 和作业 ID。'
-        : code === 'TRIAL_RUNNER_IDENTITY_MISMATCH' ? 'Runner 返回的作业身份不匹配，请核对原机器和 Runner。'
-          : '无法确认 Runner 中原试跑的状态，请检查原机器和作业后继续查询。';
+      const reason = code === 'RUNNER_STORE_MISMATCH' ? '当前 Runner 数据库与原试跑不一致，请恢复原 Runner 后查询。'
+        : code === 'RUNNER_STORE_GUARD_UNAVAILABLE' ? '原 Runner 的数据库身份保护路径不可用，请维护者检查 Runner 版本和代理配置。'
+          : code === 'RUNNER_STORE_IDENTITY_UNAVAILABLE' ? '原试跑的 Runner 数据库身份无效，请维护者核对原作业。'
+            : code === 'TRIAL_RUNNER_IDENTITY_MISMATCH' ? 'Runner 返回的作业身份不匹配，请核对原机器和 Runner。'
+              : error instanceof RunnerClientError && error.status === 404
+                ? 'Runner 未找到原试跑，不能据此认定未执行；请核对原机器、Runner 和作业 ID。'
+                : '无法确认 Runner 中原试跑的状态，请检查原机器和作业后继续查询。';
       return { trial: record, status: { status: 'UNKNOWN', failure: {
         code, message: `${reason}系统不会自动重复提交。` } },
         commands: [], measurements: [], summary: trialSummary(record, []), passed: false, formal_evidence: false };

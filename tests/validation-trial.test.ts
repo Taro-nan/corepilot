@@ -13,6 +13,7 @@ import { RUNNER_PROTOCOL_VERSION } from '../src/contracts/runner-rpc.js';
 import type { ExperimentExecutionPlan } from '../src/contracts/runner-rpc.js';
 import type { ValidationAssetDraft } from '../src/contracts/validation-assets.js';
 import { isolateCmakeBuildCommand, isolatedCmakeArtifact, commandBuild } from '../src/config/build-command.js';
+import { fixtureRunnerStoreId, guardFixtureRunnerRequest } from './guarded-runner-fixture.js';
 
 test('CMake build isolation preserves flags, quoting, subdirectory source roots and separate build trees', () => {
   const command = '# build fixture\ncmake -S. -B"build output" -G "Unix Makefiles" \\\n  \'-DCMAKE_CXX_FLAGS=-O2 -DNAME=cmake -B keep\' && cmake --build "build output" --target kernel -j8\ncmake --install "build output"';
@@ -45,9 +46,10 @@ test('trial returns its ID before staging finishes, recovers via API and freezes
   const isolatedCommand = 'cmake -S "$COREPILOT_SOURCE_ROOT" -B "$COREPILOT_BUILD_ROOT" -DCMAKE_BUILD_TYPE=Release\ncmake --build "$COREPILOT_BUILD_ROOT" -j2';
   const digest = createHash('sha256').update(bytes).digest('hex');
   const runner = http.createServer((req, res) => {
+    if (!guardFixtureRunnerRequest(req, res)) return;
     res.setHeader('content-type', 'application/json');
     if (req.url === '/health') res.end(JSON.stringify({ runner_id: 'trial-fixture', protocol_version: RUNNER_PROTOCOL_VERSION,
-      status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, source_archive_upload: 1 } }));
+      store_instance_id: fixtureRunnerStoreId, status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, source_archive_upload: 1, store_identity_guard: 1, artifact_path_check: 1 } }));
     else if (req.url === '/machine') res.end(JSON.stringify({ hostname: 'fixture', architecture: 'aarch64', cpu_count: 2,
       machine_identity_sha256: 'a'.repeat(64) }));
     else if (req.url?.startsWith('/source-archives?') && req.method === 'PUT') {
@@ -112,11 +114,13 @@ test('trial returns its ID before staging finishes, recovers via API and freezes
     assert.equal((await trials.status(project, start.trial_id)).status.status, 'SUCCEEDED');
     assert.equal(trials.list(project)[0].trial_id, start.trial_id);
     const saved = trials.list(project)[0];
+    assert.equal(saved.runner_store_instance_id, fixtureRunnerStoreId);
     assert.match(saved.remote_workspace!.run_root, /projects\/Trial-.*\/branches\/main-.*\/runs\/.*-baseline-/);
     assert.equal(saved.build_definition!.args.at(-1), isolatedCommand);
     assert.equal(saved.requested_build_definition!.args.at(-1), rawCommand);
     assert.equal(saved.build!.environment.COREPILOT_BUILD_ROOT, saved.remote_workspace!.build_root);
     assert.ok(submittedPlan);
+    assert.equal((submittedPlan as ExperimentExecutionPlan).experiment.declared_context.runner_store_instance_id, fixtureRunnerStoreId);
     assert.equal((submittedPlan as ExperimentExecutionPlan).steps[0].command.args.at(-1), isolatedCommand);
     assert.equal((submittedPlan as ExperimentExecutionPlan).build_directory, saved.remote_workspace!.build_root);
     const after = await api.projectAction(project.project_id, contextUrl) as typeof before;
@@ -160,8 +164,9 @@ for (const matrix of [false, true]) test(`comparison pins ${matrix ? 'matrix' : 
   const bytes = Buffer.from('frozen comparison bytes');
   const digest = createHash('sha256').update(bytes).digest('hex');
   const runner = http.createServer((req, res) => {
+    if (!guardFixtureRunnerRequest(req, res)) return;
     res.setHeader('content-type', 'application/json');
-    if (req.url === '/health') res.end(JSON.stringify({ runner_id: 'comparison-fixture', protocol_version: RUNNER_PROTOCOL_VERSION, status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, source_archive_upload: 1, resource_matrix: 1 } }));
+    if (req.url === '/health') res.end(JSON.stringify({ runner_id: 'comparison-fixture', protocol_version: RUNNER_PROTOCOL_VERSION, store_instance_id: fixtureRunnerStoreId, status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { controlled_validation: 1, source_archive_upload: 1, resource_matrix: 1, store_identity_guard: 1, artifact_path_check: 1 } }));
     else if (req.url === '/machine') res.end(JSON.stringify({ hostname: 'fixture', architecture: 'aarch64', cpu_count: 4, machine_identity_sha256: 'a'.repeat(64), cpu_topology: { online_cpus: '0-3', node_cpu_lists: { node0: '0-3' } } }));
     else if (req.url?.startsWith('/source-archives?') && req.method === 'PUT') {
       const chunks: Buffer[] = []; req.on('data', chunk => chunks.push(chunk));
