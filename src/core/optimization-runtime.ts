@@ -415,6 +415,7 @@ export class OptimizationRuntime {
     const cancelled = commands.some((item) => item.cancelled);
     const timedOut = commands.some((item) => item.timed_out);
     const evaluation = validationEvaluation(input.validation, input.performance);
+    const invalidPerformance = input.performance?.statistics?.verdict === 'INVALID';
     const formalIncomplete = input.validation.build.ok
       && input.validation.correctness !== null
       && !input.validation.formal_correctness_complete;
@@ -426,9 +427,10 @@ export class OptimizationRuntime {
     const completed: Experiment = {
       ...experiment,
       status: executionStatus,
-      validity: executionStatus === 'UNKNOWN'
-        ? 'UNKNOWN'
-        : executionStatus === 'FAILED' || executionStatus === 'CANCELLED' || timedOut || formalIncomplete
+      // Previously recorded evaluations retain their original validity on replay.
+      validity: experiment.evaluation && invalidPerformance ? experiment.validity
+        : executionStatus === 'UNKNOWN' ? 'UNKNOWN'
+        : executionStatus === 'FAILED' || executionStatus === 'CANCELLED' || timedOut || formalIncomplete || invalidPerformance
           ? 'INVALID'
           : 'VALID',
       failure_category: experiment.failure_category ?? failureCategory,
@@ -470,8 +472,13 @@ export class OptimizationRuntime {
       && cycleFeedback[index].correctness_status !== 'FAILED' && cycleFeedback[index].correctness_status !== 'INVALID');
     const invalidCorrectness = cycleFeedback.some(item => item.correctness_status === 'INVALID');
     const performanceGate = input.revalidation.performance_gate;
+    const savedGate = experiment.evaluation?.details?.performance_gate as PerformanceGateResult | null | undefined;
+    // Preserve the former v3 revalidation result only when replaying a saved
+    // invalid gate; new evaluations must not turn invalid data into a regression.
+    const historicalInvalidV3 = performanceGate?.gate_version === 3 && performanceGate.statistics?.verdict === 'INVALID' &&
+      savedGate?.gate_version === 3 && savedGate.statistics?.verdict === 'INVALID' && experiment.evaluation?.performance === 'FAILED';
     const invalidPerformance = cycleFeedback.some(item => item.performance_summary.status === 'INVALID') ||
-      (performanceGate?.gate_version === 4 && performanceGate.statistics?.verdict === 'INVALID');
+      (performanceGate?.statistics?.verdict === 'INVALID' && !historicalInvalidV3);
     const allPerformance = performanceGate?.passed ?? cycles.every((item) => item.performance === null || item.performance.ok);
     const performanceFailure = performanceGate?.gate_version === 4 &&
       performanceGate.statistics?.comparison !== 'REGRESSED' && !performanceGate.workloads.some(row => row.regression)
@@ -483,8 +490,8 @@ export class OptimizationRuntime {
     const completed: Experiment = {
       ...experiment,
       status: executionStatus,
-      validity: executionStatus === 'UNKNOWN'
-        ? 'UNKNOWN'
+      validity: experiment.evaluation && performanceGate?.statistics?.verdict === 'INVALID' ? experiment.validity
+        : executionStatus === 'UNKNOWN' ? 'UNKNOWN'
           : executionStatus === 'FAILED' || executionStatus === 'CANCELLED' || timedOut || !completeCorrectness || invalidPerformance ? 'INVALID' : 'VALID',
       failure_category: experiment.failure_category ?? (cancelled
         ? 'CANCELLED'
@@ -496,7 +503,7 @@ export class OptimizationRuntime {
               ? 'CORRECTNESS_FAILURE'
             : !completeCorrectness
               ? 'INVALID_EXPERIMENT'
-              : !allPerformance && performanceGate?.statistics?.verdict !== 'INCONCLUSIVE' && !(performanceGate?.gate_version === 4 && invalidPerformance)
+              : !allPerformance && performanceGate?.statistics?.verdict !== 'INCONCLUSIVE' && !invalidPerformance
                 ? performanceFailure
               : null),
       observed_context: input.observedContext ?? experiment.observed_context,
