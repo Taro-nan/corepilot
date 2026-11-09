@@ -4,6 +4,8 @@
 
 优化与测试可以分别使用：优化任务可选择“仅生成优化代码”，先得到待验证候选；测试任务独立比较源码分支或上传的库包。已有正式验证流程仍保留。操作及当前支持范围见[优化与独立测试](docs/guides/optimization-and-testing.md)。
 
+也可通过 [VS Code 扩展](extensions/vscode/README.md)连接已启动的服务，查看任务、报告和候选补丁；创建任务仍在网页完成。
+
 从交互配置到优化测试报告，先看 [使用指南](docs/guides/quickstart-report.md)。已有配置可以直接运行 `corepilot optimize --config corepilot.yaml --function <api> --performance --watch --output ./report`；交互工作台支持 `/validation`、`/check`、引导式 `/optimize` 和 `/workflow` 报告导出。
 
 新库从网页“构建与验证”开始：识别当前源码、确认构建命令、生成独立接入草稿，并逐项补齐测试、性能测量和基线。具体步骤见[新库接入配置](docs/guides/library-setup.md)。

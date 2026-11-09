@@ -17,7 +17,7 @@ npm run test:web
 git diff --check
 ```
 
-Linux 首次运行 Playwright 若缺少系统库，可使用 `npx playwright install --with-deps chromium` 安装 Chromium 及系统依赖（需要相应系统权限）。网页测试启动隔离的临时 Git 仓库、HTTP 服务和模型夹具，不使用真实优化机器；仍需先执行 `npm run build`。Windows 默认也可使用已安装的 Chrome 或 Edge，或用 `COREPILOT_BROWSER_PATH` 指定浏览器。更多操作见[网页指南](docs/guides/web-workbench.md)。根构建不覆盖 VS Code 扩展的独立检查。
+Linux 首次运行 Playwright 若缺少系统库，可使用 `npx playwright install --with-deps chromium` 安装 Chromium 及系统依赖（需要相应系统权限）。网页测试启动隔离的临时 Git 仓库、HTTP 服务和模型夹具，不使用真实优化机器；仍需先执行 `npm run build`。Windows 默认也可使用已安装的 Chrome 或 Edge，或用 `COREPILOT_BROWSER_PATH` 指定浏览器。更多操作见[网页指南](docs/guides/web-workbench.md)。根构建不覆盖 VS Code 扩展；CI 单独检查扩展的类型、打包和包内客户端，具体命令与真实 Extension Host 验证范围见[扩展指南](extensions/vscode/README.md)。
 
 GitHub Actions 对 Linux 的 Node 22.19.0 和 Node 24、Windows 的 Node 24 执行安装、构建、类型、仓库约定和 Node 测试，并在 Node 24 的两个系统上执行 Chromium 网页测试。CI 结果仅证明对应环境中的自动化检查，不证明真实硬件性能、人工审批或交付。
 

@@ -56,6 +56,12 @@ jobs:
       - run: npm run typecheck
       - run: npm run check:repo
       - run: npm test
+      - name: Check VS Code extension types
+        run: npx tsc -p extensions/vscode/tsconfig.json --noEmit
+      - name: Build VS Code extension package
+        run: node extensions/vscode/build.mjs
+      - name: Test packaged VS Code client
+        run: node --import tsx --test --test-concurrency=1 extensions/vscode/test/client.test.mts extensions/vscode/test/extension-ui.test.mts
       - name: Install Chromium and Linux dependencies
         if: matrix.browser && runner.os == 'Linux'
         run: npx playwright install --with-deps chromium
