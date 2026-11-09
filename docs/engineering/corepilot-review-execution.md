@@ -11,9 +11,9 @@
 | 优先级 | 事项及当前核实 | 状态与完成条件 |
 | --- | --- | --- |
 | P0 | `testing-service.js` 导入：源码 `src/application/testing-service.ts` 已跟踪，`tsconfig.json` 使用 NodeNext；需用干净安装和构建核对编译产物与入口。 | DONE：干净工作区安装、构建、类型检查及服务启动通过，编译产物存在；报告中的源码缺失在当前提交不成立。 |
-| P0 | 新开发者安装、类型检查、构建、仓库检查、Node 和浏览器测试；以锁文件为准，提供 CI。 | IMPLEMENTED：独立 Windows 工作区完成安装与测试，已增加 Linux/Windows CI；GitHub Actions 和最低 Node 22 版本实际运行尚未验证。 |
+| P0 | 新开发者安装、类型检查、构建、仓库检查、Node 和浏览器测试；以锁文件为准，提供 CI。 | IMPLEMENTED：Windows 隔离工作区的 Node 22.22.2 与 Node 24 已完成安装及回归，已增加 Linux/Windows CI；GitHub Actions 和最低 Node 22.19.0 尚未实际验证。 |
 | P0 | 公开仓库不应跟踪本机配置和运行数据；忽略规则不能自动移除已跟踪文件。 | DONE：从 Git 索引移除根配置和本地临时模型配置，保留本机文件；加入忽略规则和检查并验证干净工作区。Git 历史中的旧版本不会因此消失。 |
-| P0 | README、贡献指南、CI、环境要求与干净克隆一致。 | IMPLEMENTED：已更新依赖及运行说明，Windows 隔离工作区验证通过；最低 Node 22、Linux 和 GitHub Actions 尚需实际执行。 |
+| P0 | README、贡献指南、CI、环境要求与干净克隆一致。 | IMPLEMENTED：已更新依赖及运行说明，Windows 隔离工作区的 Node 22.22.2、24 验证通过；最低 Node 22.19.0、Linux 和 GitHub Actions 尚需实际执行。 |
 | P0 | 开源许可与发布机制。 | BLOCKED：仓库根目录没有项目许可证（VS Code 扩展有单独许可）；选择和修改项目许可证须由项目所有者授权。本次不发布 Release。 |
 | P1 | Application/Core/Runner/Evaluator/Storage/Agent 边界和实际状态所有权。 | IMPLEMENTED：现有架构图见 [系统架构](../architecture/corepilot-system.md)；部分 `core/` 仍依赖具体适配器，工作流、领域记录和 Runner 并非原子状态机，不能声明全仓治理完成。 |
 | P1 | 进程中断、重启、重复请求、远端未知、资源释放和状态一致性。 | IMPLEMENTED：启动恢复按状态查全量待处理记录；创建任务、执行终态、创建复现和恢复时的关联状态使用 SQLite 事务。Runner、Git、数据库跨资源一致性仍按原操作 ID 对账，其他状态转换尚未全面原子化。 |
@@ -64,7 +64,8 @@
 - 报告中的 `testing-service.js` 是 NodeNext 导入：Git 跟踪 `src/application/testing-service.ts`，干净构建生成相应 `.js`；不是缺失源码。
 - 后续集成版本在新的隔离工作区再次 `npm ci`，`npm run build`、`npm run typecheck`、`npm run check:repo` 和 `npm test` 301/301 通过；编译后的 `web` 入口使用临时空数据目录启动，网页及 `/v1/health` 均返回 200。后续证据与终态切片分别追加针对性回归。
 - 隔离工作区对 `b57c802` 再次运行完整测试：Node 321/321、浏览器 57/57 通过；测试使用本机夹具和 Chrome。此后仍有新的试跑汇总修改，须再次验证最终集成版本。
-- 限制：GitHub Actions 尚未实际运行。最低 Node 22 的本机下载因网络超时未能验证，不宣称跨平台通过。
+- 隔离 Windows 工作区使用本机 Node 22.22.2 执行 `npm ci`，锁文件未变化；对源码授权、离线复算和试跑汇总合入后的 `312dd9d` 执行 `npm run build`、`npm run typecheck`、`npm run check:repo` 和 `npm test`，Node 测试 330/330 通过。相同代码的 Node 24 浏览器全量测试 59/59 通过。此后预检和候选恢复有新的增量，需另行验证。
+- 限制：GitHub Actions 尚未实际运行。最低 Node 22.19.0 的本机下载因网络超时未能验证，也未在 Linux 验证，不宣称最低版本或跨平台通过。
 
 ### 测试方案试跑的测量清单
 
