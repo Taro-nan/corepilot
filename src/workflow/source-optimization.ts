@@ -11,6 +11,7 @@ import { isRegisteredRunner } from '../config/runner-config.js';
 import type { ExecutionMachineIdentity, ExecutionMachineRecord } from '../contracts/execution-machine.js';
 import type { TargetConfig } from '../config/target-config.js';
 import type { RunnerMachineInfo } from '../contracts/runner-rpc.js';
+import { parseSourceScope } from '../contracts/source-scope.js';
 
 export type SourceOptimizationTarget =
   | { kind: 'registered'; identity: ExecutionMachineIdentity; configuration: TargetConfig | null;
@@ -22,6 +23,8 @@ export interface SourceOptimizationPreflightOptions {
   cliApiKey?: string;
   env?: NodeJS.ProcessEnv;
   readMachine?: (id: string) => ExecutionMachineRecord | null;
+  /** Historical sessions have no scope; only continuation may load their old contract. */
+  historicalScope?: boolean;
 }
 
 export interface SourceOptimizationPreflight {
@@ -38,6 +41,9 @@ export interface SourceOptimizationPreflight {
 export function loadSourceOptimizationPreflight(request: PublicWorkflowRequest, options: SourceOptimizationPreflightOptions = {}): SourceOptimizationPreflight {
   if (request.verification_mode !== 'source_only') throw new Error('源码优化预检只接受 source_only 模式。');
   if (request.enable_performance) throw new Error('仅优化源码不执行性能测试，请选择优化并验证。');
+  const scope = request.candidate_scope === undefined ? undefined : parseSourceScope(request.candidate_scope);
+  if (!scope && !options.historicalScope) throw new Error('请明确选择本次允许修改的源码文件或目录。');
+  if (scope) request = { ...request, candidate_scope: scope };
   const config = loadOptimizationConfig(request.config_path);
   const machineId = request.machine_id ?? (isRegisteredRunner(config.config.runner) ? config.config.runner.machine_id : undefined);
   const machine = machineId ? options.readMachine?.(machineId) : undefined;
@@ -60,6 +66,7 @@ export function sourceOptimizationContractDigest(preflight: SourceOptimizationPr
   return createHash('sha256').update(JSON.stringify({
     verification_mode: 'source_only', function_name: preflight.request.function_name,
     entry_file: preflight.request.entry_file, repository: path.resolve(preflight.repository),
+    ...(preflight.request.candidate_scope ? { candidate_scope: preflight.request.candidate_scope } : {}),
     target: preflight.targetContext.kind === 'registered'
       ? { kind: 'registered', identity: preflight.targetContext.identity, configuration: preflight.targetContext.configuration }
       : preflight.targetContext,
@@ -75,6 +82,7 @@ export function sourceOptimizationIntake(workflowId: string, preflight: SourceOp
     enablePerformance: false,
   });
   record.verification_mode = 'source_only';
+  record.source_scope_authorization = { kind: 'AT_CREATION', candidate_scope: structuredClone(request.candidate_scope!), authorized_at: record.created_at };
   record.session_budget = resolveOptimizationBudget(request.budget);
   record.execution_contract_digest = sourceOptimizationContractDigest(preflight);
   if (preflight.targetContext.kind === 'registered') record.execution_machine = { ...preflight.targetContext.identity };
@@ -84,6 +92,7 @@ export function sourceOptimizationIntake(workflowId: string, preflight: SourceOp
     workflowId,
     target: { kind: 'software_function', name: request.function_name, scope: {
       verification_mode: 'source_only', repository_root: repository, entry_file: request.entry_file,
+      candidate_scope: structuredClone(request.candidate_scope!),
       ...(source ? { source_branch: source.branch } : {}),
     } },
     sourceBaseline: source ? { id: `git:${source.commit}`, digest: source.commit, details: { repository, source_branch: source.branch } }

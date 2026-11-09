@@ -23,6 +23,7 @@ export async function sourceOptimizationFixture(options: { delayFirstMs?: number
   };
   git('init', '--initial-branch=main'); git('config', 'user.name', 'Source fixture'); git('config', 'user.email', 'fixture@example.invalid');
   fs.writeFileSync(path.join(repo, 'kernel.c'), 'int kernel(void) { return 1 + 1; }\n');
+  fs.mkdirSync(path.join(repo, 'tests')); fs.writeFileSync(path.join(repo, 'tests', 'oracle.c'), 'int reference(void) { return 2; }\n');
   fs.writeFileSync(path.join(repo, '.gitignore'), 'corepilot.json\n');
   git('add', '.'); git('commit', '-m', 'source baseline');
   const baseline = git('rev-parse', 'HEAD');
@@ -86,6 +87,7 @@ export async function sourceOptimizationFixture(options: { delayFirstMs?: number
     async start(budget?: { time_limit_ms: number; max_candidates: number }, machineId?: string) {
       const response = await api.submitOptimizationWorkflow({ verification_mode: 'source_only', config_path: configPath,
         function_name: 'kernel', entry_file: 'kernel.c', repository_root: repo, source_branch: 'main',
+        candidate_scope: { include: options.onlyArtifact ? ['kernel.c', 'temporary.o'] : ['kernel.c'], exclude: [] },
         ...(machineId ? { machine_id: machineId } : {}), ...(budget ? { budget } : {}) }) as { workflow_id: string };
       workflowId = response.workflow_id; return workflowId;
     },

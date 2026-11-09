@@ -217,7 +217,7 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
         if (body.source_branch !== undefined && typeof body.source_branch !== 'string') throw new ApiError(400, 'INVALID_ARGUMENT', 'source_branch must be a string');
         if (body.machine_id !== undefined && (typeof body.machine_id !== 'string' || !body.machine_id.trim())) throw new ApiError(400, 'INVALID_ARGUMENT', '请选择有效的执行机器');
         if (body.verification_mode !== undefined && !['verified', 'source_only'].includes(String(body.verification_mode))) throw new ApiError(400, 'INVALID_ARGUMENT', '请选择仅生成代码或自动验证。');
-        sendJson(res, 200, await service.check(id, body.function_name as string | undefined, body.source_branch as string | undefined, body.machine_id as string | undefined, body.verification_mode as 'verified' | 'source_only' | undefined)); return true;
+        sendJson(res, 200, await service.check(id, body.function_name as string | undefined, body.source_branch as string | undefined, body.machine_id as string | undefined, body.verification_mode as 'verified' | 'source_only' | undefined, body.candidate_scope as import('../contracts/library-package.js').CandidateSourceScope | undefined)); return true;
       }
       if (project[2] === 'models') { const body = await readJson(req); sendJson(res, 200, await service.discoverModels(id, body.model)); return true; }
       if (project[2] === 'model-test') { sendJson(res, 200, await service.modelTest(id)); return true; }

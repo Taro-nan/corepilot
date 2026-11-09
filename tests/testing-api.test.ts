@@ -38,9 +38,10 @@ test('project submission preserves source-only mode and produces an explicitly u
     fs.writeFileSync(fixture.configPath, JSON.stringify(config));
     const api = new ApiClient(fixture.url, { token: fixture.token });
     const { project } = await api.addProject({ name: 'Source only', repository_root: fixture.repo, config_path: fixture.configPath });
-    const preflight = await api.projectAction(project.project_id, 'check', { function_name: 'kernel', verification_mode: 'source_only', source_branch: 'main' }) as { message: string };
+    const candidate_scope = { include: ['kernel.c'], exclude: [] };
+    const preflight = await api.projectAction(project.project_id, 'check', { function_name: 'kernel', verification_mode: 'source_only', source_branch: 'main', candidate_scope }) as { message: string };
     assert.match(preflight.message, /未验证|未测量|不.*测试|source.only/i);
-    const submitted = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', source_branch: 'main', verification_mode: 'source_only' }, { requestId: 'source-only-api' }) as { workflow_id: string };
+    const submitted = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', source_branch: 'main', verification_mode: 'source_only', candidate_scope }, { requestId: 'source-only-api' }) as { workflow_id: string };
     const deadline = Date.now() + 25000;
     let workflow = fixture.service.get(submitted.workflow_id)!;
     while (['CREATED', 'GENERATING'].includes(workflow.status) && Date.now() < deadline) {
@@ -60,7 +61,7 @@ test('project submission preserves source-only mode and produces an explicitly u
     assert.equal(fixture.git('show', 'main:kernel.c'), 'int kernel(void) { return 1 + 1; }');
     assert.ok(workflow.optimization_task_id);
     assert.equal(fixture.store.listExperiments(workflow.optimization_task_id).length, 0);
-    const repeated = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', source_branch: 'main', verification_mode: 'source_only' }, { requestId: 'source-only-api' }) as { workflow_id: string };
+    const repeated = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', source_branch: 'main', verification_mode: 'source_only', candidate_scope }, { requestId: 'source-only-api' }) as { workflow_id: string };
     assert.equal(repeated.workflow_id, workflow.workflow_id);
     const cli = await runFixtureCli(fixture.url, fixture.token, ['workflow', 'watch', workflow.workflow_id, '--output', path.join(fixture.root, 'export'), '--timeout', '2']);
     assert.equal(cli.code, 0, cli.stderr);
@@ -69,9 +70,13 @@ test('project submission preserves source-only mode and produces an explicitly u
 });
 
 test('CLI source-only is explicit and does not silently change old optimization requests', () => {
-  const source = parseOptimizeCliInput(['--project', 'project-1', '--function', 'kernel', '--source-only']);
+  const source = parseOptimizeCliInput(['--project', 'project-1', '--function', 'kernel', '--source-only', '--allow', 'kernel.c']);
   assert.equal(source.verificationMode, 'source_only');
+  assert.deepEqual(source.candidateScope, { include: ['kernel.c'], exclude: [] });
   assert.equal(source.enablePerformance, false);
+  assert.throws(() => parseOptimizeCliInput(['--project', 'project-1', '--source-only', '--file', 'kernel.c']), /--allow/);
+  assert.deepEqual(parseOptimizeCliInput(['--project', 'project-1', '--source-only', '--allow', 'src/', '--allow', 'kernel.c', '--exclude', 'src/tests/']).candidateScope,
+    { include: ['kernel.c', 'src/'], exclude: ['src/tests/'] });
   assert.equal(parseOptimizeCliInput(['--project', 'project-1']).verificationMode, undefined);
   assert.throws(() => parseOptimizeCliInput(['--project', 'project-1', '--source-only', '--performance']), /不能/);
 });

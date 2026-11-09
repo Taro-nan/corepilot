@@ -3,6 +3,8 @@ import path from 'node:path';
 import { test, expect, type Page } from '@playwright/test';
 import { startWebFixture, repositoryRoot } from '../../tests/web-fixture.js';
 import type { CreateTestingTask, TestingAsset, TestingPlanPreview, TestingTaskDetails, TestingTaskRecord } from '../../src/contracts/testing.js';
+import { ApiClient } from '../../src/client/api-client.js';
+import { loadSourceOptimizationPreflight, sourceOptimizationContractDigest } from '../../src/workflow/source-optimization.js';
 
 let fixture: Awaited<ReturnType<typeof startWebFixture>>;
 test.beforeEach(async () => { fixture = await startWebFixture({ execute: true }); });
@@ -176,8 +178,9 @@ test('without a test plan users can explicitly produce unverified source and pre
   await expect(task).toContainText('正确性未验证 · 性能未测量'); await expect(task.getByRole('button', { name: '开始优化' })).toBeEnabled();
   await task.getByRole('radio', { name: /优化并自动验证/ }).check(); await expect(task.getByRole('button', { name: '开始优化' })).toBeDisabled();
   await task.getByRole('radio', { name: /仅生成优化代码/ }).check();
+  await task.getByLabel('允许修改的源码文件或目录').fill('kernel.c');
   await task.getByRole('button', { name: '运行前检查', exact: true }).click(); await expect(task.getByText('源码与模型输入可用')).not.toBeVisible();
-  expect(checks).toEqual([expect.objectContaining({ verification_mode: 'source_only' })]);
+  expect(checks).toEqual([expect.objectContaining({ verification_mode: 'source_only', candidate_scope: { include: ['kernel.c'], exclude: [] } })]);
   expect(fixture.modelRequests.inference).toBe(0); expect(fixture.service.list()).toHaveLength(0);
 });
 
@@ -230,6 +233,7 @@ test('source-only optimization runs through the real control API and opens testi
   const composer = page.getByRole('dialog', { name: '创建优化任务' });
   await composer.getByLabel('优化函数').fill('kernel');
   await expect(composer.getByRole('radio', { name: /仅生成优化代码/ })).toBeChecked();
+  await composer.getByLabel('允许修改的源码文件或目录').fill('kernel.c');
   await composer.getByRole('button', { name: '开始优化', exact: true }).click();
   await expect(page.getByLabel('源码优化结果')).toContainText('候选已冻结');
   await expect(page.getByLabel('最近进展')).not.toContainText('"git_status"');
@@ -248,4 +252,27 @@ test('source-only optimization runs through the real control API and opens testi
   expect(new URLSearchParams(page.url().split('?')[1]).get('project')).toBe(project.project_id);
   expect(fixture.git('show', 'main:kernel.c')).toContain('return 1 + 1');
   expect(fixture.testing.list()).toHaveLength(0);
+});
+
+test('an older source session can be resumed only after its continuation scope is explicitly selected', async ({ page }) => {
+  const config = JSON.parse(fs.readFileSync(fixture.configPath, 'utf8'));
+  config.validation = { testpack: '' }; config.build.executable = '';
+  fs.writeFileSync(fixture.configPath, JSON.stringify(config));
+  const project = fixture.projects.add({ name: '历史源码会话', repository_root: fixture.repo, config_path: fixture.configPath, source_branch: 'main' });
+  const client = new ApiClient(fixture.url, { token: fixture.token });
+  const created = await client.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', source_branch: 'main',
+    verification_mode: 'source_only', candidate_scope: { include: ['kernel.c'], exclude: [] } }) as { workflow_id: string };
+  await expect.poll(() => fixture.service.get(created.workflow_id)?.status, { timeout: 30000 }).toBe('CANDIDATE_READY');
+  const old = fixture.service.get(created.workflow_id)!; const task = fixture.store.getOptimizationTask(old.optimization_task_id!)!;
+  delete old.source_scope_authorization; delete task.target.scope.candidate_scope;
+  old.execution_contract_digest = sourceOptimizationContractDigest(loadSourceOptimizationPreflight({ verification_mode: 'source_only',
+    function_name: old.function_name, entry_file: old.entry_file, config_path: old.config_path, repository_root: old.repository_root }, { historicalScope: true }));
+  fixture.store.saveOptimizationTask(task); fixture.store.saveOptimizationWorkflowJson(old.workflow_id, JSON.stringify(old));
+  await login(page); await page.getByRole('button', { name: '优化任务', exact: true }).click();
+  await page.getByRole('row').filter({ hasText: 'kernel' }).click();
+  await expect(page.getByText('历史任务未记录修改授权')).toBeVisible();
+  await page.getByLabel('允许修改的源码文件或目录').fill('kernel.c');
+  await page.getByRole('button', { name: '继续优化', exact: true }).click();
+  await expect.poll(() => fixture.service.get(old.workflow_id)?.source_scope_authorization?.kind, { timeout: 10000 }).toBe('CONTINUATION');
+  expect(fixture.service.get(old.workflow_id)!.source_scope_authorization?.previous_candidate_id).toBe(old.candidate_id);
 });

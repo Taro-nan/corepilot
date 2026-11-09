@@ -26,13 +26,15 @@ export function renderCliHelp(): string {
     '  corepilot optimize --project <服务器项目 ID> [--branch <name>] [--function <name>] [--performance] [--watch] [--output <dir>]',
     '  corepilot optimize --config <path> --function <name> [--branch <name>] [--file <entry-file>] [--performance] [--watch] [--output <report-dir>] [--api-key <key>]',
     '    探索预算：[--budget-minutes <分钟>] [--max-candidates <候选数>]；默认 60 分钟 / 8 个候选。',
-    '    --source-only：仅生成优化代码，无需测试方案；正确性未验证、性能未测量，不能直接批准或交付。',
-    '  corepilot check [--config <path>] [--function <name>]',
+    '    --source-only --allow <文件或目录/> [--exclude <文件或目录/>]：仅生成优化代码；选项可重复。',
+    '    修改范围需明确授权；正确性未验证、性能未测量，不能直接批准或交付。',
+    '  corepilot check [--config <path>] [--function <name>] [--source-only --allow <文件或目录/>]',
     '  corepilot serve --db <path> [--host <host>] [--port <port>] [--ssh-alias <alias> | --ssh-host <host> --ssh-username <user> [--ssh-port <port>] [--ssh-identity-file <path>]]',
     '  corepilot backend start|status|stop --config <path>',
     '  corepilot workflow list [--limit <1..200>] [--json] [--config <path>]',
     '  corepilot workflow status|watch|report|events|cancel <workflow-id> [--config <path>] [--json]',
     '  corepilot workflow resume <workflow-id> [--budget-minutes <1..1440>] [--max-candidates <1..1000>] [--message <补充要求>] [--config <path>]',
+    '    历史源码任务首次继续需指定 --allow <文件或目录/>，可重复并使用 --exclude 排除路径。',
     '  corepilot workflow retry-validation <workflow-id> [--json] [--config <path>]',
     '  corepilot workflow reproduce <workflow-id> [--plan] [--json] [--config <path>]',
     '  corepilot workflow message <workflow-id> --message <补充要求> [--config <path>]',
@@ -49,7 +51,7 @@ export function renderCliHelp(): string {
     '',
     '项目配置：corepilot.yaml；用户与运行数据：.corepilot/；环境变量：COREPILOT_*。',
     'COREPILOT_SERVER_URL 指向共享服务器，COREPILOT_SERVER_TOKEN 用于 CLI 鉴权和网页管理员登录。',
-    '--file 只是调查入口；Package/Hypothesis 限定可修改范围。--watch 等待测试结束并导出 Markdown/JSON 报告。',
+    '--file 只是调查入口；仅源码任务由 --allow 指定可修改范围，正式验证任务沿用 Package 范围。--watch 等待完成并导出报告。',
     '无参数启动交互工作台：/model → /target → /validation → /check → /optimize → /workflow。',
   ].join('\n');
 }
@@ -58,7 +60,7 @@ export interface WorkbenchArgSpec { name: string; required?: boolean; descriptio
 export interface WorkbenchCommandSpec { name: string; description: string; usage: string; args?: readonly WorkbenchArgSpec[] }
 
 export const WORKBENCH_COMMANDS: readonly WorkbenchCommandSpec[] = [
-  { name: '/optimize', description: '引导启动优化、观察并生成测试报告', usage: '/optimize [--function <name>] [--file <entry-file>] [--performance] [--watch] [--output <dir>]' },
+  { name: '/optimize', description: '引导启动优化、观察并生成测试报告', usage: '/optimize [--function <name>] [--file <entry-file>] [--performance | --source-only --allow <文件或目录/>] [--exclude <路径>] [--watch]' },
   { name: '/workflow', description: '观察、审阅、交付或导出报告', usage: '/workflow [list|status|watch|report|evidence|human-approve|deliver|reproduce|events|resume|retry-validation|message|cancel|approve|delivery-check|delivery-resume|delivery-withdraw|delivery-cleanup] [workflow-id]' },
   { name: '/task', description: '管理通用后台任务', usage: '/task list|status|cancel|retry|resume' },
   { name: '/model', description: '配置并验证模型', usage: '/model' },

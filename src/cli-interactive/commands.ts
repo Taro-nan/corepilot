@@ -118,10 +118,10 @@ async function optimize(ctx: WorkbenchContext, args: string[], io: CommandIO): P
   const effective = args.some((arg) => arg === '--config' || arg.startsWith('--config=')) ? args : ['--config', ctx.configPath, ...args];
   const input = parseOptimizeCliInput(effective);
   const loaded = loadOptimizationConfig(input.configPath);
-  if (!loaded.config.validation.library_package && !isBuildConfigured(loaded.config.build)) return { ok: false, message: '请先使用 /build 配置构建命令。' };
+  if (input.verificationMode !== 'source_only' && !loaded.config.validation.library_package && !isBuildConfigured(loaded.config.build)) return { ok: false, message: '请先使用 /build 配置构建命令。' };
   const credential = resolveOptimizationApiKey(loaded.config, { cliApiKey: input.apiKey });
   const api = await ctx.getApi();
-  const result = await api.submitOptimizationWorkflow({ function_name: input.functionName, entry_file: input.entryFile, config_path: input.configPath, repository_root: input.repositoryRoot, enable_performance: input.enablePerformance, ...(input.budget ? { budget: input.budget } : {}) }, credential.apiKey ? { apiKey: credential.apiKey } : {}) as { workflow_id?: string };
+  const result = await api.submitOptimizationWorkflow({ function_name: input.functionName, entry_file: input.entryFile, config_path: input.configPath, repository_root: input.repositoryRoot, enable_performance: input.enablePerformance, ...(input.budget ? { budget: input.budget } : {}), ...(input.verificationMode ? { verification_mode: input.verificationMode } : {}), ...(input.candidateScope ? { candidate_scope: input.candidateScope } : {}), ...(input.sourceBranch ? { source_branch: input.sourceBranch } : {}) }, credential.apiKey ? { apiKey: credential.apiKey } : {}) as { workflow_id?: string };
   if (!result.workflow_id) return { ok: false, message: '后台没有返回 workflow_id。' };
   ctx.setCurrentWorkflow(result.workflow_id);
   io.print(`已提交优化工作流：${result.workflow_id}`);

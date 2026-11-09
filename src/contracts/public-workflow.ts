@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { resolveOptimizationBudget, type OptimizationSessionBudget } from './optimization-session.js';
+import type { CandidateSourceScope } from './library-package.js';
+import { parseSourceScope } from './source-scope.js';
 
 export type OptimizationVerificationMode = 'verified' | 'source_only';
 
@@ -10,6 +12,8 @@ export interface PublicWorkflowRequest {
   budget?: OptimizationSessionBudget;
   function_name: string;
   entry_file: string | null;
+  /** Explicit source-only write permission; entry_file remains an investigation hint. */
+  candidate_scope?: CandidateSourceScope;
   config_path: string;
   /** CLI 从调用目录派生出的算法库根目录；直接调用 HTTP 时可省略。 */
   repository_root?: string;
@@ -56,6 +60,13 @@ export function parsePublicWorkflowRequest(value: unknown): PublicWorkflowReques
   if (body.verification_mode === 'source_only' && body.enable_performance === true) {
     throw new PublicWorkflowRequestError('仅优化源码不执行性能测试，请关闭性能测量或选择优化并验证。');
   }
+  let candidateScope: CandidateSourceScope | undefined;
+  if (body.candidate_scope !== undefined) {
+    if (body.verification_mode !== 'source_only') throw new PublicWorkflowRequestError('修改范围仅适用于仅源码优化；正式优化沿用其测试方案的范围。');
+    try { candidateScope = parseSourceScope(body.candidate_scope); }
+    catch (error) { throw new PublicWorkflowRequestError((error as Error).message); }
+  }
+  if (body.verification_mode === 'source_only' && !candidateScope) throw new PublicWorkflowRequestError('请明确选择本次允许修改的源码文件或目录。');
   let budget: OptimizationSessionBudget | undefined;
   if (body.budget !== undefined) {
     if (!body.budget || typeof body.budget !== 'object' || Array.isArray(body.budget)) throw new PublicWorkflowRequestError('budget must be an object');
@@ -67,6 +78,7 @@ export function parsePublicWorkflowRequest(value: unknown): PublicWorkflowReques
   return {
     function_name: functionName,
     entry_file: entryFile,
+    ...(candidateScope ? { candidate_scope: candidateScope } : {}),
     config_path: configPath,
     ...(body.verification_mode === undefined ? {} : { verification_mode: body.verification_mode }),
     ...(budget ? { budget } : {}),

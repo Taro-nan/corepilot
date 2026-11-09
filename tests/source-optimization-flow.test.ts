@@ -6,6 +6,13 @@ import test from 'node:test';
 import { parsePublicWorkflowRequest } from '../src/contracts/public-workflow.js';
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
 import { checkOptimization } from '../src/workflow/check-optimization.js';
+import { loadSourceOptimizationPreflight, sourceOptimizationContractDigest } from '../src/workflow/source-optimization.js';
+import { WorkspaceToolset } from '../src/agent/workspace-tools.js';
+import { hypothesisProposal } from './hypothesis-fixture.js';
+import { parseSourceScope } from '../src/contracts/source-scope.js';
+import { executeWorkflowCommand } from '../src/client/workflow-commands.js';
+import { runCommandArgs } from '../src/cli-interactive/commands.js';
+import type { WorkbenchContext } from '../src/cli-interactive/context.js';
 import { sourceOptimizationFixture } from './source-optimization-fixture.js';
 
 test('source-only Agent receives a submission error for an isolated build artifact and produces no Candidate', async () => {
@@ -52,7 +59,7 @@ test('source-only public workflow freezes a patch with no testpack, build, Runne
       firstFormalExperimentId: 'absent', revalidationExperimentId: 'absent', evaluatorRoot: f.root }), /未验证的源码候选不能批准/);
     assert.throws(() => f.service.retryValidationPublic(id), /独立测试任务/);
     assert.equal(f.git('rev-parse', 'HEAD'), f.baseline);
-    const checked = await checkOptimization(f.configPath, 'kernel', { verificationMode: 'source_only', repositoryRoot: f.repo, sourceBranch: 'main' });
+    const checked = await checkOptimization(f.configPath, 'kernel', { verificationMode: 'source_only', repositoryRoot: f.repo, sourceBranch: 'main', candidateScope: { include: ['kernel.c'], exclude: [] } });
     assert.match(checked.message, /源码优化输入检查通过/);
     const savedConfig = JSON.parse(fs.readFileSync(f.configPath, 'utf8')); delete savedConfig.runner;
     fs.writeFileSync(f.configPath, JSON.stringify(savedConfig));
@@ -83,7 +90,7 @@ test('selected source target uses cached hardware and its configuration without 
     const context = JSON.stringify(f.contexts[0]);
     assert.match(context, /chosen-source-target/); assert.match(context, /fixture-aarch64/); assert.match(context, /REGISTRY_CACHE/); assert.match(context, /2026-01-01/);
     assert.doesNotMatch(context, /unused-source-target|registry-source-private-token/);
-    const checked = await checkOptimization(f.configPath, 'kernel', { verificationMode: 'source_only', machineId: selected.machine_id,
+    const checked = await checkOptimization(f.configPath, 'kernel', { verificationMode: 'source_only', candidateScope: { include: ['kernel.c'], exclude: [] }, machineId: selected.machine_id,
       readMachine: machineId => f.store.getExecutionMachine(machineId) });
     assert.match(checked.message, /Chosen offline AArch64/); assert.match(checked.message, /本次未探测/);
     assert.equal(f.store.listExperiments(record.optimization_task_id!).length, 0);
@@ -146,7 +153,8 @@ test('cancelling source optimization confirms stopped state without remote work 
 test('source-only mode is explicit and rejects contradictory performance requests', () => {
   const request = { function_name: 'kernel', entry_file: null, config_path: 'corepilot.yaml' };
   assert.equal(parsePublicWorkflowRequest(request).verification_mode, undefined);
-  assert.equal(parsePublicWorkflowRequest({ ...request, verification_mode: 'source_only' }).verification_mode, 'source_only');
+  assert.throws(() => parsePublicWorkflowRequest({ ...request, verification_mode: 'source_only' }), /允许修改/);
+  assert.equal(parsePublicWorkflowRequest({ ...request, verification_mode: 'source_only', candidate_scope: { include: ['kernel.c'], exclude: [] } }).verification_mode, 'source_only');
   assert.throws(() => parsePublicWorkflowRequest({ ...request, verification_mode: 'unknown' }), /verification_mode/);
   assert.throws(() => parsePublicWorkflowRequest({ ...request, verification_mode: 'source_only', enable_performance: true }), /仅优化源码/);
 });
@@ -156,10 +164,101 @@ test('source-only request identity normalizes disabled performance and cannot be
   const service = new OptimizationWorkflowService({ store: f.store, publicExecution: false, publicEnablePerformance: true,
     transportFactory: () => { throw new Error('An intake cannot construct a transport'); } });
   try {
-    const request = { verification_mode: 'source_only' as const, config_path: f.configPath, function_name: 'kernel', entry_file: 'kernel.c', repository_root: f.repo };
+    const request = { verification_mode: 'source_only' as const, config_path: f.configPath, function_name: 'kernel', entry_file: 'kernel.c', repository_root: f.repo, candidate_scope: { include: ['kernel.c'], exclude: [] } };
     const first = service.submitPublic(request, { requestId: 'source-request' });
     assert.deepEqual(service.submitPublic({ ...request, enable_performance: false }, { requestId: 'source-request' }), first);
-    assert.throws(() => service.submitPublic({ ...request, verification_mode: 'verified' }, { requestId: 'source-request' }), /different optimization inputs/);
+    assert.throws(() => service.submitPublic({ ...request, verification_mode: 'verified' }, { requestId: 'source-request' }), /修改范围仅适用/);
+    assert.throws(() => service.submitPublic({ ...request, candidate_scope: { include: ['other.c'], exclude: [] } }, { requestId: 'source-request' }), /different optimization inputs/);
     assert.equal(service.list().length, 1); assert.equal(f.contexts.length, 0);
   } finally { await service.stop(); await f.close(); }
+});
+
+test('interactive optimize passes source-only mode and explicit scope to the shared API', async () => {
+  const f = await sourceOptimizationFixture(); const original = process.cwd(); let selected = '';
+  const context = { hasConfig: () => true, configPath: f.configPath, getApi: async () => f.api,
+    setCurrentWorkflow: (id: string) => { selected = id; } } as unknown as WorkbenchContext;
+  const io = { print: () => {}, error: () => {}, prompt: async () => null,
+    select: async <T>() => null as T | null, confirm: async () => false };
+  try {
+    process.chdir(f.repo);
+    const result = await runCommandArgs(context, '/optimize', ['--function', 'kernel', '--source-only', '--allow', 'kernel.c'], io);
+    assert.equal(result.ok, true, result.message);
+    const record = f.service.get(selected)!;
+    assert.equal(record.verification_mode, 'source_only');
+    assert.deepEqual(record.source_scope_authorization?.candidate_scope, { include: ['kernel.c'], exclude: [] });
+    assert.equal(record.enable_performance, false);
+  } finally { process.chdir(original); await f.close(); }
+});
+
+test('explicit source scope is normalized and rejects traversal and protected roots', () => {
+  assert.deepEqual(parseSourceScope({ include: ['src\\kernel.c', 'src\\kernel.c', 'impl/'], exclude: ['impl/tests/'] }),
+    { include: ['impl/', 'src/kernel.c'], exclude: ['impl/tests/'] });
+  for (const path of ['../secret.c', '/etc/passwd', 'C:/foo', '.git/config', 'src/../test.c', 'src/*']) {
+    assert.throws(() => parseSourceScope({ include: [path], exclude: [] }), /相对|无效/);
+  }
+});
+
+test('the source task constrains hypotheses, write tools and accumulated changes after resumption', async () => {
+  const f = await sourceOptimizationFixture();
+  try {
+    const id = await f.start();
+    const first = await f.wait('CANDIDATE_READY');
+    const runtime = new OptimizationRuntime(f.store);
+    assert.deepEqual(runtime.getTask(first.optimization_task_id!).target.scope.candidate_scope, { include: ['kernel.c'], exclude: [] });
+    assert.throws(() => runtime.proposeHypothesis({ taskId: first.optimization_task_id!, parentHypothesisId: first.hypothesis_id!,
+      proposal: hypothesisProposal('Try an oracle', ['tests/oracle.c']), agentIdentity: {} }), /超出允许修改范围/);
+    const tools = new WorkspaceToolset(first.workspace_editing!, { candidateSourceScope: { include: ['kernel.c'], exclude: [] } });
+    for (const [name, args] of [
+      ['replace_text', { path: 'tests/oracle.c', old_text: 'return 2', new_text: 'return 1' }],
+      ['move_file', { from: 'kernel.c', to: 'tests/new.c' }],
+    ] as const) assert.equal((await tools.execute(name, args, new AbortController().signal)).isError, true);
+    const workspaceOracle = path.join(first.workspace_editing!, 'tests', 'oracle.c');
+    fs.writeFileSync(workspaceOracle, 'int reference(void) { return 999; }\n');
+    await f.api.resumeOptimizationWorkflow(id);
+    const failed = await f.wait('FAILED');
+    assert.match(failed.error!, /超出允许修改范围/);
+    assert.equal(f.store.listCandidates(first.optimization_task_id!).length, 1);
+    assert.match(fs.readFileSync(workspaceOracle, 'utf8'), /999/);
+    assert.match(fs.readFileSync(path.join(f.repo, 'tests', 'oracle.c'), 'utf8'), /return 2/);
+  } finally { await f.close(); }
+});
+
+test('legacy source session gains a continuation-only scope without changing historical candidates or digest', async () => {
+  const f = await sourceOptimizationFixture();
+  try {
+    const id = await f.start(); const first = await f.wait('CANDIDATE_READY');
+    const task = f.store.getOptimizationTask(first.optimization_task_id!)!;
+    delete task.target.scope.candidate_scope;
+    delete first.source_scope_authorization;
+    const oldPreflight = loadSourceOptimizationPreflight({ verification_mode: 'source_only', function_name: first.function_name,
+      entry_file: first.entry_file, config_path: first.config_path, repository_root: first.repository_root }, { historicalScope: true });
+    first.execution_contract_digest = sourceOptimizationContractDigest(oldPreflight);
+    f.store.saveOptimizationTask(task); f.store.saveOptimizationWorkflowJson(id, JSON.stringify(first));
+    const oldCandidate = JSON.stringify(f.store.getCandidate(first.candidate_id!)!);
+    await assert.rejects(f.api.resumeOptimizationWorkflow(id), /历史任务未记录源码授权范围/);
+    await assert.rejects(f.api.resumeOptimizationWorkflow(id, { candidate_scope: { include: ['tests/'], exclude: [] } }), /超出允许修改范围/);
+    assert.equal(f.service.get(id)!.source_scope_authorization, undefined);
+    const save = f.store.saveOptimizationWorkflowJson.bind(f.store);
+    f.store.saveOptimizationWorkflowJson = () => { throw new Error('injected authorization write failure'); };
+    await assert.rejects(f.api.resumeOptimizationWorkflow(id, { candidate_scope: { include: ['kernel.c'], exclude: [] } }), /injected authorization write failure/);
+    f.store.saveOptimizationWorkflowJson = save;
+    assert.equal(f.store.getOptimizationTask(first.optimization_task_id!)!.declared_context.source_scope_authorization, undefined);
+    assert.equal(f.service.get(id)!.source_scope_authorization, undefined);
+    await f.restart();
+    const cliResume = await executeWorkflowCommand(f.api, ['resume', id, '--allow', 'kernel.c']);
+    assert.equal(cliResume.ok, true);
+    const second = await f.wait('CANDIDATE_READY');
+    assert.equal(second.source_scope_authorization?.kind, 'CONTINUATION');
+    assert.equal(second.source_scope_authorization?.previous_candidate_id, first.candidate_id);
+    assert.equal(second.execution_contract_digest, first.execution_contract_digest);
+    assert.equal(JSON.stringify(f.store.getCandidate(first.candidate_id!)!), oldCandidate);
+    const restored = f.store.getOptimizationTask(first.optimization_task_id!)!;
+    assert.equal(restored.target.scope.candidate_scope, undefined);
+    assert.deepEqual(restored.declared_context.source_scope_authorization, second.source_scope_authorization);
+    await assert.rejects(f.api.resumeOptimizationWorkflow(id, { candidate_scope: { include: ['tests/'], exclude: [] } }), /修改范围已固定/);
+    await f.restart();
+    await f.api.resumeOptimizationWorkflow(id);
+    const last = await f.wait('NO_CANDIDATE');
+    assert.deepEqual(last.source_scope_authorization, second.source_scope_authorization);
+  } finally { await f.close(); }
 });

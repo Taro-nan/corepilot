@@ -145,6 +145,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
         if (budget && Object.keys(budget).some(key => !['time_limit_ms', 'max_candidates'].includes(key))) throw new Error('unknown budget field');
         const header = req.headers['x-corepilot-model-api-key'];
         const result = options.workflowService.resumePublic(id, { ...(body.message === undefined ? {} : { message: requireString(body.message, 'message') }),
+          ...(body.candidate_scope === undefined ? {} : { candidateScope: body.candidate_scope as import('../contracts/library-package.js').CandidateSourceScope }),
           ...(budget ? { budget } : {}), ...(typeof header === 'string' ? { cliApiKey: header } : {}), packageLoader: options.projectService?.packageLoader });
         sendJson(res, 202, result);
       }

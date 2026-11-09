@@ -5,6 +5,15 @@ import type { WorkflowDeliveryOperation } from './delivery.js';
 import type { WorkflowEvidenceSnapshot } from './optimization-approval.js';
 import type { OptimizationVerificationMode } from './public-workflow.js';
 import type { OptimizationTaskStatus } from './optimization-domain.js';
+import type { CandidateSourceScope } from './library-package.js';
+
+export interface SourceScopeAuthorization {
+  kind: 'AT_CREATION' | 'CONTINUATION';
+  candidate_scope: CandidateSourceScope;
+  authorized_at: string;
+  /** The continuation permission does not apply retroactively to this candidate. */
+  previous_candidate_id?: string | null;
+}
 
 /** public optimize 工作流的持久化状态；不包含旧候选补丁或授权对象。 */
 export type OptimizationWorkflowStatus =
@@ -34,6 +43,8 @@ export interface OptimizationWorkflowProgress {
 export interface OptimizationWorkflowRecord {
   /** Missing on historical workflows means verified. */
   verification_mode?: OptimizationVerificationMode;
+  /** Missing on a source-only task denotes a legacy task without recorded permission. */
+  source_scope_authorization?: SourceScopeAuthorization;
   review_evidence?: WorkflowEvidenceSnapshot;
   review_evidence_history?: WorkflowEvidenceSnapshot[];
   /** Persisted before Git changes; absent for historical deliveries. */

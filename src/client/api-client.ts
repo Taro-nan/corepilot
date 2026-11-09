@@ -78,7 +78,7 @@ export class ApiClient {
     return this.request('GET', `/v1/workflows/${encodeURIComponent(workflowId)}/events?after=${after}&limit=${limit}`) as Promise<OptimizationSessionEvents>;
   }
 
-  resumeOptimizationWorkflow(workflowId: string, input: { message?: string; budget?: Partial<OptimizationSessionBudget> } = {}): Promise<unknown> {
+  resumeOptimizationWorkflow(workflowId: string, input: { message?: string; budget?: Partial<OptimizationSessionBudget>; candidate_scope?: import('../contracts/library-package.js').CandidateSourceScope } = {}): Promise<unknown> {
     return this.request('POST', `/v1/workflows/${encodeURIComponent(workflowId)}/resume`, input);
   }
 

@@ -40,6 +40,8 @@ export interface TaskStore extends OptimizationStore {
   saveOptimizationWorkflowJson(workflowId: string, workflowJson: string): void;
   /** Atomically create the task and workflow, or return the existing matching request. */
   createOptimizationIntake(task: OptimizationTask, workflow: OptimizationWorkflowRecord): { workflowId: string; created: boolean };
+  /** Append a non-retroactive scope authorization when resuming an older source-only task. */
+  authorizeLegacySourceContinuation(expectedWorkflowJson: string, workflow: OptimizationWorkflowRecord): void;
   /** Commit the worker outcome and its Task status together without changing experiments or approval. */
   finishOptimizationWorkflow(workflowId: string, taskId: string, patch: WorkflowExecutionOutcomePatch): void;
   /** Save a diagnostic only if this task is still the active workflow. */

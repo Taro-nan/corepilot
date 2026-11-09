@@ -161,12 +161,13 @@ export class ProjectService {
     return this.config(id);
   }
 
-  request(id: string, input: { function_name?: string; entry_file?: string | null; enable_performance?: boolean; verification_mode?: PublicWorkflowRequest['verification_mode']; source_branch?: string; machine_id?: string; budget?: import('../contracts/optimization-session.js').OptimizationSessionBudget }): PublicWorkflowRequest {
+  request(id: string, input: { function_name?: string; entry_file?: string | null; candidate_scope?: PublicWorkflowRequest['candidate_scope']; enable_performance?: boolean; verification_mode?: PublicWorkflowRequest['verification_mode']; source_branch?: string; machine_id?: string; budget?: import('../contracts/optimization-session.js').OptimizationSessionBudget }): PublicWorkflowRequest {
     const project = this.get(id);
     const runner = loadOptimizationConfig(project.config_path).config.runner;
     const machineId = input.machine_id ?? (isRegisteredRunner(runner) ? runner.machine_id : undefined);
     return { config_path: project.config_path, repository_root: project.repository_root,
       function_name: input.function_name?.trim() || project.default_function || configuredOptimizationFunction(project.config_path, this.packageLoader), entry_file: input.entry_file ?? null,
+      ...(input.candidate_scope === undefined ? {} : { candidate_scope: input.candidate_scope }),
       enable_performance: input.enable_performance ?? input.verification_mode !== 'source_only',
       ...(input.verification_mode === undefined ? {} : { verification_mode: input.verification_mode }),
       ...(input.budget === undefined ? {} : { budget: input.budget }),
@@ -174,12 +175,12 @@ export class ProjectService {
       ...((input.source_branch ?? project.source_branch) === undefined ? {} : { source_branch: input.source_branch ?? project.source_branch }) };
   }
 
-  async check(id: string, functionName?: string, branch?: string, machineId?: string, verificationMode?: PublicWorkflowRequest['verification_mode']) {
+  async check(id: string, functionName?: string, branch?: string, machineId?: string, verificationMode?: PublicWorkflowRequest['verification_mode'], candidateScope?: PublicWorkflowRequest['candidate_scope']) {
     const project = this.get(id);
     const name = branch ?? project.source_branch;
     const source = name === undefined ? undefined : resolveSourceBranch(project.repository_root, name);
     const result = await checkOptimization(project.config_path, functionName?.trim() || project.default_function || undefined, { resolveMachine: id => this.machines.resolve(id), packageLoader: this.packageLoader, machineId,
-      verificationMode, repositoryRoot: project.repository_root, sourceBranch: name, readMachine: id => this.store.getExecutionMachine(id) });
+      verificationMode, candidateScope, repositoryRoot: project.repository_root, sourceBranch: name, readMachine: id => this.store.getExecutionMachine(id) });
     return source ? { ...result, source_branch: source.branch, baseline_commit: source.commit,
       message: `源码分支：${source.branch}\n源码 commit：${source.commit}\n${result.message}` } : result;
   }

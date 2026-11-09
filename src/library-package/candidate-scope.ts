@@ -9,5 +9,5 @@ export function candidatePathAllowed(scope: CandidateSourceScope, filename: stri
 }
 
 export function assertCandidateSourceScope(scope: CandidateSourceScope, filenames: readonly string[]): void {
-  for (const filename of filenames) if (!candidatePathAllowed(scope, filename)) throw new Error(`candidate source path is outside package scope: ${filename}`);
+  for (const filename of filenames) if (!candidatePathAllowed(scope, filename)) throw new Error(`候选源码超出允许修改范围：${filename}`);
 }

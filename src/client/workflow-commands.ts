@@ -6,7 +6,7 @@ import type { ApiClient } from './api-client.js';
 import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import { writeOptimizationReport } from '../report/write-report.js';
 
-export const WORKFLOW_USAGE = 'workflow list | workflow status|watch|report|evidence|human-approve|deliver|reproduce|events|resume|retry-validation|message|cancel|delivery-check|delivery-resume|delivery-withdraw|delivery-cleanup <workflow-id> [--json]';
+export const WORKFLOW_USAGE = 'workflow list | workflow status|watch|report|evidence|human-approve|deliver|reproduce|events|resume|retry-validation|message|cancel|delivery-check|delivery-resume|delivery-withdraw|delivery-cleanup <workflow-id> [--json]；历史源码任务首次继续：workflow resume <id> --allow <文件或目录/> [--exclude <路径>]';
 export function isWorkflowFinished(record: OptimizationWorkflowRecord): boolean {
   return ['CANDIDATE_READY', 'WAITING_APPROVAL', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'BUDGET_EXHAUSTED', 'INTERRUPTED', 'VALIDATION_BLOCKED', 'DELIVERABLE', 'FAILED', 'CANCELLED'].includes(record.status);
 }
@@ -20,6 +20,7 @@ export function workflowStatusText(w: OptimizationWorkflowRecord): string {
     ...(w.error ? [`错误：${w.error}`] : []),
     ...(w.stop_reason ? [`结束原因：${w.stop_reason}`] : []),
     ...(w.agent_session ? [`会话：${w.agent_session.turns} 次模型轮次 · ${w.agent_session.tool_calls} 次工具调用 · ${w.agent_session.compactions} 次上下文整理`] : []),
+    ...(w.verification_mode === 'source_only' && !w.source_scope_authorization ? [`历史任务未记录源码授权；继续时请指定 --allow <文件或目录/>。`] : []),
     ...(['BUDGET_EXHAUSTED', 'INTERRUPTED'].includes(w.status) ? [`继续：corepilot workflow resume ${w.workflow_id}`] : []),
     ...(w.status === 'VALIDATION_BLOCKED' ? [`验证受阻，候选已保留。修复环境后重试：corepilot workflow retry-validation ${w.workflow_id}`] : []),
     ...(w.status === 'CANDIDATE_READY' ? ['代码候选已生成；正确性未验证，性能未测量。请创建独立测试任务验证此候选。'] : []),
@@ -45,6 +46,7 @@ export async function executeWorkflowCommand(api: ApiClient, args: string[], opt
     interval: { type: 'string' }, timeout: { type: 'string' },
     'commit-message': { type: 'string' }, 'expected-baseline-commit': { type: 'string' },
     message: { type: 'string' }, 'budget-minutes': { type: 'string' }, 'max-candidates': { type: 'string' }, after: { type: 'string' },
+    allow: { type: 'string', multiple: true }, exclude: { type: 'string', multiple: true },
     plan: { type: 'boolean' }, cancel: { type: 'boolean' }, 'confirm-stopped': { type: 'boolean' }, 'operation-id': { type: 'string' },
     prepare: { type: 'boolean' }, reviewer: { type: 'string' }, 'authorization-reference': { type: 'string' }, 'evidence-digest': { type: 'string' },
   } });
@@ -56,7 +58,7 @@ export async function executeWorkflowCommand(api: ApiClient, args: string[], opt
     cancel: ['json'], 'retry-validation': ['json'], approve: ['json', 'commit-message', 'expected-baseline-commit'], deliver: ['json', 'commit-message', 'expected-baseline-commit'],
     reproduce: ['json', 'plan', 'cancel'],
     'delivery-check': ['json'], 'delivery-resume': ['json', 'confirm-stopped'], 'delivery-withdraw': ['json', 'confirm-stopped', 'operation-id'], 'delivery-cleanup': ['json'],
-    resume: ['json', 'message', 'budget-minutes', 'max-candidates'], message: ['json', 'message'], events: ['json', 'after', 'limit'],
+    resume: ['json', 'message', 'budget-minutes', 'max-candidates', 'allow', 'exclude'], message: ['json', 'message'], events: ['json', 'after', 'limit'],
   };
   if (!action || !allowed[action] || extra.length || (action === 'list' ? !!id : !id)) throw new Error(WORKFLOW_USAGE);
   for (const name of Object.keys(value)) if (!allowed[action].includes(name)) throw new Error(`${action} does not support --${name}`);
@@ -140,7 +142,8 @@ export async function executeWorkflowCommand(api: ApiClient, args: string[], opt
       if (!Number.isInteger(count) || count < 1 || count > 1000) throw new Error('--max-candidates must be from 1 to 1000');
       budget.max_candidates = count;
     }
-    const data = await api.resumeOptimizationWorkflow(id, { ...(value.message ? { message: value.message } : {}), ...(Object.keys(budget).length ? { budget } : {}) });
+    const data = await api.resumeOptimizationWorkflow(id, { ...(value.message ? { message: value.message } : {}), ...(Object.keys(budget).length ? { budget } : {}),
+      ...(value.allow || value.exclude ? { candidate_scope: { include: value.allow ?? [], exclude: value.exclude ?? [] } } : {}) });
     return result(data, `已继续原优化会话：${id}。使用 workflow watch 查看进展。`);
   }
   if (action === 'approve' || action === 'deliver') {

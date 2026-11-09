@@ -3,7 +3,8 @@ import { hypothesisProposalTool, optimizationHistoryTool } from '../agent/hypoth
 import { WorkspaceToolset } from '../agent/workspace-tools.js';
 import type { OptimizationRuntime } from '../core/optimization-runtime.js';
 import type { OptimizationStore } from '../storage/optimization-store.js';
-import { checkpointCandidate, createCandidateWorkspace, restoreCandidateWorkspace, type CandidateCheckpoint, type CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
+import { candidateSourceChangesSinceBaseline, checkpointCandidate, createCandidateWorkspace, restoreCandidateWorkspace, type CandidateCheckpoint, type CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
+import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
 import type { SourceOptimizationPreflight } from './source-optimization.js';
 
 export interface SourceAgentCheckpoint {
@@ -47,8 +48,12 @@ export async function runSourceAgentWorkflow(input: {
   const parentHypothesisId = state.phase === 'COMPLETE' ? state.hypothesis_id : null;
   if (state.phase === 'COMPLETE') { state.phase = 'AGENT'; state.hypothesis_id = null; state.agent = null; }
   const capture = () => input.saveCheckpoint(state);
+  const scope = input.preflight.request.candidate_scope;
+  if (!scope) throw new Error('历史源码任务尚未授权继续时可修改的文件或目录。');
+  const checkScope = () => assertCandidateSourceScope(scope, candidateSourceChangesSinceBaseline(state.workspace));
   const toolset = new WorkspaceToolset(state.workspace.editing, {
     baselineCommit: state.workspace.baseline_commit, candidateSubmission: true, candidateValidation: 'deferred',
+    candidateSourceScope: scope,
     buildContext: () => ({ configured: input.preflight.config.config.build, execution: 'NOT_EXECUTED' }),
     targetProfile: () => ({ ...input.preflight.targetContext, current_probe: 'NOT_EXECUTED' }),
     beforeSourceMutation: () => { if (!state.hypothesis_id) throw new Error('修改源码前请先调用 record_hypothesis，记录源码调查依据。'); },
@@ -60,6 +65,7 @@ export async function runSourceAgentWorkflow(input: {
     '完成所有相关编辑后调用 submit_candidate。没有可信改进方向时调用 finish_optimization，不制造改动。',
     `当前假设：${state.hypothesis_id ?? '无'}；新假设父 ID：${parentHypothesisId ?? 'null'}。声明的目标配置仅是上下文，未探测或验证机器能力。`,
     `目标上下文：${JSON.stringify(input.preflight.targetContext)}。REGISTRY_CACHE 是指定 observed_at 的历史观测，不是本次硬件验证；unresolved 表示尚未解析指定机器，不能使用其他机器配置代替。`,
+    `用户授权的修改范围：${JSON.stringify(scope)}。读取可覆盖仓库，所有写入必须符合此范围。`,
   ].join('\n');
   if (!saved && input.preflight.request.entry_file) {
     const entry = await toolset.execute('read_file', { path: input.preflight.request.entry_file }, input.signal);
@@ -68,6 +74,7 @@ export async function runSourceAgentWorkflow(input: {
   }
   try {
     input.signal.throwIfAborted();
+    checkScope();
     await capture();
     if (state.phase === 'AGENT') {
       await input.onProgress('AGENT_EDITING', 'Agent 正在调查源码并准备优化补丁', state);
@@ -99,11 +106,13 @@ export async function runSourceAgentWorkflow(input: {
       await capture();
     }
     input.signal.throwIfAborted();
+    checkScope();
     if (!state.checkpoint || state.workspace.candidate_commit !== state.checkpoint.commit || saved?.phase === 'COMPLETE') {
       state.checkpoint = checkpointCandidate(state.workspace, 'corepilot unverified source candidate');
       state.candidate_id = null;
       await capture();
     }
+    checkScope();
     const existing = input.store.listCandidates(input.taskId).find(candidate => candidate.source.commit === state.checkpoint!.commit && candidate.hypothesis_id === state.hypothesis_id);
     const candidate = existing ?? input.runtime.recordCandidate({ taskId: input.taskId, hypothesisId: state.hypothesis_id!,
       workspace: state.workspace, checkpoint: state.checkpoint, hypothesis: state.agent?.text ?? null,

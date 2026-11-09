@@ -15,7 +15,10 @@ import type { AgentTool } from '../agent/pi-agent-runtime.js';
 import { PiOptimizationSession, readOptimizationSessionEvents } from '../agent/pi-optimization-session.js';
 import { resolveOptimizationBudget, type OptimizationSessionBudget, type OptimizationSessionEvents } from '../contracts/optimization-session.js';
 import { buildCandidateFeedbackPrompt, runPublicAgentWorkflow, type PublicDevelopmentInvestigation, type PublicAgentWorkflowCheckpoint } from './public-agent-workflow.js';
-import { ensureCandidateRepository, type CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
+import { candidateSourceChangesSinceBaseline, ensureCandidateRepository, type CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
+import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
+import { parseSourceScope } from '../contracts/source-scope.js';
+import type { CandidateSourceScope } from '../contracts/library-package.js';
 import { snapshotEditingSource } from '../workspace/git-source-archive.js';
 import { stageRpcSource } from '../workspace/rpc-source-staging.js';
 import { freezeValidationTestpack } from '../testpack/validation-freeze.js';
@@ -166,10 +169,15 @@ export class OptimizationWorkflowService {
   submitPublic(request: PublicWorkflowRequest, options: { cliApiKey?: string; requestId?: string; packageLoader?: LibraryPackageLoader } = {}): { workflowId: string } {
     if (this.stopping) throw new Error('后台正在停止，请稍后重试。');
     if (request.verification_mode === 'source_only' && request.enable_performance === true) throw new Error('仅优化源码不执行性能测试，请选择优化并验证。');
+    if (request.candidate_scope) {
+      if (request.verification_mode !== 'source_only') throw new Error('修改范围仅适用于仅源码优化。');
+      request = { ...request, candidate_scope: parseSourceScope(request.candidate_scope) };
+    }
     const requestDigest = createHash('sha256').update(JSON.stringify({
       config_path: path.resolve(request.config_path),
       function_name: request.function_name,
       entry_file: request.entry_file,
+      ...(request.candidate_scope ? { candidate_scope: request.candidate_scope } : {}),
       repository_root: path.resolve(request.repository_root ?? path.dirname(request.config_path)),
       ...(request.source_branch === undefined ? {} : { source_branch: request.source_branch }),
       ...(request.machine_id === undefined ? {} : { machine_id: request.machine_id }),
@@ -810,25 +818,45 @@ export class OptimizationWorkflowService {
     this.running.set(workflowId, running);
   }
 
-  private resumeSourceWorkflow(record: OptimizationWorkflowRecord, input: { message?: string; budget?: Partial<OptimizationSessionBudget>; cliApiKey?: string }): { workflow_id: string; status: string } {
+  private resumeSourceWorkflow(record: OptimizationWorkflowRecord, input: { message?: string; budget?: Partial<OptimizationSessionBudget>; cliApiKey?: string; candidateScope?: CandidateSourceScope }): { workflow_id: string; status: string } {
     if (!record.agent_session || !['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'NO_CANDIDATE', 'CANDIDATE_READY'].includes(record.status)) throw new Error('此任务没有可继续的源码会话。');
-    const selectedMachine = this.runtime.getTask(record.optimization_task_id!).declared_context.requested_machine_id;
+    const expectedWorkflowJson = JSON.stringify(record);
+    const task = this.runtime.getTask(record.optimization_task_id!);
+    const selectedMachine = task.declared_context.requested_machine_id;
+    const authorization = record.source_scope_authorization;
+    const taskScope = task.target.scope.candidate_scope as CandidateSourceScope | undefined;
+    const continuation = task.declared_context.source_scope_authorization as OptimizationWorkflowRecord['source_scope_authorization'];
+    if (authorization && JSON.stringify(authorization.kind === 'AT_CREATION' ? taskScope : continuation?.candidate_scope) !== JSON.stringify(authorization.candidate_scope)) {
+      throw new Error('保存的源码授权范围不一致，请保留现场并核对任务记录。');
+    }
+    if (authorization && input.candidateScope) throw new Error('任务的修改范围已固定，不能继续时更改；需要其他范围请新建任务。');
+    const candidateScope = authorization?.candidate_scope ?? (input.candidateScope ? parseSourceScope(input.candidateScope) : undefined);
+    if (!candidateScope) throw new Error('历史任务未记录源码授权范围。请明确允许修改的文件或目录后再继续，已有候选不会被改写。');
     const preflight = loadSourceOptimizationPreflight({ verification_mode: 'source_only', function_name: record.function_name,
       entry_file: record.entry_file, config_path: record.config_path, repository_root: record.repository_root,
+      ...(authorization?.kind === 'AT_CREATION' ? { candidate_scope: candidateScope } : {}),
       ...(typeof selectedMachine === 'string' ? { machine_id: selectedMachine } : {}),
-    }, { cliApiKey: input.cliApiKey, readMachine: id => this.options.store.getExecutionMachine(id) });
+    }, { cliApiKey: input.cliApiKey, historicalScope: authorization?.kind !== 'AT_CREATION', readMachine: id => this.options.store.getExecutionMachine(id) });
     if (record.execution_contract_digest !== sourceOptimizationContractDigest(preflight)) throw new Error('源码范围、声明目标或构建上下文已改变，请创建新任务；原任务保持源码优化模式。');
+    preflight.request = { ...preflight.request, candidate_scope: candidateScope };
+    if (!authorization) {
+      if (!record.workspace_editing || !record.baseline_commit) throw new Error('历史工作区或源码基线缺失，无法核对已有改动；请查看历史记录并新建任务。');
+      assertCandidateSourceScope(candidateScope, candidateSourceChangesSinceBaseline({ editing: record.workspace_editing, baseline_commit: record.baseline_commit }));
+      record.source_scope_authorization = { kind: 'CONTINUATION', candidate_scope: candidateScope, authorized_at: new Date().toISOString(), previous_candidate_id: record.candidate_id ?? null };
+    }
     if (record.baseline_commit) preflight.source = { branch: record.source_branch ?? 'detached', commit: record.baseline_commit };
     record.session_budget = resolveOptimizationBudget(input.budget ?? record.session_budget);
     record.continuation_count = (record.continuation_count ?? 0) + 1;
     record.status = 'GENERATING'; record.error = null; delete record.stop_reason;
     record.progress = { phase: 'RESUMING', last_event: '正在恢复源码工作区与原 Agent 会话' };
-    record.updated_at = new Date().toISOString(); this.records.save(record);
+    record.updated_at = new Date().toISOString();
+    if (authorization) this.records.save(record);
+    else this.options.store.authorizeLegacySourceContinuation(expectedWorkflowJson, record);
     this.launchSourceWorkflow(record.workflow_id, preflight, true, input.message);
     return { workflow_id: record.workflow_id, status: record.status };
   }
 
-  resumePublic(workflowId: string, input: { message?: string; budget?: Partial<OptimizationSessionBudget>; cliApiKey?: string; packageLoader?: LibraryPackageLoader } = {}): { workflow_id: string; status: string } {
+  resumePublic(workflowId: string, input: { message?: string; budget?: Partial<OptimizationSessionBudget>; cliApiKey?: string; packageLoader?: LibraryPackageLoader; candidateScope?: CandidateSourceScope } = {}): { workflow_id: string; status: string } {
     if (this.stopping) throw new Error('后台正在停止，请稍后重试。');
     const record = this.records.get(workflowId);
     if (!record) throw new Error('workflow not found');
@@ -836,6 +864,7 @@ export class OptimizationWorkflowService {
     if (this.controllers.has(workflowId)) return { workflow_id: workflowId, status: record.status };
     if (input.message !== undefined && (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 16_384)) throw new Error('补充要求需为 1–16384 字符');
     if (record.verification_mode === 'source_only') return this.resumeSourceWorkflow(record, input);
+    if (input.candidateScope) throw new Error('正式优化的修改范围由已固定的测试方案确定，不能继续时更改。');
     if (isWorkflowValidationBlocked(record)) throw new Error('验证环境异常不会通过修改候选修复；请使用「重新验证当前候选」或 workflow retry-validation。');
     if (!record.agent_session || !['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'GENERATING', 'CREATED'].includes(record.status)) throw new Error('此任务没有可继续的 Agent 会话；旧记录仍可查看报告。');
     const budget = resolveOptimizationBudget(input.budget ?? record.session_budget);

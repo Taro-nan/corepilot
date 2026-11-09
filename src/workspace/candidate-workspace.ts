@@ -155,6 +155,14 @@ export function pendingCandidateSourceChanges(editing: string): string[] {
   return [...new Set([...tracked, ...untracked])];
 }
 
+/** All changed paths since the original baseline, including untracked candidate source. */
+export function candidateSourceChangesSinceBaseline(state: Pick<CandidateWorkspaceState, 'editing' | 'baseline_commit'>): string[] {
+  const tracked = gitNullSeparated(state.editing, ['diff', '--no-ext-diff', '--no-renames', '--name-only', '-z', state.baseline_commit, '--']);
+  const untracked = gitNullSeparated(state.editing, ['ls-files', '--others', '--exclude-standard', '-z'])
+    .filter(relative => !isBuildArtifact(relative));
+  return [...new Set([...tracked, ...untracked])];
+}
+
 function addDetached(repository: string, directory: string, commit: string): void {
   fs.mkdirSync(path.dirname(directory), { recursive: true });
   const result = spawnSync('git', ['-C', repository, 'worktree', 'add', '--detach', directory, commit], {

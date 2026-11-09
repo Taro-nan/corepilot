@@ -55,6 +55,14 @@ export interface RecordCandidateInput {
   agentIdentity: Record<string, unknown>;
 }
 
+/** New source tasks own their scope; historical tasks may add a continuation authorization. */
+function taskCandidateScope(task: OptimizationTask): CandidateSourceScope | undefined {
+  if (task.library_package) return task.target.scope.candidate_scope as CandidateSourceScope;
+  if (task.target.scope.verification_mode !== 'source_only') return undefined;
+  const continuation = task.declared_context.source_scope_authorization as { candidate_scope?: CandidateSourceScope } | undefined;
+  return (task.target.scope.candidate_scope as CandidateSourceScope | undefined) ?? continuation?.candidate_scope;
+}
+
 export interface StartExperimentInput {
   taskId: string;
   candidateId: string;
@@ -247,7 +255,9 @@ export class OptimizationRuntime {
       if (typeof proposal[field] !== 'string' || !proposal[field].trim() || proposal[field].length > 8192) throw new Error(`Hypothesis ${field} must be bounded and non-empty`);
     }
     if (!Array.isArray(proposal.affected_scope) || proposal.affected_scope.length === 0 || proposal.affected_scope.length > 64 || proposal.affected_scope.some(scope => typeof scope !== 'string' || !scope.trim() || scope.length > 1024 || /^[\\/]|:|[*?]/.test(scope) || scope.replace(/\\/g, '/').split('/').some(part => !part || part === '.' || part === '..'))) throw new Error('Hypothesis affected_scope must contain relative source file paths');
-    if (task.library_package) assertCandidateSourceScope(task.target.scope.candidate_scope as CandidateSourceScope, proposal.affected_scope);
+    const taskScope = taskCandidateScope(task);
+    if (task.target.scope.verification_mode === 'source_only' && !taskScope) throw new Error('历史源码任务尚未授权继续时的修改范围。');
+    if (taskScope) assertCandidateSourceScope(taskScope, proposal.affected_scope);
     if (!Array.isArray(proposal.evidence) || proposal.evidence.length === 0 || proposal.evidence.length > 64) throw new Error('Hypothesis requires bounded investigation evidence');
     for (const evidence of proposal.evidence) {
       if (!evidence || !['SOURCE_INSPECTION', 'DEVELOPMENT_FEEDBACK', 'EXPERIMENT_FEEDBACK'].includes(evidence.kind) || typeof evidence.summary !== 'string' || !evidence.summary.trim() || evidence.summary.length > 8192) throw new Error('Hypothesis evidence is invalid');
@@ -317,7 +327,9 @@ export class OptimizationRuntime {
     const hypothesis = this.getHypothesis(input.hypothesisId);
     if (hypothesis.task_id !== input.taskId || hypothesis.status === 'ABANDONED') throw new Error('Candidate requires an active Hypothesis from the same task');
     assertCandidateSourceScope({ include: hypothesis.affected_scope, exclude: [] }, input.checkpoint.files.map(item => item.path));
-    if (task.library_package) assertCandidateSourceScope(task.target.scope.candidate_scope as CandidateSourceScope, input.checkpoint.files.map((item) => item.path));
+    const taskScope = taskCandidateScope(task);
+    if (task.target.scope.verification_mode === 'source_only' && !taskScope) throw new Error('历史源码任务尚未授权继续时的修改范围。');
+    if (taskScope) assertCandidateSourceScope(taskScope, input.checkpoint.files.map((item) => item.path));
     const existing = this.store.listCandidates(input.taskId);
     const parent = existing.at(-1) ?? null;
     const candidate: Candidate = {

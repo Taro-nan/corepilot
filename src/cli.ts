@@ -3,7 +3,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { parseOptimizeCliInput, OptimizeCliInputError } from './config/optimize-cli-input.js';
+import { parseOptimizeCliInput, renderOptimizeCliHelp, OptimizeCliInputError } from './config/optimize-cli-input.js';
 import { isBuildConfigured, loadOptimizationConfig, resolveOptimizationApiKey, resolveOptimizationProxy } from './config/optimization-config.js';
 import { SqliteTaskStore } from './storage/sqlite-task-store.js';
 import { TaskHost } from './core/task-host.js';
@@ -88,7 +88,7 @@ async function optimize(args: string[]): Promise<number> {
     const input = parseOptimizeCliInput(args);
     if (input.projectId) {
       const api = new ApiClient(serverUrl());
-      const submitted = await api.submitOptimizationWorkflow({ project_id: input.projectId, ...(input.budget ? { budget: input.budget } : {}), ...(input.functionName ? { function_name: input.functionName } : {}), ...(input.sourceBranch ? { source_branch: input.sourceBranch } : {}), entry_file: input.entryFile, enable_performance: input.enablePerformance, ...(input.verificationMode ? { verification_mode: input.verificationMode } : {}) }, { apiKey: input.apiKey }) as { workflow_id: string };
+      const submitted = await api.submitOptimizationWorkflow({ project_id: input.projectId, ...(input.budget ? { budget: input.budget } : {}), ...(input.functionName ? { function_name: input.functionName } : {}), ...(input.sourceBranch ? { source_branch: input.sourceBranch } : {}), entry_file: input.entryFile, ...(input.candidateScope ? { candidate_scope: input.candidateScope } : {}), enable_performance: input.enablePerformance, ...(input.verificationMode ? { verification_mode: input.verificationMode } : {}) }, { apiKey: input.apiKey }) as { workflow_id: string };
       console.log(`已提交优化工作流：${submitted.workflow_id}`);
       if (input.watch) return await watchWorkflow(api, ['watch', submitted.workflow_id, ...(input.reportOutput ? ['--output', input.reportOutput] : [])]);
       return 0;
@@ -103,6 +103,7 @@ async function optimize(args: string[]): Promise<number> {
       function_name: input.functionName,
       ...(input.budget ? { budget: input.budget } : {}),
       entry_file: input.entryFile,
+      ...(input.candidateScope ? { candidate_scope: input.candidateScope } : {}),
       config_path: input.configPath,
       repository_root: input.repositoryRoot,
       ...(input.sourceBranch ? { source_branch: input.sourceBranch } : {}),
@@ -216,9 +217,9 @@ async function watchWorkflow(api: ApiClient, args: string[], reportRoot?: string
 
 async function check(args: string[]): Promise<number> {
   try {
-    const parsed = parseArgs({ args, strict: true, options: { config: { type: 'string' }, function: { type: 'string' }, 'source-only': { type: 'boolean' }, branch: { type: 'string' } } });
+    const parsed = parseArgs({ args, strict: true, options: { config: { type: 'string' }, function: { type: 'string' }, 'source-only': { type: 'boolean' }, branch: { type: 'string' }, allow: { type: 'string', multiple: true }, exclude: { type: 'string', multiple: true } } });
     const result = await checkOptimization(path.resolve(parsed.values.config ?? 'corepilot.yaml'), parsed.values.function,
-      { ...(parsed.values['source-only'] ? { verificationMode: 'source_only' as const } : {}), repositoryRoot: process.cwd(), sourceBranch: parsed.values.branch });
+      { ...(parsed.values['source-only'] ? { verificationMode: 'source_only' as const, candidateScope: { include: parsed.values.allow ?? [], exclude: parsed.values.exclude ?? [] } } : {}), repositoryRoot: process.cwd(), sourceBranch: parsed.values.branch });
     console.log(result.message);
     return 0;
   } catch (error) { return fail(`运行条件检查失败：${(error as Error).message}`); }
@@ -453,6 +454,8 @@ async function libraryPackageCommand(args: string[]): Promise<number> {
 
 export async function runCli(argv: string[]): Promise<number> {
   const [command, ...args] = argv;
+  if (command === 'optimize' && (args.includes('--help') || args.includes('-h'))) { console.log(renderOptimizeCliHelp()); return 0; }
+  if (command === 'workflow' && (args.includes('--help') || args.includes('-h'))) { console.log(renderCliHelp()); return 0; }
   if (!command) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) return fail('交互式工作台需要终端；使用 corepilot --help 查看命令');
     const { startInteractive } = await import('./cli-interactive/start.js');

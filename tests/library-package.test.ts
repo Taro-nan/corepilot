@@ -284,7 +284,7 @@ test('package candidate scope is enforced while Agent reads remain unrestricted'
   const scope = { include: ['fixtures/'], exclude: ['fixtures/oracle.c'] };
   assert.equal(candidatePathAllowed(scope, 'fixtures/vector.c'), true);
   for (const filename of ['oracle.txt', 'fixtures/oracle.c', 'fixtures/../oracle.txt', 'evaluators/oracle.c', '/fixtures/vector.c', 'C:/fixtures/vector.c']) {
-    assert.throws(() => assertCandidateSourceScope(scope, [filename]), /outside package scope/);
+    assert.throws(() => assertCandidateSourceScope(scope, [filename]), /超出允许修改范围/);
   }
   assert.equal(candidatePathAllowed({ include: ['.GIT/'], exclude: [] }, '.GIT/config'), false);
   const tools = new WorkspaceToolset(root, { candidateSourceScope: scope });
@@ -349,7 +349,7 @@ test('OptimizationRuntime rejects out-of-domain candidate checkpoints before per
       hypothesis: null,
       agentIdentity: {},
     };
-    assert.throws(() => runtime.recordCandidate(input), /outside package scope/);
+    assert.throws(() => runtime.recordCandidate(input), /超出允许修改范围/);
     assert.equal(store.listCandidates(task.task_id).length, 0);
     input.checkpoint.files[0].path = 'fixtures/vector.c';
     assert.equal(runtime.recordCandidate(input).status, 'FROZEN');

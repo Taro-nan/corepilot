@@ -12,6 +12,10 @@
 
 测试两端可分别选择源码分支或已上传库包，因此支持源码与源码、源码与库包、库包与库包。源码会固定 Git commit，再通过 RPC 上传到 Runner 的本次专属目录中构建；上传库包固定文件、入口和摘要，在使用时检查目标机器兼容性及依赖。当前库包入口支持 Linux `.so` 及配套头文件，不把其他产物类型写成已支持。
 
+“仅生成代码”需要在提交前明确允许 Agent 修改的仓库相对文件或目录；目录以 `/` 结尾，包含其所有后代文件。应选择最小范围，并排除测试、参考实现和评价器；调查时仍可读取仓库中的其他源码。优先调查文件 `--file` 仅提示从哪里开始阅读，不授予修改权限。修改范围随任务冻结，需扩大时创建新任务。
+
+历史源码任务没有记录授权范围，旧候选与报告保持原样。继续历史任务时需要明确范围，范围从本次继续生效；如果旧工作区相对原基线已有越界改动，先检查现场，系统不会清理或覆盖。独立测试已有候选无需补录范围。
+
 ## 创建测试
 
 1. 选择被测对象；需要性能比较时再选择比较对象。仅测正确性时也可勾选“向正确性脚本提供比较库”，具体参考用途仍由方案定义。
@@ -35,8 +39,10 @@
 ## CLI 与 API
 
 ```text
-corepilot optimize --project <项目ID> --function <函数> --source-only
+corepilot optimize --project <项目ID> --function <函数> --source-only --allow src/kernel.c
+corepilot optimize --project <项目ID> --function <函数> --source-only --allow src/impl/ --exclude src/impl/tests/
 corepilot workflow watch <工作流ID>
+corepilot workflow resume <历史源码工作流ID> --allow src/kernel.c
 corepilot test list
 corepilot test assets
 corepilot test import --directory ./library --entry lib/libexample.so --name Example --version 1.0
@@ -45,6 +51,8 @@ corepilot test start --file ./test-request.json --request-id my-comparison-1
 corepilot test status <测试ID>
 corepilot test cancel <测试ID>
 ```
+
+`--allow` 和 `--exclude` 可重复；目录以 `/` 结尾。HTTP `POST /v1/workflows` 的 `source_only` 模式对应 `candidate_scope: { "include": ["src/kernel.c"], "exclude": [] }`；恢复无记录范围的历史任务时在 `/v1/workflows/<ID>/resume` 提交相同字段。相同幂等键重试必须保持范围一致。旧版客户端的源码任务提交应增加该字段；正式验证模式仍由接入方案规定范围。
 
 `plan-ref.json`：
 
