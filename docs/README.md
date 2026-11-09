@@ -10,6 +10,7 @@
 | --- | --- |
 | 当前调用链、状态所有权、目标模块边界与迁移条件 | [系统架构与演进边界](architecture/corepilot-system.md) |
 | 下一阶段深度改进、优先级与验收标准 | [性能工程清单](roadmap/performance-depth.md) |
+| 技术评审整改状态、验证结果与外部阻塞 | [技术评审整改记录](engineering/corepilot-review-execution.md) |
 | 测试辨别力、Runner 排队、统计区间、A/A 校准与源码复现 | [性能可信度与复现](guides/performance-assurance.md) |
 | 目录职责、文件保留/清理和工程检查 | [仓库结构与维护](development/repository-layout.md) |
 | 贡献流程和本地验证 | [贡献指南](../CONTRIBUTING.md) |

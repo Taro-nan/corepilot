@@ -18,6 +18,27 @@ const files = [...new Set(execFileSync('git', ['ls-files', '--cached', '--others
   cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
 }).split('\0').filter(file => file && fs.existsSync(path.join(root, file)) && fs.statSync(path.join(root, file)).isFile()))];
 
+// Ignore rules do not remove files already tracked by Git. Machine-specific
+// configuration and local runtime state must not enter a fresh checkout.
+const trackedFiles = execFileSync('git', ['ls-files', '--cached', '-z'], {
+  cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
+}).split('\0').filter(Boolean);
+for (const file of trackedFiles) {
+  if (file === 'corepilot.yaml' || /^(?:\.tmp-model-test|\.corepilot|corepilot-data)\//.test(file)) {
+    problems.push(`Machine-specific configuration or runtime data must not be tracked: ${file}`);
+  }
+}
+
+// Keep this intentionally small: it catches repository-wide formatting and
+// unresolved merges without pretending to be a semantic TypeScript linter.
+for (const file of files.filter(file => /^(?:src|web\/src|tests|scripts)\/.*\.(?:ts|tsx|mjs)$/.test(file))) {
+  const lines = fs.readFileSync(path.join(root, file), 'utf8').split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    if (/[\t ]+$/.test(lines[index])) problems.push(`Trailing whitespace: ${file}:${index + 1}`);
+    if (/^(?:<{7}(?:\s|$)|={7}$|>{7}(?:\s|$))/.test(lines[index])) problems.push(`Unresolved merge marker: ${file}:${index + 1}`);
+  }
+}
+
 const tests = [...walk(path.join(root, 'tests')), ...walk(path.join(root, 'web', 'tests'))].map(file => slash(path.relative(root, file)));
 const ignored = spawnSync('git', ['check-ignore', '--no-index', '--stdin'], { cwd: root, encoding: 'utf8', input: tests.join('\n') + '\n', windowsHide: true });
 if (ignored.error || ignored.status !== 0 && ignored.status !== 1) throw new Error(ignored.error?.message ?? ignored.stderr);

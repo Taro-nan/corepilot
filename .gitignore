@@ -1,4 +1,6 @@
 node_modules/
+# The repository-root CLI configuration is machine-specific; public examples live in examples/.
+/corepilot.yaml
 # Codex/工作助手本地记忆，不属于项目源码或发布产物
 .workbuddy/
 dist/
