@@ -93,6 +93,10 @@ export class ApiClient {
     return this.request('GET', `/v1/workflows/${encodeURIComponent(workflowId)}/report`) as Promise<OptimizationReportResponse>;
   }
 
+  getExperimentReview(workflowId: string, experimentId: string): Promise<{ review: Record<string, unknown> }> {
+    return this.request('GET', `/v1/workflows/${encodeURIComponent(workflowId)}/experiments/${encodeURIComponent(experimentId)}/review`) as Promise<{ review: Record<string, unknown> }>;
+  }
+
   cancelOptimizationWorkflow(workflowId: string): Promise<unknown> {
     return this.request('POST', `/v1/workflows/${encodeURIComponent(workflowId)}/cancel`, {});
   }

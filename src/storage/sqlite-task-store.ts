@@ -876,6 +876,32 @@ export class SqliteTaskStore implements TaskStore {
     return this.readJsonRecord<Experiment>('SELECT record_json FROM optimization_experiments WHERE experiment_id = ?', experimentId);
   }
 
+  readExperimentReviewSnapshot(workflowId: string, experimentId: string): {
+    workflow: OptimizationWorkflowRecord; task: OptimizationTask; candidate: Candidate | null; experiment: Experiment; measurements: Measurement[];
+  } | null {
+    // One SQLite read transaction prevents mixing an Experiment state with rows
+    // committed after it. Runner synchronization and the testpack file have
+    // separate lifetimes and are deliberately not claimed as atomic here.
+    this.db.exec('BEGIN');
+    try {
+      const raw = this.getOptimizationWorkflowJson(workflowId);
+      const workflow = raw ? JSON.parse(raw) as OptimizationWorkflowRecord : null;
+      const task = workflow?.optimization_task_id ? this.getOptimizationTask(workflow.optimization_task_id) : null;
+      const experiment = this.getExperiment(experimentId);
+      if (!workflow || workflow.workflow_id !== workflowId || !task || task.workflow_id !== workflowId ||
+          !experiment || experiment.task_id !== task.task_id) {
+        this.db.exec('COMMIT'); return null;
+      }
+      const size = this.db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(length(CAST(record_json AS BLOB))), 0) AS bytes
+        FROM optimization_measurements WHERE experiment_id = ?`).get(experimentId) as { count: number; bytes: number };
+      if (size.count > 20_000 || size.bytes > 32 * 1024 * 1024) throw new Error('实验测量超过单次诊断导出的数量或大小上限；原记录未修改。');
+      const measurements = this.readJsonRecords<Measurement>('SELECT record_json FROM optimization_measurements WHERE experiment_id = ? ORDER BY rowid', experimentId);
+      const candidate = this.getCandidate(experiment.candidate_id);
+      this.db.exec('COMMIT');
+      return { workflow, task, candidate, experiment, measurements };
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+
   listExperiments(taskId: string): Experiment[] {
     return this.readJsonRecords<Experiment>('SELECT record_json FROM optimization_experiments WHERE task_id = ? ORDER BY rowid', taskId);
   }

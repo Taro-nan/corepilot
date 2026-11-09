@@ -32,6 +32,7 @@ import { executeTestingCommand } from './client/testing-commands.js';
 import { verifyFrozenEvidenceArchive } from './workspace/frozen-evidence.js';
 import { recalculateFrozenEvidenceArchive } from './application/evidence-statistics-recalculation.js';
 import { exportReviewSamples, verifyReviewSamples } from './application/evidence-review-samples.js';
+import { verifyExperimentReview } from './application/experiment-review-verification.js';
 
 function fail(message: string): number { console.error(`corepilot: ${message}`); return 1; }
 function serverUrl(): string { return process.env.COREPILOT_SERVER_URL ?? 'http://127.0.0.1:4317'; }
@@ -42,10 +43,15 @@ function evidenceCommand(args: string[]): number {
       options: { sha256: { type: 'string' }, output: { type: 'string' }, json: { type: 'boolean' }, 'recalculate-performance': { type: 'boolean' } } });
     const [action, filename] = parsed.positionals;
     if (parsed.positionals.length !== 2 || !filename || !parsed.values.sha256 ||
-        (action !== 'verify' && action !== 'export-review' && action !== 'verify-review') ||
+        (action !== 'verify' && action !== 'export-review' && action !== 'verify-review' && action !== 'verify-experiment-review') ||
         (action === 'export-review' ? !parsed.values.output : !!parsed.values.output) ||
         (action !== 'verify' && parsed.values['recalculate-performance'])) {
-      throw new Error('用法：corepilot evidence verify|export-review|verify-review <文件> --sha256 <可信 SHA-256>；export-review 还需 --output <新文件>');
+      throw new Error('用法：corepilot evidence verify|export-review|verify-review|verify-experiment-review <文件> --sha256 <可信 SHA-256>；export-review 还需 --output <新文件>');
+    }
+    if (action === 'verify-experiment-review') {
+      const result = verifyExperimentReview(filename, parsed.values.sha256);
+      console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      return 0;
     }
     if (action === 'export-review' || action === 'verify-review') {
       const result = action === 'export-review'
@@ -62,7 +68,8 @@ function evidenceCommand(args: string[]): number {
     const message = (error as Error).message;
     if (!args.includes('--json')) return fail(message);
     const code = args[0] === 'export-review' ? 'EVIDENCE_REVIEW_EXPORT_FAILED'
-      : args[0] === 'verify-review' ? 'EVIDENCE_REVIEW_VERIFICATION_FAILED' : 'EVIDENCE_VERIFICATION_FAILED';
+      : args[0] === 'verify-review' ? 'EVIDENCE_REVIEW_VERIFICATION_FAILED'
+      : args[0] === 'verify-experiment-review' ? 'EXPERIMENT_REVIEW_VERIFICATION_FAILED' : 'EVIDENCE_VERIFICATION_FAILED';
     console.error(JSON.stringify({ ok: false, code, message }));
     return 1;
   }

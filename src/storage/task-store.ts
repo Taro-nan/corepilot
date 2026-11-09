@@ -3,7 +3,7 @@ import type { Event, RunnerJob, Task, TaskStatus } from '../contracts/index.js';
 import type { OptimizationStore } from './optimization-store.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
-import type { Candidate, Experiment, OptimizationTask } from '../contracts/optimization-domain.js';
+import type { Candidate, Experiment, Measurement, OptimizationTask } from '../contracts/optimization-domain.js';
 import type { OptimizationWorkflowRecord, WorkflowExecutionOutcomePatch, WorkflowExperimentIntent } from '../contracts/workflow.js';
 import type { OptimizationIntakeStatus } from '../contracts/optimization-intake.js';
 
@@ -64,6 +64,10 @@ export interface TaskStore extends OptimizationStore {
   updateReproduction(workflowId: string, experimentId: string, patch: Partial<Omit<NonNullable<OptimizationWorkflowRecord['reproduction']>, 'experiment_id'>>): boolean;
   saveCompletedDelivery(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   getOptimizationWorkflowJson(workflowId: string): string | null;
+  /** Read a bounded, mutually consistent SQLite view; no Runner or filesystem facts are implied. */
+  readExperimentReviewSnapshot(workflowId: string, experimentId: string): {
+    workflow: OptimizationWorkflowRecord; task: OptimizationTask; candidate: Candidate | null; experiment: Experiment; measurements: Measurement[];
+  } | null;
   listOptimizationWorkflowJson(limit: number): string[];
   listRecoverableWorkflowJson(): string[];
   listPendingDeliveryWorkflowIds(): string[];

@@ -1,12 +1,15 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ApiClientError, type ApiClient } from './api-client.js';
 import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import { writeOptimizationReport } from '../report/write-report.js';
+import { writeNewPrivateFile } from '../workspace/private-output.js';
+import { verifyExperimentReviewBytes } from '../application/experiment-review-verification.js';
 
-export const WORKFLOW_USAGE = 'workflow list | workflow status|watch|report|evidence|human-approve|deliver|reproduce|events|resume|retry-validation|message|cancel|delivery-check|delivery-resume|delivery-withdraw|delivery-cleanup <workflow-id> [--json]；历史未授权任务首次继续编辑：workflow resume <id> --allow <文件或目录/> [--exclude <路径>]';
+export const WORKFLOW_USAGE = 'workflow list | workflow status|watch|report|experiment-review|evidence|human-approve|deliver|reproduce|events|resume|retry-validation|message|cancel|delivery-check|delivery-resume|delivery-withdraw|delivery-cleanup <workflow-id> [--json]；历史未授权任务首次继续编辑：workflow resume <id> --allow <文件或目录/> [--exclude <路径>]';
 export function isWorkflowFinished(record: OptimizationWorkflowRecord): boolean {
   return ['CANDIDATE_READY', 'WAITING_APPROVAL', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'BUDGET_EXHAUSTED', 'INTERRUPTED', 'VALIDATION_BLOCKED', 'DELIVERABLE', 'FAILED', 'CANCELLED'].includes(record.status);
 }
@@ -43,6 +46,7 @@ export async function executeWorkflowCommand(api: ApiClient, args: string[], opt
 } = {}): Promise<WorkflowCommandResult> {
   const parsed = parseArgs({ args, allowPositionals: true, strict: true, options: {
     json: { type: 'boolean' }, limit: { type: 'string' }, output: { type: 'string' },
+    experiment: { type: 'string' },
     interval: { type: 'string' }, timeout: { type: 'string' },
     'commit-message': { type: 'string' }, 'expected-baseline-commit': { type: 'string' },
     message: { type: 'string' }, 'budget-minutes': { type: 'string' }, 'max-candidates': { type: 'string' }, after: { type: 'string' },
@@ -54,7 +58,7 @@ export async function executeWorkflowCommand(api: ApiClient, args: string[], opt
   const value = parsed.values;
   const allowed: Record<string, string[]> = {
     list: ['json', 'limit'], status: ['json'], watch: ['json', 'interval', 'timeout', 'output'],
-    report: ['json', 'output'], evidence: ['json', 'prepare', 'output'], 'human-approve': ['json', 'reviewer', 'authorization-reference', 'evidence-digest'],
+    report: ['json', 'output'], 'experiment-review': ['json', 'output', 'experiment'], evidence: ['json', 'prepare', 'output'], 'human-approve': ['json', 'reviewer', 'authorization-reference', 'evidence-digest'],
     cancel: ['json'], 'retry-validation': ['json'], approve: ['json', 'commit-message', 'expected-baseline-commit'], deliver: ['json', 'commit-message', 'expected-baseline-commit'],
     reproduce: ['json', 'plan', 'cancel'],
     'delivery-check': ['json'], 'delivery-resume': ['json', 'confirm-stopped'], 'delivery-withdraw': ['json', 'confirm-stopped', 'operation-id'], 'delivery-cleanup': ['json'],
@@ -77,6 +81,16 @@ export async function executeWorkflowCommand(api: ApiClient, args: string[], opt
       return result({ files, report: response.report }, `已导出优化测试报告：\n${files.markdown}\n${files.json}`);
     }
     return result(response.report, response.markdown);
+  }
+  if (action === 'experiment-review') {
+    if (!value.experiment?.trim() || !value.output?.trim()) throw new Error('experiment-review 需要 --experiment <实验 ID> 和 --output <新文件>。');
+    const { review } = await api.getExperimentReview(id, value.experiment);
+    const bytes = Buffer.from(`${JSON.stringify(review, null, 2)}\n`, 'utf8');
+    try { verifyExperimentReviewBytes(bytes); }
+    catch { throw new Error('服务端返回的单实验数值包包含不支持或无效的内容；未生成文件，请核对服务版本和原记录。'); }
+    writeNewPrivateFile(value.output, bytes);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    return result({ sha256, review: 'REVIEW_REQUIRED' }, `已生成待人工审阅的单实验数值包，SHA-256：${sha256}\n数值仍可能敏感；不证明来源、测试有效性、批准或交付。`);
   }
   if (action === 'evidence') {
     if (value.prepare && value.output) throw new Error('先准备证据，再使用 --output 下载已准备的证据。');

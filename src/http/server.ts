@@ -202,6 +202,17 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
     return;
   }
   const workflowReport = pathname.match(/^\/v1\/workflows\/([^/]+)\/report$/);
+  const workflowExperimentReview = pathname.match(/^\/v1\/workflows\/([^/]+)\/experiments\/([^/]+)\/review$/);
+  if (method === 'GET' && workflowExperimentReview) {
+    try {
+      const review = options.workflowService.experimentReview(decodeURIComponent(workflowExperimentReview[1]), decodeURIComponent(workflowExperimentReview[2]));
+      if (!review) throw new ApiError(404, 'EXPERIMENT_NOT_FOUND', '未找到属于该任务的实验。');
+      sendJson(res, 200, { review }); return;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(409, 'EXPERIMENT_REVIEW_UNAVAILABLE', '无法安全读取单次实验诊断，请检查持久记录和导出上限；原记录未修改。');
+    }
+  }
   const workflowEvents = pathname.match(/^\/v1\/workflows\/([^/]+)\/events$/);
   if (method === 'GET' && workflowEvents) {
     const after = Number(url.searchParams.get('after') ?? 0);

@@ -18,6 +18,7 @@ import { PiOptimizationSession, readOptimizationSessionEvents, withContinuationI
 import { resolveOptimizationBudget, type OptimizationSessionBudget, type OptimizationSessionEvents } from '../contracts/optimization-session.js';
 import { buildCandidateFeedbackPrompt, runPublicAgentWorkflow, type PublicDevelopmentInvestigation, type PublicAgentWorkflowCheckpoint } from './public-agent-workflow.js';
 import { candidateSourceChangesSinceBaseline, ensureCandidateRepository, type CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
+import { experimentReview } from '../application/experiment-review.js';
 import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
 import { parseSourceScope } from '../contracts/source-scope.js';
 import type { CandidateSourceScope } from '../contracts/library-package.js';
@@ -171,6 +172,12 @@ export class OptimizationWorkflowService {
     if (!workflow) return null;
     const report = buildOptimizationReport(workflow, this.options.store);
     return { report, markdown: renderOptimizationReport(report) };
+  }
+
+  /** A bounded diagnostic projection; it never creates Evidence or changes facts. */
+  experimentReview(workflowId: string, experimentId: string) {
+    const snapshot = this.options.store.readExperimentReviewSnapshot(workflowId, experimentId);
+    return snapshot ? experimentReview(snapshot) : null;
   }
 
   private createIntake(record: OptimizationWorkflowRecord, task: OptimizationTask) {

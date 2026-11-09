@@ -1,9 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import path from 'node:path';
 import type { Experiment, Measurement } from '../contracts/optimization-domain.js';
 import type { ValidationTestpack } from '../contracts/validation-testpack.js';
 import { inspectVerifiedEvidenceArchive } from '../workspace/frozen-evidence.js';
+import { writeNewPrivateFile } from '../workspace/private-output.js';
 import { recalculateEvidenceStatistics } from './evidence-statistics-recalculation.js';
 import { createReviewSamples, verifyReviewSamplesBytes } from './review-samples.js';
 import { assertPerformanceEvidenceConsistent } from './workflow-evidence-performance.js';
@@ -29,27 +29,6 @@ function readFileBounded(filename: string): Buffer {
   } finally { fs.closeSync(fd); }
 }
 
-/** Write a private temporary file, then atomically create the destination without replacing it. */
-function writeNewFile(filename: string, bytes: Buffer): void {
-  const destination = path.resolve(filename);
-  const temporary = path.join(path.dirname(destination), `.corepilot-review-${randomUUID()}.tmp`);
-  let fd: number | undefined;
-  let created = false;
-  try {
-    fd = fs.openSync(temporary, 'wx', 0o600); created = true;
-    fs.writeFileSync(fd, bytes);
-    fs.fsyncSync(fd);
-    fs.closeSync(fd); fd = undefined;
-    fs.linkSync(temporary, destination);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('输出文件已存在，未覆盖；请选择新的文件名。');
-    throw new Error('无法创建待审阅包；请检查输出目录权限和文件系统是否支持排他创建。');
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-    if (created) fs.unlinkSync(temporary);
-  }
-}
-
 /** The original archive is read and verified once; no contents from it are executed or published. */
 export function exportReviewSamples(archivePath: string, trustedSha256: string, outputPath: string) {
   let archive: ReturnType<typeof inspectVerifiedEvidenceArchive>;
@@ -69,7 +48,7 @@ export function exportReviewSamples(archivePath: string, trustedSha256: string, 
   } catch { throw new Error('原始样本无法按白名单投影或与两轮统计一致；未生成待审阅包。'); }
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, 'utf8');
   if (bytes.length > MAX_BYTES) throw new Error('待审阅包超过 16 MiB 上限；未生成文件。');
-  writeNewFile(outputPath, bytes);
+  writeNewPrivateFile(outputPath, bytes);
   return { format: document.format, review: document.review, sha256: digest(bytes), notice };
 }
 
