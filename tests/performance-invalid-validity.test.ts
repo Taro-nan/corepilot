@@ -6,6 +6,7 @@ import { ApiClient } from '../src/client/api-client.js';
 import { loadOptimizationConfig } from '../src/config/optimization-config.js';
 import { DEFAULT_STATISTICS } from '../src/contracts/performance-statistics.js';
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
+import { candidateEvaluationFeedback } from '../src/workspace/candidate-evaluation-feedback.js';
 import { evaluatePerformanceGate } from '../src/workspace/validation-runner.js';
 import { seedBlockedValidation } from './validation-recovery-fixture.js';
 import { startWebFixture } from './web-fixture.js';
@@ -68,6 +69,9 @@ test('Runner success remains a separate fact; invalid derived statistics and rep
     const status = { ...experiment, status: 'SUCCEEDED' as const, validity: 'VALID' as const, failure_category: null,
       ended_at: experiment.created_at, current_step: null, cancel_requested: false, failure: null };
     const validation = { ...seeded.validation, runner_status: status, performance: seeded.validation.build, passed: true };
+    const feedback = candidateEvaluationFeedback({ validation, performance: gate });
+    assert.equal(feedback.experiment_validity, 'INVALID');
+    assert.equal(status.validity, 'VALID', 'raw Runner execution fact remains unchanged');
     runtime.synchronizeRemoteExperiment(status);
     const result = runtime.completeValidationExperiment({ experimentId: experiment.experiment_id, validation, performance: gate, factsAlreadyPersisted: true });
     assert.equal(result.status, 'SUCCEEDED');
@@ -105,6 +109,7 @@ test('public retry and report retain the invalid statistics diagnosis without ma
     assert.equal(workflow.status, 'VALIDATION_BLOCKED', workflow.error ?? JSON.stringify(workflow.progress));
     assert.equal(workflow.candidate_id, seeded.candidate.candidate_id);
     assert.equal(workflow.candidate_evaluation_feedback?.performance_summary.status, 'INVALID');
+    assert.equal(workflow.candidate_evaluation_feedback?.experiment_validity, 'INVALID');
     const report = (await api.getOptimizationReport(seeded.workflowId)).report;
     const result = report.experiments.filter(row => row.experiment.candidate_id === seeded.candidate.candidate_id).at(-1)!.experiment;
     assert.equal(result.status, 'SUCCEEDED');

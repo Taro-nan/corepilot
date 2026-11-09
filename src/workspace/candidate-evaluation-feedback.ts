@@ -67,7 +67,7 @@ export function candidateEvaluationFeedback(input: {
     schema_version: 1,
     candidate_id: input.candidateId ?? status?.candidate_id ?? null,
     experiment_id: input.experimentId ?? status?.experiment_id ?? null,
-    experiment_validity: status?.validity ?? 'UNKNOWN',
+    experiment_validity: performance?.statistics?.verdict === 'INVALID' ? 'INVALID' : status?.validity ?? 'UNKNOWN',
     correctness_status: correctnessStatus,
     correctness_coverage: { ...validation.correctness_coverage },
     failed_cases: failedCases.map(item => ({
