@@ -37,9 +37,11 @@ export interface TaskStore extends OptimizationStore {
   releaseLease(ownerId: string): void;
   getActiveLease(): LeaseRecord | null;
   saveOptimizationWorkflowJson(workflowId: string, workflowJson: string): void;
+  saveRecoveredWorkflow(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   saveCompletedDelivery(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   getOptimizationWorkflowJson(workflowId: string): string | null;
   listOptimizationWorkflowJson(limit: number): string[];
+  listRecoverableWorkflowJson(): string[];
   listPendingDeliveryWorkflowIds(): string[];
   getOptimizationWorkflowByRequestId(requestId: string): string | null;
   listProjects(): ProjectRecord[];

@@ -277,6 +277,18 @@ export class SqliteTaskStore implements TaskStore {
     this.db.prepare('INSERT INTO optimization_workflows (workflow_id, workflow_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(workflow_id) DO UPDATE SET workflow_json=excluded.workflow_json, updated_at=excluded.updated_at').run(workflowId, workflowJson, new Date().toISOString());
   }
 
+  saveRecoveredWorkflow(workflowId: string, workflowJson: string, task: OptimizationTask | null): void {
+    this.transaction(() => {
+      if (task) {
+        if ((task.workflow_id !== null && task.workflow_id !== workflowId) || task.status !== 'INTERRUPTED') {
+          throw new Error('recovered task identity or status mismatch');
+        }
+        this.saveOptimizationTask(task);
+      }
+      this.saveOptimizationWorkflowJson(workflowId, workflowJson);
+    });
+  }
+
   saveCompletedDelivery(workflowId: string, workflowJson: string, task: OptimizationTask | null): void {
     this.transaction(() => {
       if (task) {
@@ -294,6 +306,18 @@ export class SqliteTaskStore implements TaskStore {
 
   listOptimizationWorkflowJson(limit: number): string[] {
     const rows = this.db.prepare('SELECT workflow_json FROM optimization_workflows ORDER BY updated_at DESC, workflow_id DESC LIMIT ?').all(limit) as Array<{ workflow_json: string }>;
+    return rows.map(row => row.workflow_json);
+  }
+
+  listRecoverableWorkflowJson(): string[] {
+    const rows = this.db.prepare(`SELECT workflow.workflow_json FROM optimization_workflows AS workflow
+      LEFT JOIN optimization_tasks AS task ON task.task_id = json_extract(workflow.workflow_json, '$.optimization_task_id')
+      WHERE json_extract(workflow.workflow_json, '$.status') = 'GENERATING'
+         OR (json_extract(workflow.workflow_json, '$.status') = 'CREATED'
+             AND (json_type(workflow.workflow_json, '$.agent_session') = 'object' OR task.status = 'RUNNING'))
+         OR (json_extract(workflow.workflow_json, '$.status') = 'INTERRUPTED' AND task.status IN ('CREATED', 'RUNNING'))
+         OR json_extract(workflow.workflow_json, '$.reproduction.status') IN ('PREPARING', 'RUNNING')
+      ORDER BY workflow.updated_at, workflow.workflow_id`).all() as Array<{ workflow_json: string }>;
     return rows.map(row => row.workflow_json);
   }
 

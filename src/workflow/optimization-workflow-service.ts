@@ -98,17 +98,29 @@ export class OptimizationWorkflowService {
     this.records = new SqliteOptimizationWorkflowStore(options.store);
     this.runtime = new OptimizationRuntime(options.store);
     this.reproductions = new ReproductionService(options.store, this.records);
-    for (const record of this.records.list(200)) {
+    for (const json of options.store.listRecoverableWorkflowJson()) {
+      const record = JSON.parse(json) as OptimizationWorkflowRecord;
+      const timestamp = new Date().toISOString();
       if (record.reproduction && ['PREPARING', 'RUNNING'].includes(record.reproduction.status)) {
         record.reproduction.status = 'UNKNOWN'; record.reproduction.error = 'Control 已重启；继续时先查询原复现实验，不重复提交新 ID';
-        this.records.save(record);
+        record.reproduction.updated_at = timestamp;
       }
-      if (record.agent_session && ['CREATED', 'GENERATING'].includes(record.status)) {
+      const task = record.optimization_task_id ? options.store.getOptimizationTask(record.optimization_task_id) : null;
+      const wasRunning = record.status === 'GENERATING'
+        || (record.status === 'CREATED' && (!!record.agent_session || task?.status === 'RUNNING'));
+      if (wasRunning) {
+        if (record.optimization_task_id && !task) throw new Error(`optimization task '${record.optimization_task_id}' not found during recovery`);
         record.status = 'INTERRUPTED';
-        record.progress = { ...record.progress, phase: 'INTERRUPTED', last_event: '后台已重新启动，优化现场已保留，可继续原会话。' };
-        this.records.save(record);
-        if (record.optimization_task_id) this.runtime.setTaskStatus(record.optimization_task_id, 'INTERRUPTED');
+        record.progress = { ...record.progress, phase: 'INTERRUPTED', last_event: record.agent_session
+          ? '后台已重新启动；若已保存检查点，可继续原会话。'
+          : '后台已重新启动，但会话尚未保存；请保留原记录并创建新任务。' };
       }
+      // Also repair a partial write left by earlier versions when the workflow
+      // became INTERRUPTED before its still-running Task was updated.
+      const recoverTask = task && (wasRunning || (record.status === 'INTERRUPTED' && ['CREATED', 'RUNNING'].includes(task.status)))
+        ? { ...task, status: 'INTERRUPTED' as const, updated_at: timestamp } : null;
+      record.updated_at = timestamp;
+      options.store.saveRecoveredWorkflow(record.workflow_id, JSON.stringify(record), recoverTask);
     }
     this.approvals = new WorkflowApprovalService(options.store, this.records,
       options.evidenceRoot ?? (options.worktreeRoot ? path.join(path.dirname(options.worktreeRoot), 'evidence') : path.join(os.tmpdir(), 'corepilot-evidence')));

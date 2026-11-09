@@ -50,10 +50,12 @@ flowchart LR
 | Workflow | WorkflowService 写 `optimization_workflows` JSON；HTTP、Web、CLI 和报告读取 | 持有进度、候选/实验引用、会话与交付摘要；`WAITING_APPROVAL` 是工作流状态，不是当前证据的独立证明。 |
 | OptimizationTask、Hypothesis、Candidate | OptimizationRuntime 和 Store 分别写入领域表；报告、Agent 历史与工作流读取 | Candidate 冻结源码提交和树；工作流也缓存其引用。Task 与 Workflow 的状态分别写入，不能假定跨表转换总是原子。 |
 | Experiment、CommandExecution、Measurement | Runner 管理远端执行事实；RPC 适配器以稳定 ID 同步到 Control，Runtime 记录评价；报告及 Agent 读取 | Runner 状态与 Control 副本是两个位置的事实；断线后查询原 ID，未知不能视为失败或立即重跑。新测试与复验产生新实验。 |
-| 会话与进展 | Pi 持久会话记录消息/工具事件和检查点；Workflow 存当前摘要；Web 游标读取事件 | 进程内 controllers/sessions 只表示当前接管情况，不是持久结果。一般任务的部分中断恢复目前只扫描最近 200 个工作流；交付恢复另行查询全部待核对记录。 |
+| 会话与进展 | Pi 持久会话记录消息/工具事件和检查点；Workflow 存当前摘要；Web 游标读取事件 | 进程内 controllers/sessions 只表示当前接管情况，不是持久结果。启动时按状态查询全部待恢复工作流和复现，不受公开列表 200 条限制；交付恢复单独查询待核对记录。 |
 | Evidence、领域 Approval、Delivery | 工作流引用冻结证据；`OptimizationRuntime.approveCandidate` 校验后事务保存 Approval；公开交付引用批准和证据并更新 Git | 新路径要求具名人类决定；冻结、批准和交付分别操作。历史交付不补造 Approval，旧的未完成请求须先核对并撤回后重新审阅。 |
 
 Control SQLite 在 [SqliteTaskStore](../../src/storage/sqlite-task-store.ts) 中保存项目、机器、工作流 JSON、领域对象、命令与测量；部分关联写入有事务，但跨 Workflow、领域事实、会话和文件系统没有统一原子提交。Runner 有独立 SQLite。源码归档、基线、测试包、构建产物和导出报告由文件系统保存；Pi 会话有自己的持久存储。当前命令输出与测量仍可随记录存储和整批读取，不能声称已实现通用分块日志或对象存储。
+
+启动恢复将中断的 Workflow 和其 OptimizationTask 在同一 SQLite 事务中标记为 `INTERRUPTED`；旧版已写入中断工作流、但领域任务仍为 `CREATED`/`RUNNING` 的记录也会对账。会话尚未保存时提示创建新任务，不声称能够恢复。复现的 `PREPARING`/`RUNNING` 只改为 `UNKNOWN` 并保留原实验 ID，继续复现时查询原 Runner；启动本身不会提交、取消或修改远端实验。没有会话且领域任务仍为 `CREATED` 的工作流无法区分尚未启动与启动前崩溃，保持原状态。其余运行期 Workflow、Task 和跨 Runner 的状态写入仍非统一原子状态机。
 
 ### 优化与独立测试的已落地边界
 
