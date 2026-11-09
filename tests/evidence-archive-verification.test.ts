@@ -91,6 +91,7 @@ test('rejects corrupted archive, inventory, archived file, unsafe paths, and dup
       ['base64', value => { value.files[0].base64 += '!'; }, /file identity/],
       ['path escape', value => { value.manifest.files[0].relative_path = '../escape'; value.files[0].relative_path = '../escape'; value.manifest.digest = hash(JSON.stringify(value.manifest.files)); }, /invalid Evidence file inventory/],
       ['duplicates', value => { value.manifest.files.push({ ...value.manifest.files[0] }); value.files.push({ ...value.files[0] }); value.manifest.digest = hash(JSON.stringify(value.manifest.files)); }, /invalid Evidence file inventory/],
+      ['unsorted inventory', value => { value.manifest.files.reverse(); value.files.reverse(); value.manifest.digest = hash(JSON.stringify(value.manifest.files)); }, /invalid Evidence file inventory/],
       ['file count', value => { value.manifest.files = Array.from({ length: 25_001 }, () => value.manifest.files[0]); value.manifest.digest = hash(JSON.stringify(value.manifest.files)); }, /file-count limit/],
       ['identity', value => { f.replace(value, 'candidate.json', json({ candidate_id: 'candidate:other', task_id: 'task:fixture', source: { commit: 'a'.repeat(40), tree: 'b'.repeat(40) } })); }, /identity records/],
       ['record type', value => { f.replace(value, 'evidence.json', json({ record_type: 'INVALID' })); }, /not a frozen optimization artifact/],

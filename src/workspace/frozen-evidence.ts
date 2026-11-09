@@ -19,14 +19,17 @@ function validateManifest(value: unknown, expectedDigest?: string, maxFiles?: nu
     throw new Error('Evidence inventory digest mismatch or inventory exceeds the file-count limit');
   }
   const seen = new Set<string>();
+  let previous: string | undefined;
   for (const file of manifest.files) {
     if (!file || typeof file.relative_path !== 'string' || /[:\\\0]/.test(file.relative_path) ||
         (strictPaths && /[\x00-\x1f\x7f]/.test(file.relative_path)) || path.posix.isAbsolute(file.relative_path) ||
+        (strictPaths && previous !== undefined && previous >= file.relative_path) ||
         file.relative_path.split('/').some(part => !part || part === '.' || part === '..') || seen.has(file.relative_path) ||
         !Number.isSafeInteger(file.size_bytes) || file.size_bytes < 0 || typeof file.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(file.sha256)) {
       throw new Error('invalid Evidence file inventory');
     }
     seen.add(file.relative_path);
+    previous = file.relative_path;
   }
   if (!seen.has('evidence.json')) throw new Error('Evidence inventory is missing evidence.json');
   return manifest;
