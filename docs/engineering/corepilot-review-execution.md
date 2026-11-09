@@ -17,7 +17,7 @@
 | P0 | 开源许可与发布机制。 | BLOCKED：仓库根目录没有项目许可证（VS Code 扩展有单独许可）；选择和修改项目许可证须由项目所有者授权。本次不发布 Release。 |
 | P1 | Application/Core/Runner/Evaluator/Storage/Agent 边界和实际状态所有权。 | IMPLEMENTED：现有架构图见 [系统架构](../architecture/corepilot-system.md)；部分 `core/` 仍依赖具体适配器，工作流、领域记录和 Runner 并非原子状态机，不能声明全仓治理完成。 |
 | P1 | 进程中断、重启、重复请求、远端未知、资源释放和状态一致性。 | IMPLEMENTED：启动恢复按状态查全量待处理记录；创建任务、创建复现和恢复时的关联状态使用 SQLite 事务。Runner、Git、数据库跨资源一致性仍按原操作 ID 对账，其他状态转换尚未全面原子化。 |
-| P1 | Agent 读写必须受候选工作区和源码范围约束。 | IMPLEMENTED：本轮补上终点符号链接检查；这不等于对任意构建脚本或并发进程提供操作系统级沙箱。 |
+| P1 | Agent 读写必须受候选工作区和源码范围约束。 | IMPLEMENTED：Package 模式执行候选范围检查，本轮补上终点符号链接检查；`source_only` 尚无由用户确认的文件白名单，假设中的范围由 Agent 提出。这不等于对任意构建脚本或并发进程提供操作系统级沙箱。 |
 | P2 | Candidate、Baseline、Evaluator、机器、原始测量、Evidence、Approval、Delivery 的绑定和完整性。 | IMPLEMENTED：冻结包保存摘要和原始记录，新批准会重算统计结果与原始样本的一致性。公开脱敏归档不能直接复用包含私有信息的原始包。 |
 | P2 | 可供外部复核的归档、脱敏与原始数据重算。 | NOT STARTED：当前冻结包包含私有路径和源码等信息，不能直接视为公开数据；需要独立的脱敏导出与离线复算设计。 |
 | P2 | 公开历史实验的完整原始证据。 | BLOCKED：现有 [Dilate3x3 证据索引](../../examples/ippi-dilate3x3-success-case/evidence-index.md) 对应的部分原件和公开授权不在仓库；不得伪造原始记录或覆盖冻结证据。 |
