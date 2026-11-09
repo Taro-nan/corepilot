@@ -60,6 +60,8 @@ test('a lost response and refresh recover the created task without a second POST
   await dialog.getByRole('button', { name: '查询原任务', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect.poll(() => page.url()).toContain(encodeURIComponent(originalId));
+  await expect(page.getByText('已找到原任务，请查看当前状态。')).toBeVisible();
+  await expect(page.getByText('优化任务已提交，关闭页面后后台继续执行。')).not.toBeVisible();
   expect(posts).toBe(1);
   expect(f.service.list()).toHaveLength(1);
   expect(f.modelRequests.inference).toBe(0);

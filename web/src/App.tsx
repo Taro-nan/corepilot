@@ -59,6 +59,7 @@ export function App() {
   const validationDrafts = useRef(new Map<string, ValidationEditorDraft>());
   const loading = useRef(false);
   const runReturnFocus = useRef<HTMLElement | null>(null);
+  const taskNavigationNotice = useRef<{ workflow: string; text: string } | null>(null);
   const notify = useCallback((text: string, bad = false) => setNotice({ text, bad }), []);
   const project = projects.find(p => p.project_id === projectId) ?? projects[0];
   const matchingResponse = response?.report.workflow.workflow_id === currentRoute.workflow ? response : null;
@@ -100,7 +101,11 @@ export function App() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
-  useEffect(() => { setNotice(null); }, [currentRoute.page, currentRoute.workflow]);
+  useEffect(() => {
+    const pending = taskNavigationNotice.current;
+    taskNavigationNotice.current = null;
+    setNotice(pending && currentRoute.page === 'tasks' && currentRoute.workflow === pending.workflow ? { text: pending.text, bad: false } : null);
+  }, [currentRoute.page, currentRoute.workflow]);
   useEffect(() => {
     const expired = () => setAuthenticated(false);
     window.addEventListener('corepilot-session-expired', expired);
@@ -213,7 +218,13 @@ export function App() {
     </div>
     {notice && <div className={`toast ${notice.bad ? 'bad' : ''}`} role="status"><Icon name={notice.bad ? 'report' : 'check'} size={18} /><span>{notice.text}</span><button aria-label="关闭提示" className="icon-btn" onClick={() => setNotice(null)}><Icon name="close" size={15} /></button></div>}
     {modal === 'project' && <AddProject projects={projects} close={() => setModal(null)} added={p => { setProjects(ps => [...ps.filter(x => x.project_id !== p.project_id), p]); setProjectId(p.project_id); localStorage.setItem('corepilot-project', p.project_id); setModal(null); navigate('overview'); notify('项目已添加。首页将引导你配置模型与机器，再准备测试方案。'); void refresh(); }} />}
-    {modal === 'run' && runSetup && project && <TaskComposer project={project} context={runSetup} returnFocus={runReturnFocus.current} close={() => setModal(null)} configure={(page, preparation) => { if (page === 'validation') openTaskPreparation(preparation); else { setModal(null); navigate(page); } }} created={id => { setModal(null); setResponse(null); void refresh(); navigate('tasks', id); notify('优化任务已提交，关闭页面后后台继续执行。'); }} />}
+    {modal === 'run' && runSetup && project && <TaskComposer project={project} context={runSetup} returnFocus={runReturnFocus.current} close={() => setModal(null)} configure={(page, preparation) => { if (page === 'validation') openTaskPreparation(preparation); else { setModal(null); navigate(page); } }} created={(id, recovered) => {
+      const text = recovered ? '已找到原任务，请查看当前状态。' : '优化任务已提交，关闭页面后后台继续执行。';
+      setModal(null); setResponse(null); void refresh();
+      if (currentRoute.page === 'tasks' && currentRoute.workflow === id) notify(text);
+      else taskNavigationNotice.current = { workflow: id, text };
+      navigate('tasks', id);
+    }} />}
     {inspection !== null && <Modal title="源码接入调查 · Draft" wide onClose={() => setInspection(null)}><p className="hint">只读调查结果。草稿仍需人工审阅和目标验证，不能作为已 Qualified 的正式 evaluator。</p><pre className="detail-code">{JSON.stringify(inspection, null, 2)}</pre></Modal>}
   </div>;
 }

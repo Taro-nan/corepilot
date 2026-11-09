@@ -28,7 +28,7 @@ export function updateTaskDraftSelection(projectId: string, patch: Partial<Pick<
 }
 
 export function TaskComposer({ project, context, close, created, configure, returnFocus }: {
-  project: ProjectRecord; context: TaskComposerContext; close: () => void; created: (id: string) => void; configure: (page: string, preparation: TaskPreparationContext) => void; returnFocus?: HTMLElement | null;
+  project: ProjectRecord; context: TaskComposerContext; close: () => void; created: (id: string, recovered?: boolean) => void; configure: (page: string, preparation: TaskPreparationContext) => void; returnFocus?: HTMLElement | null;
 }) {
   const storageKey = 'corepilot-task-draft:' + project.project_id;
   const formId = React.useId();
@@ -122,7 +122,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
       }
       if (result.status === 'CREATED') {
         try { forgetOptimizationRequest(project.project_id, requestId); } catch { /* The task can still be opened with its returned identity. */ }
-        created(result.workflow_id); return;
+        created(result.workflow_id, true); return;
       }
       forgetOptimizationRequest(project.project_id, requestId);
       setPending(readPending());
