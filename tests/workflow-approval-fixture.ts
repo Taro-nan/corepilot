@@ -19,12 +19,14 @@ import { DEFAULT_STATISTICS } from '../src/contracts/performance-statistics.js';
 export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>, workflowId: string, options: {
   omitRevalidationSamples?: boolean; omitRevalidationCandidateSample?: number; extraUnobservedWorkload?: boolean;
   statisticalGate?: boolean; distinctRevalidation?: boolean; revalidationCandidateSamples?: number[]; twoWorkloads?: boolean;
+  statisticsMethod?: 'paired-block-bootstrap-v1' | 'paired-block-bootstrap-v2';
 } = {}) {
   const workflow = f.service.get(workflowId)!;
   const task = f.store.getOptimizationTask(workflow.optimization_task_id!)!;
   const candidate = f.store.getCandidate(workflow.candidate_id!)!;
   const root = path.join(f.root, `evaluator-${randomUUID()}`);
   const statisticalGate = options.statisticalGate ?? true;
+  const statistics = { ...DEFAULT_STATISTICS, method: options.statisticsMethod ?? DEFAULT_STATISTICS.method };
   const sampleCount = statisticalGate ? 9 : 3;
   createFormalEvaluatorFixture(root, { sampleCount });
   const manifestPath = path.join(root, 'manifest.json'), qualificationPath = path.join(root, 'qualification.json');
@@ -41,7 +43,7 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
     resources: { cpu_set: manifest.resource_requirements.cpu_set, numa_node: manifest.resource_requirements.numa_node },
     sampling: { warmup_count: manifest.performance.sampling.warmup_count, sample_count: sampleCount, order: 'alternating' },
     seed: 0, inner_iterations: 1, timing_scope: 'kernel', candidate_api: workflow.function_name,
-    baseline_api: workflow.function_name, statistics: DEFAULT_STATISTICS }));
+    baseline_api: workflow.function_name, statistics }));
   fs.writeFileSync(manifestPath, JSON.stringify(manifest));
   const digest = evaluatorContentSha256(root);
   manifest.digest = digest;
@@ -66,7 +68,7 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
   testpack.performance.sampling.samples = sampleCount;
   testpack.resources = { cpu_set: manifest.resource_requirements.cpu_set,
     numa_nodes: [manifest.resource_requirements.numa_node], thread_counts: manifest.resource_requirements.thread_counts };
-  if (statisticalGate) testpack.performance.statistics = DEFAULT_STATISTICS;
+  if (statisticalGate) testpack.performance.statistics = statistics;
   else delete testpack.performance.statistics;
   const snapshotDir = path.join(f.root, `frozen-${randomUUID()}`);
   const frozen = freezeValidationTestpack(testpack, snapshotDir);

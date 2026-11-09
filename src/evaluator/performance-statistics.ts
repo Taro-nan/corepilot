@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { PerformanceStatisticsPolicy, ConfidenceInterval, PerformanceCalibration } from '../contracts/performance-statistics.js';
+import { statisticsGateVersion } from '../contracts/performance-statistics.js';
 import type { ValidationTestpack } from '../contracts/validation-testpack.js';
 import type { PerformanceCaseMeasurement, PerformanceGateResult, PerformanceWorkloadResult } from '../workspace/validation-runner.js';
 
 export function parseStatisticsPolicy(value: unknown): PerformanceStatisticsPolicy {
   const raw = value as PerformanceStatisticsPolicy;
-  if (!raw || raw.method !== 'paired-block-bootstrap-v1' || !Number.isFinite(raw.confidence_level) || raw.confidence_level < 0.8 || raw.confidence_level > 0.99
+  if (!raw || !['paired-block-bootstrap-v1', 'paired-block-bootstrap-v2'].includes(raw.method) || !Number.isFinite(raw.confidence_level) || raw.confidence_level < 0.8 || raw.confidence_level > 0.99
     || !Number.isInteger(raw.iterations) || raw.iterations < 1000 || raw.iterations > 20000 || !Number.isSafeInteger(raw.seed) || raw.seed < 0 || raw.seed > 4294967295
     || !Number.isInteger(raw.min_samples) || raw.min_samples < 9 || raw.min_samples > 100 || !Number.isInteger(raw.block_length) || raw.block_length < 1 || raw.block_length > raw.min_samples) throw new Error('统计方案需要 9..100 个最少样本、1000..20000 次重采样及有效置信水平/seed/分块长度');
   return { method: raw.method, confidence_level: raw.confidence_level, iterations: raw.iterations, seed: raw.seed, block_length: raw.block_length, min_samples: raw.min_samples };
@@ -22,6 +23,7 @@ function interval(values: number[], alpha: number): ConfidenceInterval {
 type StatisticalInput = { performance: Pick<ValidationTestpack['performance'], 'statistics' | 'cases' | 'sampling' | 'thresholds' | 'key_cases'> };
 export function evaluateStatisticalPerformance(testpack: StatisticalInput, input: readonly PerformanceCaseMeasurement[]): PerformanceGateResult {
   const policy = parseStatisticsPolicy(testpack.performance.statistics);
+  const gateVersion = statisticsGateVersion(policy);
   const issues: string[] = [], workloads: PerformanceWorkloadResult[] = [], declared = testpack.performance.cases;
   const seen = new Set<string>(); let invalid = false, insufficient = false;
   for (const row of input) {
@@ -80,22 +82,33 @@ export function evaluateStatisticalPerformance(testpack: StatisticalInput, input
       workloads.forEach((row, index) => {
         const ci = interval(distributions[index], alpha / workloads.length);
         row.ci_lower = ci.lower; row.ci_upper = ci.upper;
-        row.regression = ci.upper < (row.critical ? thresholds.key_case_ci_lower_min : thresholds.overall_ci_lower_min);
+        // v3 used regression for an acceptance-floor miss, even if the
+        // workload was faster than baseline. Preserve that historical meaning.
+        row.regression = ci.upper < (gateVersion === 3
+          ? row.critical ? thresholds.key_case_ci_lower_min : thresholds.overall_ci_lower_min : 1);
         row.conclusion = ci.lower > 1 ? 'IMPROVED' : ci.upper < 1 ? 'REGRESSED' : 'INCONCLUSIVE';
       });
       statistics.worst_case_lower = Math.min(...workloads.map(row => row.ci_lower!));
       const passes = weighted >= thresholds.weighted_geomean_min && statistics.overall_interval.lower >= Math.max(thresholds.weighted_geomean_min, thresholds.overall_ci_lower_min)
         && workloads.every(row => row.ci_lower! >= thresholds.overall_ci_lower_min && (!row.critical || row.ci_lower! >= thresholds.key_case_ci_lower_min));
-      const fails = statistics.overall_interval.upper < thresholds.weighted_geomean_min || workloads.some(row => row.regression);
+      const fails = gateVersion === 3
+        ? statistics.overall_interval.upper < thresholds.weighted_geomean_min || workloads.some(row => row.regression)
+        : statistics.overall_interval.upper < Math.max(thresholds.weighted_geomean_min, thresholds.overall_ci_lower_min) ||
+          workloads.some(row => row.ci_upper! < Math.max(thresholds.overall_ci_lower_min, row.critical ? thresholds.key_case_ci_lower_min : 0));
       statistics.verdict = passes ? 'PASSED' : fails ? 'FAILED' : 'INCONCLUSIVE';
+      if (gateVersion === 4) statistics.comparison = statistics.overall_interval.lower > 1 ? 'IMPROVED'
+        : statistics.overall_interval.upper < 1 ? 'REGRESSED' : 'INCONCLUSIVE';
     }
   }
   const critical = workloads.filter(row => row.critical);
-  return { gate_version: 3, passed: statistics.verdict === 'PASSED', weighted_geomean: weighted,
+  const confirmedRegression = statistics.comparison === 'REGRESSED' || workloads.some(row => row.regression);
+  return { gate_version: gateVersion, passed: statistics.verdict === 'PASSED', weighted_geomean: weighted,
     overall_ci_lower: statistics.overall_interval?.lower ?? null, key_case_ci_lower: critical.length && critical.every(row => row.ci_lower !== undefined) ? Math.min(...critical.map(row => row.ci_lower!)) : null,
     case_ratios: Object.fromEntries(workloads.map(row => [row.case_id, row.speedup])), workloads, statistics,
     reason: issues.length ? `性能证据不足或无效：${issues.join('; ')}` : statistics.verdict === 'PASSED' ? '统计区间与全部负载通过固定验收线'
-      : statistics.verdict === 'FAILED' ? '统计区间确认存在未达到目标或退化的负载' : '区间跨越验收线，当前证据不足；保留候选。调整采样方案需新版本，不能重复试到通过。' };
+      : statistics.verdict === 'FAILED' ? gateVersion === 3 ? '统计区间确认存在未达到目标或退化的负载'
+        : confirmedRegression ? '统计区间确认未达到固定验收线，并检测到性能退化。' : '统计区间确认未达到固定验收线；未确认性能退化。'
+        : '区间跨越验收线，当前证据不足；保留候选。调整采样方案需新版本，不能重复试到通过。' };
 }
 
 /** Diagnostic equality check, separate from optimization acceptance. */

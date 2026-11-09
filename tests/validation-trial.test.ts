@@ -302,6 +302,7 @@ for (const matrix of [false, true]) test(`comparison pins ${matrix ? 'matrix' : 
       assert.equal(new Set(identities).size, 1, 'both roles load exactly the same built artifact');
       const calibrated = await trials.status(project, started.trial_id);
       assert.equal(calibrated.summary.calibration?.status, 'BIAS_DETECTED', 'role-biased fixture measurements must be detected');
+      assert.equal(calibrated.summary.calibration?.statistics.policy.method, 'paired-block-bootstrap-v2');
       assert.equal(calibrated.formal_evidence, false);
       assert.equal(f.projects.validationAssets.get(project, packageId, version, targetId).qualification, 'DRAFT');
     }

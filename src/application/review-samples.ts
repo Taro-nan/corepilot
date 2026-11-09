@@ -3,7 +3,8 @@ import type { PerformanceThresholds, ValidationSampling, ValidationTestpack } fr
 import { evaluateStatisticalPerformance, parseStatisticsPolicy } from '../evaluator/performance-statistics.js';
 import type { PerformanceGateResult } from '../workspace/validation-runner.js';
 
-const FORMAT = 'COREPILOT_REVIEW_SAMPLES_V1';
+const FORMAT_V1 = 'COREPILOT_REVIEW_SAMPLES_V1';
+const FORMAT_V2 = 'COREPILOT_REVIEW_SAMPLES_V2';
 const LIMITS = { workloads: 64, samples: 1000, workUnits: 10_000_000 };
 const OMITTED = { provenance: 'NOT_INCLUDED', binaries: 'NOT_INCLUDED', evaluator: 'NOT_INCLUDED', machine: 'NOT_INCLUDED',
   parameters: 'NOT_INCLUDED', correctness: 'NOT_INCLUDED', approval: 'NOT_INCLUDED', delivery: 'NOT_INCLUDED' } as const;
@@ -64,14 +65,16 @@ function gateSummary(gate: PerformanceGateResult) {
   if (!stats || !stats.overall_interval || !Number.isFinite(gate.weighted_geomean) ||
       !Number.isFinite(stats.overall_interval.lower) || !Number.isFinite(stats.overall_interval.upper) ||
       !Number.isFinite(stats.worst_case_lower) || !Number.isFinite(gate.overall_ci_lower) ||
-      (gate.key_case_ci_lower !== null && !Number.isFinite(gate.key_case_ci_lower))) return invalid();
+      (gate.key_case_ci_lower !== null && !Number.isFinite(gate.key_case_ci_lower)) ||
+      (stats.policy.method === 'paired-block-bootstrap-v2' && !['IMPROVED', 'REGRESSED', 'INCONCLUSIVE'].includes(stats.comparison ?? ''))) return invalid();
   const workloads = gate.workloads.map((row, index) => {
     if (![row.baseline_median, row.candidate_median, row.speedup, row.ci_lower, row.ci_upper].every(Number.isFinite) || !row.conclusion) return invalid();
     return { workload_id: id(index), baseline_median: row.baseline_median, candidate_median: row.candidate_median,
       speedup: row.speedup, critical: row.critical, regression: row.regression, ci_lower: row.ci_lower,
       ci_upper: row.ci_upper, conclusion: row.conclusion };
   });
-  return { passed: gate.passed, verdict: stats.verdict, weighted_geomean: gate.weighted_geomean,
+  return { passed: gate.passed, verdict: stats.verdict,
+    ...(stats.policy.method === 'paired-block-bootstrap-v2' ? { comparison: stats.comparison } : {}), weighted_geomean: gate.weighted_geomean,
     overall_ci_lower: gate.overall_ci_lower, key_case_ci_lower: gate.key_case_ci_lower,
     overall_interval: { lower: stats.overall_interval.lower, upper: stats.overall_interval.upper },
     worst_case_lower: stats.worst_case_lower, workloads };
@@ -88,7 +91,8 @@ function calculate(inputs: Inputs, samples: Samples[]) {
 function projection(inputs: Inputs) {
   const formal = gateSummary(calculate(inputs, inputs.formal)), revalidation = gateSummary(calculate(inputs, inputs.revalidation));
   if (!formal.passed || formal.verdict !== 'PASSED' || !revalidation.passed || revalidation.verdict !== 'PASSED') return invalid();
-  return { format: FORMAT, review: 'REVIEW_REQUIRED', omitted: OMITTED, unit: 'seconds', pairing: 'BY_SAMPLE_INDEX',
+  return { format: inputs.policy.method === 'paired-block-bootstrap-v1' ? FORMAT_V1 : FORMAT_V2,
+    review: 'REVIEW_REQUIRED', omitted: OMITTED, unit: 'seconds', pairing: 'BY_SAMPLE_INDEX',
     policy: inputs.policy, sampling: inputs.sampling, thresholds: inputs.thresholds, workloads: inputs.workloads,
     formal: { samples: inputs.formal, result: formal }, revalidation: { samples: inputs.revalidation, result: revalidation } };
 }

@@ -49,7 +49,9 @@ export function candidateEvaluationFeedback(input: {
   const validity = resourcePolicy?.validity;
   const resourceValidity = validity === 'VALID' || validity === 'INVALID' || validity === 'NOT_ENFORCED' ? validity : 'UNKNOWN';
   const uncertain = performance?.statistics?.verdict === 'INCONCLUSIVE' || performance?.statistics?.verdict === 'INVALID';
-  const failureCategory = status?.failure_category ?? (!validation.build.ok ? 'BUILD_FAILURE' : correctnessStatus === 'FAILED' ? 'CORRECTNESS_FAILURE' : performance?.passed === false && !uncertain ? 'PERFORMANCE_TARGET_NOT_MET' : null);
+  const performanceFailure = performance?.gate_version === 4 && (performance.statistics?.comparison === 'REGRESSED' || performance.workloads.some(row => row.regression))
+    ? 'PERFORMANCE_REGRESSION' : 'PERFORMANCE_TARGET_NOT_MET';
+  const failureCategory = status?.failure_category ?? (!validation.build.ok ? 'BUILD_FAILURE' : correctnessStatus === 'FAILED' ? 'CORRECTNESS_FAILURE' : performance?.passed === false && !uncertain ? performanceFailure : null);
   const failureClassification = status ? classifyExperimentFailure({ ...status, failure_category: failureCategory }) : null;
   if (failureClassification?.evaluation_status === 'PASS' &&
       (uncertain || correctnessStatus !== 'PASSED' || !validation.correctness_coverage.complete || (validation.performance && !performance))) {

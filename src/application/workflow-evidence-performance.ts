@@ -1,5 +1,6 @@
 import type { Experiment, Measurement } from '../contracts/optimization-domain.js';
 import type { ValidationTestpack } from '../contracts/validation-testpack.js';
+import { statisticsGateVersion } from '../contracts/performance-statistics.js';
 import { evaluatePerformanceGate, type PerformanceCaseMeasurement, type PerformanceGateResult, type PerformanceWorkloadResult } from '../workspace/validation-runner.js';
 
 /** Recompute each recorded gate against that experiment's persisted samples before a new freeze. */
@@ -9,7 +10,7 @@ export function assertPerformanceEvidenceConsistent(experiment: Experiment, rows
   };
   const evaluation = experiment.evaluation;
   const storedGate = evaluation?.details?.performance_gate as Record<string, unknown> | null | undefined;
-  const version = testpack.performance.statistics ? 3 : 2;
+  const version = testpack.performance.statistics ? statisticsGateVersion(testpack.performance.statistics) : 2;
   if (!storedGate || storedGate.gate_version !== version || storedGate.passed !== true) return fail();
   const gate = storedGate;
 
@@ -59,7 +60,7 @@ export function assertPerformanceEvidenceConsistent(experiment: Experiment, rows
     const stored = saved.find(row => (row.case_id ?? row.workload_id) === result.case_id)!;
     if (!sameWorkload(stored, result)) fail();
   }
-  if (version === 3) {
+  if (version >= 3) {
     const recorded = gate.statistics as Record<string, unknown> | undefined;
     const actual = recomputed.statistics;
     // Earlier callers could supply raw arrays without explicit indices. Both
@@ -69,6 +70,7 @@ export function assertPerformanceEvidenceConsistent(experiment: Experiment, rows
       : evaluatePerformanceGate(testpack, withoutIndices).statistics?.sample_digest;
     const originalInterval = recorded?.overall_interval as Record<string, unknown> | undefined;
     if (!recorded || !actual || recorded.verdict !== actual.verdict ||
+        (version === 4 && recorded.comparison !== actual.comparison) ||
         (recorded.sample_digest !== actual.sample_digest && recorded.sample_digest !== alternateDigest) ||
         !samePolicy(recorded.policy, actual.policy) || recorded.resampling_unit !== actual.resampling_unit ||
         recorded.case_interval_adjustment !== actual.case_interval_adjustment ||

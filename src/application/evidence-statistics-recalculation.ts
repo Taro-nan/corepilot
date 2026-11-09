@@ -12,7 +12,7 @@ type RoundResult = { status: RecalculationStatus; message: string; workload_coun
   overall_interval?: { lower: number; upper: number } | null; recomputed_sample_digest?: string };
 export type EvidenceRecalculation = { status: RecalculationStatus; message: string; formal?: RoundResult; revalidation?: RoundResult };
 
-// Bounds cover both rounds and the alternate v3 sample identity check. Exceeding
+// Bounds cover both rounds and the alternate v3/v4 sample identity check. Exceeding
 // them means only that this offline tool declined the work, not invalid evidence.
 const LIMITS = { testpackBytes: 4 * 1024 * 1024, measurementBytes: 32 * 1024 * 1024,
   workloads: 64, samplesPerRole: 1000, sampleRows: 128_000, nodes: 100_000, depth: 64, workUnits: 10_000_000 };
@@ -61,9 +61,10 @@ function validateTestpack(value: unknown, task: Record<string, unknown>, evidenc
   const testpack = value.testpack, performance = testpack.performance;
   if (!object(performance) || !object(performance.sampling) || !object(performance.thresholds) || !Array.isArray(performance.cases) || !Array.isArray(performance.key_cases))
     return reject('INVALID', '冻结测试方案缺少有效的性能统计输入。');
-  if (performance.statistics === undefined) return reject('LEGACY', '历史 v2 方案可能包含外部下界，不能仅凭样本重算为 v3 区间。');
+  if (performance.statistics === undefined) return reject('LEGACY', '历史 v2 方案可能包含外部下界，不能仅凭样本重算为 v3/v4 区间。');
   if (!object(performance.statistics)) return reject('INVALID', '冻结的统计方案无效。');
-  if (performance.statistics.method !== 'paired-block-bootstrap-v1') return reject('UNSUPPORTED', '此离线重算不支持归档中的统计方法。');
+  if (!['paired-block-bootstrap-v1', 'paired-block-bootstrap-v2'].includes(String(performance.statistics.method)))
+    return reject('UNSUPPORTED', '此离线重算不支持归档中的统计方法。');
   let policy: ReturnType<typeof parseStatisticsPolicy>;
   try { policy = parseStatisticsPolicy(performance.statistics); }
   catch { return reject('INVALID', '冻结的统计方案参数无效。'); }

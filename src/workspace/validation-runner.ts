@@ -124,7 +124,7 @@ export interface PerformanceWorkloadResult {
 }
 
 export interface PerformanceGateResult {
-  gate_version?: 2 | 3;
+  gate_version?: 2 | 3 | 4;
   passed: boolean;
   weighted_geomean: number;
   overall_ci_lower: number | null;

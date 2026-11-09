@@ -43,7 +43,7 @@
 - 以审批记录判断当前 approved result；保留冻结时的 FROZEN/NOT_REQUESTED snapshot 与历史 FAILED Task/Workflow，不回写历史。
 - 区分 Development、Formal、Revalidation、Owner Qualification、Human Approval 与 merge/delivery；`ACCEPTED` outcome 不是 Owner Approval。
 - 区分 Package qualification 记录与当前实际强制执行的 Evaluator qualification gate。
-- 区分统计版本：历史 gate v2 缺 `ci_lower` 时使用 ratio；新方案显式启用 gate v3 配对分块 bootstrap。配置 0.95 本身不代表已有区间，历史结果保持原含义。
+- 区分统计版本：历史 gate v2 缺 `ci_lower` 时使用 ratio；旧统计方案使用 gate v3，新方案显式启用 gate v4 配对分块 bootstrap。配置 0.95 本身不代表已有区间，历史结果保持原含义。
 
 C002 的首次 Formal 4.6976×、独立复验 4.5867×、两次 19/19 PASS 和 APPROVED 均有记录；C001 来自 Pi、C002 repair 来自 Codex，后续阶段由操作脚本衔接，尚未 merge/delivery。不要把它表述成从单条命令全自动完成并交付的 Workflow。
 

@@ -44,7 +44,7 @@
 
 ## 3. 真实统计区间与测量校准
 
-现状：[evaluatePerformanceGate](../../src/workspace/validation-runner.ts) 保留历史 gate v2；显式启用统计的新方案使用 [paired-block-bootstrap-v1](../../src/evaluator/performance-statistics.ts) 和 gate v3。
+现状：[evaluatePerformanceGate](../../src/workspace/validation-runner.ts) 保留历史 gate v2 和统计 gate v3；新统计方案使用 [paired-block-bootstrap-v2](../../src/evaluator/performance-statistics.ts) 和 gate v4，分别表达验收线与相对基线的变化。
 
 - [x] 按固定采样和相邻配对分块计算区间，保存方法、参数、seed 与样本摘要；重复/缺失/无效样本不能通过。
 - [x] 总体区间对应固定权重几何平均；逐负载区间校正多负载比较，分别检查非退化和关键下限。

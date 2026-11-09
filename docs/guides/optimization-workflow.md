@@ -152,7 +152,7 @@ CLI 可用 `corepilot workflow delivery-check <workflow-id>` 核对，`corepilot
 
 ## 统计口径
 
-未声明 `statistics` 的历史 gate v2 使用 median ratio 和 workload weight 计算 weighted geomean。有 `ci_lower` 时使用它；没有时以 speedup ratio 替代，`overall_ci_lower` 也不是总体统计量的真实区间。显式启用统计的新方案使用 gate v3 `paired-block-bootstrap-v1`，从配对分块样本计算总体和逐负载区间；证据不足保存候选并停止验证。方法、A/A 校准和复现入口见[性能可信度与复现](performance-assurance.md)。
+未声明 `statistics` 的历史 gate v2 使用 median ratio 和 workload weight 计算 weighted geomean。有 `ci_lower` 时使用它；没有时以 speedup ratio 替代，`overall_ci_lower` 也不是总体统计量的真实区间。历史统计方案使用 gate v3 `paired-block-bootstrap-v1`；新方案默认 gate v4 `paired-block-bootstrap-v2`，两者均从配对分块样本计算总体和逐负载区间，按各自版本判定；证据不足保存候选并停止验证。方法、A/A 校准和复现入口见[性能可信度与复现](performance-assurance.md)。
 
 C002 两次记录的 Acceptance PASS 和 raw measurements 原样保留，但 `confidence_level = 0.95` 只是配置，不能作为已经证明 95% CI 的结论。该限制应随案例、结果表和 Evidence 引用一起解释，不修改既有 policy 或结果。
 

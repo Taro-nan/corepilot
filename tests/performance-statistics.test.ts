@@ -16,13 +16,72 @@ const measurements = (n: number, ratio: number) => ['small', 'large'].map(case_i
 test('statistics computes the fixed-weight aggregate interval and reproducible sample identity; supplied lower bounds cannot override samples', () => {
   const input = measurements(12, 2).map(row => ({ ...row, ci_lower: 0.01 }));
   const result = evaluatePerformanceGate(pack(), input);
-  assert.equal(result.gate_version, 3); assert.equal(result.passed, true);
+  assert.equal(result.gate_version, 4); assert.equal(result.passed, true);
   assert.deepEqual(result.statistics?.overall_interval, { lower: 2, upper: 2 });
   assert.equal(result.workloads[0].conclusion, 'IMPROVED');
   assert.deepEqual(evaluatePerformanceGate(pack(), input), result);
   assert.equal(result.statistics?.sample_digest.length, 64);
   const changed = pack(); changed.performance.statistics = { ...DEFAULT_STATISTICS, seed: 42 };
   assert.notEqual(evaluatePerformanceGate(changed, input).statistics?.sample_digest, result.statistics?.sample_digest);
+});
+
+test('versioned target failures distinguish a missed target from regression and preserve v3 semantics', () => {
+  const current = pack(12);
+  current.performance.cases.forEach(row => { row.weight = 1; });
+  current.performance.thresholds = { weighted_geomean_min: 1, overall_ci_lower_min: 1.1, key_case_ci_lower_min: 0.9, confidence_level: 0.95 };
+  const data = measurements(12, 1);
+  data[0].baseline_samples = Array(12).fill(1.2); data[0].candidate_samples = Array(12).fill(1);
+  data[1].baseline_samples = Array(12).fill(1); data[1].candidate_samples = Array(12).fill(1);
+  const next = evaluatePerformanceGate(current, data);
+  assert.equal(next.gate_version, 4);
+  assert.equal(next.statistics?.verdict, 'FAILED');
+  assert.ok(next.statistics!.overall_interval!.upper < 1.1);
+  assert.equal(next.statistics?.comparison, 'IMPROVED');
+  assert.equal(next.workloads.every(row => !row.regression), true);
+  assert.match(next.reason, /未达到固定验收线；未确认性能退化/);
+
+  const legacy = structuredClone(current);
+  legacy.performance.statistics = { ...DEFAULT_STATISTICS, method: 'paired-block-bootstrap-v1' };
+  const old = evaluatePerformanceGate(legacy, data);
+  assert.equal(old.gate_version, 3);
+  assert.equal(old.statistics?.verdict, 'INCONCLUSIVE');
+  assert.equal(old.statistics?.comparison, undefined);
+  assert.notEqual(old.statistics?.sample_digest, next.statistics?.sample_digest);
+  const oldPass = evaluatePerformanceGate(legacy, measurements(12, 2));
+  assert.equal(oldPass.gate_version, 3); assert.equal(oldPass.statistics?.verdict, 'PASSED');
+  const oldFailure = evaluatePerformanceGate(legacy, measurements(12, 0.8));
+  assert.equal(oldFailure.gate_version, 3); assert.equal(oldFailure.statistics?.verdict, 'FAILED');
+});
+
+test('v4 calls a proven slowdown a regression but still follows a permissive frozen target', () => {
+  const testpack = pack(12);
+  testpack.performance.thresholds = { weighted_geomean_min: 1, overall_ci_lower_min: 1, key_case_ci_lower_min: 1, confidence_level: 0.95 };
+  const slower = measurements(12, 0.9);
+  const rejected = evaluatePerformanceGate(testpack, slower);
+  assert.equal(rejected.statistics?.verdict, 'FAILED');
+  assert.equal(rejected.statistics?.comparison, 'REGRESSED');
+  assert.equal(rejected.workloads.every(row => row.regression), true);
+  assert.match(rejected.reason, /性能退化/);
+  testpack.performance.thresholds = { weighted_geomean_min: 0.8, overall_ci_lower_min: 0.8, key_case_ci_lower_min: 0.8, confidence_level: 0.95 };
+  const permitted = evaluatePerformanceGate(testpack, slower);
+  assert.equal(permitted.passed, true, 'the confirmed policy permits this regression');
+  assert.equal(permitted.statistics?.comparison, 'REGRESSED');
+  assert.equal(permitted.workloads.every(row => row.regression), true, 'the report must still show the slowdown');
+});
+
+test('v4 leaves a confidence interval crossing the required target inconclusive', () => {
+  const testpack = pack(12);
+  testpack.performance.thresholds = { weighted_geomean_min: 1.1, overall_ci_lower_min: 1, key_case_ci_lower_min: 1, confidence_level: 0.95 };
+  const data = measurements(12, 1);
+  for (const row of data) {
+    row.baseline_samples = Array(12).fill(1);
+    row.candidate_samples = Array.from({ length: 12 }, (_, index) => index < 6 ? 1 : 1 / 1.3);
+  }
+  const result = evaluatePerformanceGate(testpack, data);
+  assert.equal(result.statistics?.verdict, 'INCONCLUSIVE');
+  assert.ok(result.statistics!.overall_interval!.lower < 1.1);
+  assert.ok(result.statistics!.overall_interval!.upper > 1.1);
+  assert.equal(result.passed, false);
 });
 
 test('A/A control does not claim an improvement and case regression cannot be hidden behind aggregate speedup', () => {

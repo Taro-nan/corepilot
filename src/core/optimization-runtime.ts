@@ -469,8 +469,13 @@ export class OptimizationRuntime {
     const allCorrectness = cycles.length > 0 && cycles.every((item, index) => item.correctness?.ok === true
       && cycleFeedback[index].correctness_status !== 'FAILED' && cycleFeedback[index].correctness_status !== 'INVALID');
     const invalidCorrectness = cycleFeedback.some(item => item.correctness_status === 'INVALID');
-    const invalidPerformance = cycleFeedback.some(item => item.performance_summary.status === 'INVALID');
-    const allPerformance = input.revalidation.performance_gate?.passed ?? cycles.every((item) => item.performance === null || item.performance.ok);
+    const performanceGate = input.revalidation.performance_gate;
+    const invalidPerformance = cycleFeedback.some(item => item.performance_summary.status === 'INVALID') ||
+      (performanceGate?.gate_version === 4 && performanceGate.statistics?.verdict === 'INVALID');
+    const allPerformance = performanceGate?.passed ?? cycles.every((item) => item.performance === null || item.performance.ok);
+    const performanceFailure = performanceGate?.gate_version === 4 &&
+      performanceGate.statistics?.comparison !== 'REGRESSED' && !performanceGate.workloads.some(row => row.regression)
+      ? 'PERFORMANCE_TARGET_NOT_MET' : 'PERFORMANCE_REGRESSION';
     const timestamp = this.timestamp();
     const executionStatus = input.factsAlreadyPersisted
       ? experiment.status
@@ -491,8 +496,8 @@ export class OptimizationRuntime {
               ? 'CORRECTNESS_FAILURE'
             : !completeCorrectness
               ? 'INVALID_EXPERIMENT'
-              : !allPerformance && input.revalidation.performance_gate?.statistics?.verdict !== 'INCONCLUSIVE'
-                ? 'PERFORMANCE_REGRESSION'
+              : !allPerformance && performanceGate?.statistics?.verdict !== 'INCONCLUSIVE' && !(performanceGate?.gate_version === 4 && invalidPerformance)
+                ? performanceFailure
               : null),
       observed_context: input.observedContext ?? experiment.observed_context,
       evaluation: {
@@ -932,7 +937,8 @@ function validationFailure(
   if (validation.performance && !validation.performance.ok) return 'EVALUATOR_FAILURE';
   if (performance && !performance.passed) {
     if (performance.statistics?.verdict === 'INCONCLUSIVE' || performance.statistics?.verdict === 'INVALID') return null;
-    return performance.workloads.some((item) => item.regression) ? 'PERFORMANCE_REGRESSION' : 'PERFORMANCE_TARGET_NOT_MET';
+    return performance.statistics?.comparison === 'REGRESSED' || performance.workloads.some((item) => item.regression)
+      ? 'PERFORMANCE_REGRESSION' : 'PERFORMANCE_TARGET_NOT_MET';
   }
   return null;
 }

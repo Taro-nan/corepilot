@@ -1615,7 +1615,7 @@ test('test conditions expand thread and binding selections while advanced sampli
   expect(saved.test_plan.execution_matrix!.profiles[1].numa_node).toBe(1);
   expect(saved.workloads[0].weight).toBe(weights[0]);
   expect(saved.test_plan.sampling.sample_count).toBe(9);
-  expect(saved.test_plan.statistics?.method).toBe('paired-block-bootstrap-v1');
+  expect(saved.test_plan.statistics?.method).toBe('paired-block-bootstrap-v2');
   expect(saved.quality?.coverage[0].input_ids).toEqual([logicalInput]);
   expect(saved.quality?.probes[0].defect).toBe('漏算尾部');
   const resolved = f.projects.packageLoader.resolveSelection({ package_id: pkg, package_version: version, target_id: target });
@@ -1627,6 +1627,27 @@ test('test conditions expand thread and binding selections while advanced sampli
   expect(clipped).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: path.join(repositoryRoot, 'build/frontend-audit/test-matrix-mobile.png'), fullPage: true });
+  expect(f.service.list()).toHaveLength(0);
+});
+
+test('reselecting repeated sampling preserves a historical v1 statistics policy', async ({ page }) => {
+  const f = fixture;
+  const project = f.projects.add({ name: 'Historical statistics', repository_root: f.repo, config_path: f.configPath });
+  const discovered = await f.projects.discover(project.project_id, 'kernel');
+  const pkg = discovered.evidence.generated.package_id, version = discovered.evidence.generated.version, target = discovered.targets[0].target_id;
+  const original = f.projects.validationAssets.get(project, pkg, version, target);
+  f.projects.validationAssets.save(project, pkg, version, target, { ...original, source: 'edited', expected_digest: original.evaluator_digest,
+    test_plan: { ...original.test_plan, statistics: { ...DEFAULT_STATISTICS, method: 'paired-block-bootstrap-v1' },
+      sampling: { ...original.test_plan.sampling, sample_count: 9 } } });
+  f.projects.saveConfig(project.project_id, { ...f.projects.config(project.project_id), validation: { testpack: '',
+    library_package: { package_id: pkg, package_version: version, target_id: target }, baseline_artifact: '' } });
+  await login(page); await openTaskPreparation(page);
+  await page.locator('details').filter({ hasText: '统计判定方法与固定参数' }).locator('summary').click();
+  await expect(page.getByText('统计规则 v1（沿用历史判定）', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: '重复测量', exact: false }).click();
+  await page.getByRole('button', { name: '保存条件并准备测试代码', exact: true }).click();
+  await expect(page.getByRole('tab', { name: '2 测试代码' })).toHaveAttribute('aria-selected', 'true');
+  expect(f.projects.validationAssets.get(project, pkg, version, target).test_plan.statistics?.method).toBe('paired-block-bootstrap-v1');
   expect(f.service.list()).toHaveLength(0);
 });
 

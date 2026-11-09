@@ -76,7 +76,7 @@ report.json
 
 Markdown 报告包含任务与源码身份、候选/假设、实验总览、正确性 coverage、逐 case 诊断、逐 workload 性能、原始样本、资源环境、命令日志和反馈历史。JSON 包含同一份结构化快照，可用于后续分析。报告不重新判定 acceptance，不修改历史实验；运行中导出的报告会标明尚未完成。
 
-历史 gate v2 缺区间字段时使用点估计；新测试方案选择「重复测量」可启用 gate v3 真实统计区间，并提供 A/A 校准和冻结源码重建复现。方法、使用步骤与限制见[性能可信度与复现](performance-assurance.md)。Development、Formal、Revalidation 分别显示，不把历史配置的 0.95 当成已计算区间。
+历史 gate v2 缺区间字段时使用点估计；新测试方案选择「重复测量」可启用 gate v4 统计区间，并提供 A/A 校准和冻结源码重建复现；既有 gate v3 统计方案保持原判定。方法、使用步骤与限制见[性能可信度与复现](performance-assurance.md)。Development、Formal、Revalidation 分别显示，不把历史配置的 0.95 当成已计算区间。
 
 报告生成不授予 Human Approval，不自动 merge。使用 `workflow evidence --prepare` 准备冻结证据，使用 `workflow human-approve` 明确批准，再用 `workflow deliver --commit-message` 单独交付；不要将普通报告当成冻结 Evidence。参见 [生命周期指南](optimization-workflow.md)。
 
