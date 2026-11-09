@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { ApiClient } from '../src/client/api-client.js';
 import { startWebFixture, runFixtureCli } from './web-fixture.js';
 import { seedBlockedValidation } from './validation-recovery-fixture.js';
-import { seedApprovalFacts } from './workflow-approval-fixture.js';
+import { seedApprovalFacts, seedLegacyApprovedEvidence } from './workflow-approval-fixture.js';
 import { freezeEvidenceFiles } from '../src/workspace/freeze-evidence.js';
 
 test('HTTP and CLI freeze real persisted fixture facts, require explicit approval, then deliver the approved tree', async () => {
@@ -84,53 +84,92 @@ test('incomplete sample inventories or duplicate correctness records cannot be f
   }
 });
 
-test('new approval evidence recomputes each gate from its own persisted samples', async () => {
-  for (const statisticalGate of [false, true]) {
-    const f = await startWebFixture();
-    let db: DatabaseSync | undefined;
-    try {
-      const seeded = await seedBlockedValidation(f, true);
-      const facts = seedApprovalFacts(f, seeded.workflowId, { statisticalGate, distinctRevalidation: true });
-      const api = new ApiClient(f.url, { token: f.token });
-      const first = f.store.listMeasurements(facts.first.experiment_id).filter(row => row.kind === 'PERFORMANCE_SAMPLE' && row.role === 'CANDIDATE');
-      const repeated = f.store.listMeasurements(facts.repeated.experiment_id).filter(row => row.kind === 'PERFORMANCE_SAMPLE' && row.role === 'CANDIDATE');
-      db = new DatabaseSync(path.join(f.root, 'db.sqlite'));
-      const update = db.prepare('UPDATE optimization_measurements SET record_json = ? WHERE measurement_id = ?');
-      if (statisticalGate) {
-        // Mixing in the other round's values keeps the inventory complete and
-        // passing, but must not be accepted as this round's statistical evidence.
-        for (const row of repeated) {
-          const other = first.find(item => item.sample_index === row.sample_index)!;
-          update.run(JSON.stringify({ ...row, value: other.value }), row.measurement_id);
-        }
-      } else {
-        // A single positive replacement remains a passing point estimate but is
-        // no longer the data which produced the saved result.
-        const row = first[0];
-        update.run(JSON.stringify({ ...row, value: (row.value as number) + 0.125 }), row.measurement_id);
-      }
-      await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /原始性能样本.*不一致/);
-      const cli = await runFixtureCli(f.url, f.token, ['workflow', 'evidence', seeded.workflowId, '--prepare', '--json']);
-      assert.notEqual(cli.code, 0);
-      assert.match(cli.stderr, /原始性能样本.*不一致/);
-      assert.equal(f.store.getCandidateApproval(seeded.candidate.candidate_id), null);
+test('legacy point-estimate results and previously frozen unapproved snapshots cannot receive a new approval', async () => {
+  const f = await startWebFixture();
+  try {
+    const seeded = await seedBlockedValidation(f, true);
+    const facts = seedApprovalFacts(f, seeded.workflowId, { statisticalGate: false });
+    const api = new ApiClient(f.url, { token: f.token });
+    const before = (await api.getOptimizationReport(seeded.workflowId)).report.summary!;
+    assert.equal(before.verification.ready, true);
+    assert.equal(before.state, 'BLOCKED');
+    assert.match(before.next_step.message, /旧版点估计.*重新执行/);
+    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /旧版点估计.*新版测试方案/);
+    const cli = await runFixtureCli(f.url, f.token, ['workflow', 'evidence', seeded.workflowId, '--prepare', '--json']);
+    assert.notEqual(cli.code, 0);
+    assert.match(cli.stderr, /旧版点估计/);
 
-      for (const row of statisticalGate ? repeated : first) update.run(JSON.stringify(row), row.measurement_id);
-      if (statisticalGate) {
-        const original = f.store.getExperiment(facts.repeated.experiment_id)!;
-        const modified = structuredClone(original);
-        const gate = modified.evaluation!.details!.performance_gate as { statistics: { sample_digest: string } };
-        gate.statistics.sample_digest = '0'.repeat(64);
-        f.store.saveExperiment(modified);
-        await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /原始性能样本.*不一致/);
-        f.store.saveExperiment(original);
-      }
-      const snapshot = (await api.prepareWorkflowEvidence(seeded.workflowId)).snapshot;
-      assert.equal(snapshot.first_formal_experiment_id, facts.first.experiment_id);
-      assert.equal(snapshot.revalidation_experiment_id, facts.repeated.experiment_id);
-      assert.equal(f.store.getCandidateApproval(seeded.candidate.candidate_id), null);
-    } finally { db?.close(); await f.close(); }
-  }
+    // Model a snapshot produced by an older release; no bytes are read because
+    // a new approval must first establish the current statistical prerequisite.
+    const workflow = f.service.get(seeded.workflowId)!;
+    const digest = 'a'.repeat(64);
+    workflow.review_evidence = { schema_version: 1, task_id: workflow.optimization_task_id!, candidate_id: seeded.candidate.candidate_id,
+      candidate_commit: seeded.checkpoint.commit, first_formal_experiment_id: facts.first.experiment_id,
+      revalidation_experiment_id: facts.repeated.experiment_id, frozen_at: new Date().toISOString(),
+      artifact: { evidence_id: `evidence:${digest}`, digest, archive_sha256: digest,
+        archive_path: path.join(f.root, 'legacy.gz'), manifest_path: path.join(f.root, 'legacy.json') } };
+    f.store.saveOptimizationWorkflowJson(seeded.workflowId, JSON.stringify(workflow));
+    await assert.rejects(api.approveWorkflowEvidence(seeded.workflowId, { expected_evidence_digest: digest,
+      reviewer: 'Fixture Reviewer', authorization_reference: 'fixture' }), /旧版点估计.*新版测试方案/);
+    assert.equal(f.store.getCandidateApproval(seeded.candidate.candidate_id), null);
+    assert.equal(f.store.getExperiment(facts.first.experiment_id)?.evaluation?.performance, 'PASSED');
+  } finally { await f.close(); }
+});
+
+test('an existing legacy approval remains retryable and deliverable under its recorded evidence', async () => {
+  const f = await startWebFixture();
+  try {
+    const seeded = await seedBlockedValidation(f, true);
+    const facts = seedApprovalFacts(f, seeded.workflowId, { statisticalGate: false });
+    const { approval, artifact } = seedLegacyApprovedEvidence(f, seeded.workflowId, facts);
+    const api = new ApiClient(f.url, { token: f.token });
+    assert.equal((await api.getOptimizationReport(seeded.workflowId)).report.summary?.state, 'READY_FOR_DELIVERY');
+    const retried = await api.approveWorkflowEvidence(seeded.workflowId, { expected_evidence_digest: artifact.digest,
+      reviewer: 'Fixture Reviewer', authorization_reference: 'legacy fixture' });
+    assert.equal(retried.approval.approval_id, approval.approval_id);
+    await assert.rejects(api.approveWorkflowEvidence(seeded.workflowId, { expected_evidence_digest: artifact.digest,
+      reviewer: 'Fixture Reviewer', authorization_reference: 'different approval' }), /cannot change/);
+    const delivered = await runFixtureCli(f.url, f.token, ['workflow', 'deliver', seeded.workflowId, '--commit-message', 'legacy fixture', '--json']);
+    assert.equal(delivered.code, 0, delivered.stderr);
+    assert.equal(f.service.get(seeded.workflowId)!.delivery?.approval_id, approval.approval_id);
+  } finally { await f.close(); }
+});
+
+test('new approval evidence recomputes each gate from its own persisted samples', async () => {
+  const f = await startWebFixture();
+  let db: DatabaseSync | undefined;
+  try {
+    const seeded = await seedBlockedValidation(f, true);
+    const facts = seedApprovalFacts(f, seeded.workflowId, { distinctRevalidation: true });
+    const api = new ApiClient(f.url, { token: f.token });
+    const first = f.store.listMeasurements(facts.first.experiment_id).filter(row => row.kind === 'PERFORMANCE_SAMPLE' && row.role === 'CANDIDATE');
+    const repeated = f.store.listMeasurements(facts.repeated.experiment_id).filter(row => row.kind === 'PERFORMANCE_SAMPLE' && row.role === 'CANDIDATE');
+    db = new DatabaseSync(path.join(f.root, 'db.sqlite'));
+    const update = db.prepare('UPDATE optimization_measurements SET record_json = ? WHERE measurement_id = ?');
+    // Mixing rounds keeps the inventory complete but changes the evidence.
+    for (const row of repeated) {
+      const other = first.find(item => item.sample_index === row.sample_index)!;
+      update.run(JSON.stringify({ ...row, value: other.value }), row.measurement_id);
+    }
+    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /原始性能样本.*不一致/);
+    const cli = await runFixtureCli(f.url, f.token, ['workflow', 'evidence', seeded.workflowId, '--prepare', '--json']);
+    assert.notEqual(cli.code, 0);
+    assert.match(cli.stderr, /原始性能样本.*不一致/);
+    assert.equal(f.store.getCandidateApproval(seeded.candidate.candidate_id), null);
+
+    for (const row of repeated) update.run(JSON.stringify(row), row.measurement_id);
+    const original = f.store.getExperiment(facts.repeated.experiment_id)!;
+    const modified = structuredClone(original);
+    const gate = modified.evaluation!.details!.performance_gate as { statistics: { sample_digest: string } };
+    gate.statistics.sample_digest = '0'.repeat(64);
+    f.store.saveExperiment(modified);
+    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /原始性能样本.*不一致/);
+    f.store.saveExperiment(original);
+    const snapshot = (await api.prepareWorkflowEvidence(seeded.workflowId)).snapshot;
+    assert.equal(snapshot.first_formal_experiment_id, facts.first.experiment_id);
+    assert.equal(snapshot.revalidation_experiment_id, facts.repeated.experiment_id);
+    assert.equal(f.store.getCandidateApproval(seeded.candidate.candidate_id), null);
+  } finally { db?.close(); await f.close(); }
 });
 
 test('an older frozen archive cannot bypass sample verification when approved directly', async () => {
@@ -171,7 +210,7 @@ test('complete evaluator samples cannot conceal a workload missing from the froz
       for (const row of samples) f.store.appendMeasurement({ ...row, measurement_id: `measurement:${randomUUID()}`, subject_id: 'workload-2' });
     }
     const api = new ApiClient(f.url, { token: f.token });
-    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /冻结测试方案与评价器负载/);
+    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /冻结测试方案与评价器不一致.*performance inventory/);
     assert.equal(f.store.getCandidateApproval(seeded.candidate.candidate_id), null);
   } finally { await f.close(); }
 });

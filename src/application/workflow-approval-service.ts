@@ -10,16 +10,22 @@ import type { FrozenValidationTestpack, ValidationTestpack } from '../contracts/
 import type { TaskStore } from '../storage/task-store.js';
 import type { OptimizationWorkflowStore } from '../workflow/optimization-workflow.js';
 import { assessCandidateVerification } from '../core/candidate-verification.js';
+import { hasCurrentApprovalStatistics } from '../core/approval-statistics.js';
 import { OptimizationRuntime } from '../core/optimization-runtime.js';
 import { listFormalEvaluatorFiles, loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
-import { formalCaseParameters, formalWorkloadParameters } from '../evaluator/formal-arguments.js';
+import { validateFormalTestpackCompatibility } from '../evaluator/testpack-compatibility.js';
 import { readFrozenValidationTestpack } from '../testpack/validation-freeze.js';
-import { parametersAreSubset, validationCaseParameters } from '../testpack/validation-parameters.js';
 import { freezeEvidenceFiles } from '../workspace/freeze-evidence.js';
 import { verifyFrozenEvidenceArtifact } from '../workspace/frozen-evidence.js';
 import { assertPerformanceEvidenceConsistent } from './workflow-evidence-performance.js';
 
 const jsonBytes = (value: unknown) => Buffer.from(JSON.stringify(value, null, 2) + '\n');
+
+function requireCurrentApprovalStatistics(testpack: ValidationTestpack, first: Experiment, repeated: Experiment): void {
+  if (!testpack.performance.statistics || !hasCurrentApprovalStatistics(first) || !hasCurrentApprovalStatistics(repeated)) {
+    throw new Error('当前记录采用旧版点估计或缺少有效统计区间，不能作为新的正式批准依据。请确认新版测试方案，并重新执行正式实验与独立复验；原结果和历史批准会保留。');
+  }
+}
 
 /** Check persisted facts again: a completed Runner result may have been only partly synchronized. */
 function assertRawEvidenceComplete(experiment: Experiment, rows: readonly Measurement[], bundle: LoadedFormalEvaluatorBundle, testpack: ValidationTestpack): void {
@@ -31,12 +37,8 @@ function assertRawEvidenceComplete(experiment: Experiment, rows: readonly Measur
     && row.evaluator.digest === experiment.evaluator.digest;
   const coverage = experiment.evaluation?.correctness_coverage;
   const correctness = rows.filter(row => row.kind === 'CORRECTNESS_CASE');
-  if (JSON.stringify(testpack.correctness.cases.map(item => item.case_id)) !== JSON.stringify(bundle.manifest.correctness.case_ids)) {
-    fail(`${experiment.type} 的冻结测试方案与评价器正确性用例不一致`);
-  }
-  if (testpack.correctness.cases.some((item, index) => !parametersAreSubset(validationCaseParameters(item), formalCaseParameters(bundle.correctness.cases[index])))) {
-    fail(`${experiment.type} 的冻结测试方案与评价器正确性参数不一致`);
-  }
+  try { validateFormalTestpackCompatibility(testpack, bundle); }
+  catch (error) { fail(`${experiment.type} 的冻结测试方案与评价器不一致：${(error as Error).message}`); }
   if (!coverage || correctness.length !== coverage.planned || correctness.some(row => row.role !== 'EVALUATOR'
     || row.sample_index !== null || row.validity !== 'VALID' || (row.value !== true && row.value !== 'PASS') || !sameEvaluator(row))) {
     fail(`${experiment.type} 的正确性记录数量、状态或评价器身份不一致`);
@@ -51,13 +53,6 @@ function assertRawEvidenceComplete(experiment: Experiment, rows: readonly Measur
 
   const samples = rows.filter(row => row.kind === 'PERFORMANCE_SAMPLE');
   const expectedCount = bundle.manifest.performance.sampling.sample_count;
-  if (testpack.performance.sampling.samples !== expectedCount ||
-      JSON.stringify(testpack.performance.cases.map(item => item.case_id)) !== JSON.stringify(bundle.manifest.performance.workload_ids)) {
-    fail(`${experiment.type} 的冻结测试方案与评价器负载或采样数量不一致`);
-  }
-  if (testpack.performance.cases.some((item, index) => !parametersAreSubset(validationCaseParameters(item), formalWorkloadParameters(bundle.workloads.workloads[index])))) {
-    fail(`${experiment.type} 的冻结测试方案与评价器负载参数不一致`);
-  }
   const samplingComplete = prefixes.some(prefix => bundle.manifest.performance.workload_ids.every(id =>
     (['BASELINE', 'CANDIDATE'] as const).every(role => {
       const selected = samples.filter(row => row.subject_id === prefix + id && row.role === role)
@@ -146,6 +141,7 @@ export class WorkflowApprovalService {
       return workflow.review_evidence;
     }
     const inspected = this.runtime.inspectCandidateApproval(input);
+    requireCurrentApprovalStatistics(frozen.testpack, inspected.first, inspected.repeated);
     const firstMeasurements = this.store.listMeasurements(inspected.first.experiment_id);
     const repeatedMeasurements = this.store.listMeasurements(inspected.repeated.experiment_id);
     for (const [experiment, rows] of [[inspected.first, firstMeasurements], [inspected.repeated, repeatedMeasurements]] as const) {
@@ -209,6 +205,7 @@ export class WorkflowApprovalService {
     const existingApproval = this.store.getCandidateApproval(facts.candidate.candidate_id);
     const first = this.runtime.getExperiment(snapshot.first_formal_experiment_id);
     const repeated = this.runtime.getExperiment(snapshot.revalidation_experiment_id);
+    if (!existingApproval) requireCurrentApprovalStatistics(facts.frozen.testpack, first, repeated);
     this.assertSnapshotMatches(snapshot, { task: facts.task, candidate: existingApproval?.candidate_before ?? facts.candidate,
       first, repeated, frozen: facts.frozen });
     // The current qualification and the archived copy must both remain valid.

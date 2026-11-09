@@ -12,7 +12,9 @@ function report(): OptimizationReport {
     experiment_id: id, type, task_id: workflow.optimization_task_id, candidate_id: workflow.candidate_id, status: 'SUCCEEDED', validity: 'VALID', evaluator: { id: 'e', version: '1', digest: 'e'.repeat(64) },
     failure_category: null, baseline: { id: 'baseline', digest: 'b'.repeat(64) }, observed_context: { machine: { machine_identity_sha256: 'a'.repeat(64) }, runner_queue: { wait_ms: 100 }, resource_policy: { validity: 'VALID' } },
     evaluation: { build: 'PASSED', correctness: 'PASSED', performance: 'PASSED', correctness_coverage: { planned: 4, executed: 4, passed: 4, failed: 0, complete: true },
-      details: { performance_gate: { weighted_geomean: ratio } }, performance_workloads: [{ workload_id: 'large-t1', speedup: ratio, regression: false }] },
+      details: { performance_gate: { gate_version: 3, weighted_geomean: ratio,
+        statistics: { policy: { method: 'paired-block-bootstrap-v1', confidence_level: 0.95 }, verdict: 'PASSED', overall_interval: null } } },
+      performance_workloads: [{ workload_id: 'large-t1', speedup: ratio, regression: false }] },
   }, commands: [], measurements: [] });
   return { schema_version: 1, generated_at: '', workflow, task: { task_id: workflow.optimization_task_id, workflow_id: workflow.workflow_id,
     evaluator: { id: 'e', version: '1', digest: 'e'.repeat(64) }, source_baseline: { id: 'source', digest: 'base-source' }, performance_baseline: { id: 'baseline', digest: 'b'.repeat(64) }, declared_context: { correctness_scope: {
@@ -31,7 +33,20 @@ test('customer report separates logical coverage, execution matrix, first run, r
   assert.equal(result.formal_speedup, 2); assert.equal(result.revalidation_speedup, 1.8); assert.equal(result.overall_interval, null);
   assert.equal(result.groups.find(row => row.dimension === 'n')?.weighted_speedup, 2);
   assert.equal(result.resource_wait_ms, 200);
-  assert.ok(result.limits.some(row => row.includes('点估计')));
+  assert.ok(result.limits.some(row => row.includes('统计方法')));
+});
+
+test('a legacy point estimate is preserved but cannot recommend a new approval', () => {
+  const r = report();
+  for (const row of r.experiments) row.experiment.evaluation!.details!.performance_gate = { gate_version: 2, weighted_geomean: 2 };
+  const summary = customerSummary(r);
+  assert.equal(summary.verification.ready, true, 'the historical experiment remains valid under its original semantics');
+  assert.equal(summary.state, 'BLOCKED');
+  assert.match(summary.next_step.message, /旧版点估计.*重新执行/);
+  assert.match(summary.conclusion, /不足以支持新的正式批准/);
+  assert.ok(summary.limits.some(row => row.includes('点估计')));
+  r.candidates[0].approval = { candidate_commit: 'frozen', first_formal_experiment_id: 'formal', revalidation_experiment_id: 'revalidation' } as never;
+  assert.equal(customerSummary(r).state, 'READY_FOR_DELIVERY', 'an existing approval keeps its historical meaning');
 });
 
 test('missing, invalid, incomplete or mismatched independent evidence cannot recommend delivery', () => {

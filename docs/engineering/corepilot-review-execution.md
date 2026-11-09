@@ -11,7 +11,7 @@
 | 优先级 | 事项及当前核实 | 状态与完成条件 |
 | --- | --- | --- |
 | P0 | `testing-service.js` 导入：源码 `src/application/testing-service.ts` 已跟踪，`tsconfig.json` 使用 NodeNext；需用干净安装和构建核对编译产物与入口。 | IMPLEMENTED：干净工作区已安装、构建并类型检查；完整回归和公开入口结果见下方。 |
-| P0 | 新开发者安装、类型检查、构建、仓库检查、Node 和浏览器测试；以锁文件为准，提供 CI。 | IMPLEMENTED：干净工作区和 CI 正在验证；GitHub Actions 实际运行单独记录。 |
+| P0 | 新开发者安装、类型检查、构建、仓库检查、Node 和浏览器测试；以锁文件为准，提供 CI。 | IMPLEMENTED：独立 Windows 工作区完成安装与测试，已增加 Linux/Windows CI；GitHub Actions 和最低 Node 22 版本实际运行尚未验证。 |
 | P0 | 公开仓库不应跟踪本机配置和运行数据；忽略规则不能自动移除已跟踪文件。 | IMPLEMENTED：从 Git 索引移除根配置和本地临时模型配置，保留本机文件；加入忽略规则和检查。Git 历史中的旧版本不会因此消失。 |
 | P0 | README、贡献指南、CI、环境要求与干净克隆一致。 | IMPLEMENTED：正在核对和更新；最终结果见验证记录。 |
 | P0 | 开源许可与发布机制。 | BLOCKED：仓库缺少已选定的项目许可证；选择和修改许可证须由项目所有者授权。本次不发布 Release。 |
@@ -20,7 +20,7 @@
 | P1 | Agent 读写必须受候选工作区和源码范围约束。 | IMPLEMENTED：本轮补上终点符号链接检查；这不等于对任意构建脚本或并发进程提供操作系统级沙箱。 |
 | P2 | Candidate、Baseline、Evaluator、机器、原始测量、Evidence、Approval、Delivery 的绑定和完整性。 | IMPLEMENTED：现有冻结包保存摘要和原始记录；正在核对冻结前的统计结果与原始样本一致性。公开脱敏归档不能直接复用包含私有信息的原始包。 |
 | P2 | 能从公开记录复核完整实验，提供脱敏、可验证的归档。 | BLOCKED：现有 [Dilate3x3 证据索引](../../examples/ippi-dilate3x3-success-case/evidence-index.md) 对应的部分原件和公开授权不在仓库；不得伪造原始记录或覆盖冻结证据。 |
-| P3 | A/A、A/B 对称、独立复验、多负载评价、置信区间、退化和不足证据。 | IMPLEMENTED：现有流程与口径见 [性能可信度与复现](../guides/performance-assurance.md)；历史 v2 与新 v3 统计语义不同，离线测试不证明目标机噪声及误报率。 |
+| P3 | A/A、A/B 对称、独立复验、多负载评价、置信区间、退化和不足证据。 | IMPLEMENTED：已有流程与口径见 [性能可信度与复现](../guides/performance-assurance.md)；新批准要求 v3 区间并核对 evaluator 冻结统计政策，历史 v2 实验与已有批准保持原语义。离线测试不证明目标机噪声及误报率。 |
 | P3 | 异常样本策略、独立多轮、目标机 A/A 噪声校准、人工与 Agent 同预算对照。 | BLOCKED：需要受控目标硬件、固定方案和人工工程师；不能用 fixture、历史测量或单次 A/A 推断误报率。 |
 | P4 | Package 和 Evaluator 独立资格，C/C++ 源码调查、独立 oracle、测试/benchmark 草稿、覆盖和辨别力检查。 | IMPLEMENTED：已有接入调查、草稿和测试质量机制；调用图、热点证明及新库低人工成本尚未经过真实接入验收，AI 生成内容不是自动可信的正式评价器。 |
 | P5 | SAXPY、SGEMV、Dilate3x3 经同一工作流完成构建到人工批准与交付。 | BLOCKED：仓库具有 SAXPY 草稿、SGEMV 评价器与 Dilate3x3 历史案例，但没有本轮三算法完整真机闭环证据；历史批准不等于已经交付。 |
@@ -43,5 +43,19 @@
 - **修改**：所有路径分量使用 `lstatSync` 检查，包括最终分量和失效链接；现有的源码范围检查继续执行。
 - **针对性测试**：`node --import tsx --test --test-concurrency=1 tests/workspace-tools.test.ts tests/library-package.test.ts`，24 项通过。本机 Windows 测试末尾和中间目录 junction 及外部文件保持不变；普通文件链接和失效文件链接已编写 Linux 测试，尚待执行，本机没有创建文件符号链接的权限。
 - **限制**：这是应用层路径约束，不能防止其他进程在检查与使用之间替换路径，也不能约束任意构建命令。需要系统级资源/权限隔离才能进一步收紧这些边界，不能把本次修复称作完整沙箱。
+
+### 干净安装和 CI
+
+- 独立 Windows 工作区、Node 24.11.1：`npm ci`、`npm run build`、`npm run typecheck`、`npm run check:repo` 均通过；`npm test` 272/272，`npm run test:web` 55/55，使用本地 HTTP/Git/模型夹具及系统 Chrome。Playwright 安装的 Chromium 另运行 1 项页面测试通过。
+- 新增 `.github/workflows/ci.yml`，安装 ripgrep 并覆盖 Linux Node 22.19/24、Windows Node 24；Node 24 两个平台含浏览器测试。安装与贡献文档说明 Node、Git、Python、ripgrep 和浏览器要求。
+- 报告中的 `testing-service.js` 是 NodeNext 导入：Git 跟踪 `src/application/testing-service.ts`，干净构建生成相应 `.js`；不是缺失源码。
+- 限制：以上安装和全量测试针对本轮最初基线，集成后须重新回归；GitHub Actions 尚未实际运行。最低 Node 22 的本机下载因网络超时未能验证，不宣称跨平台通过。
+
+### 实验结果与统计规则的核对
+
+- 发现冻结证据前只核对性能样本数量、身份和正值，可能把数值已变化的样本与旧的通过结论一起打包。冻结、人工批准和交付前现按正式与复验各自保存的样本、冻结方案和门禁版本重算；混入其他轮次、额外样本、变更统计摘要均会阻断新批准。
+- 执行与证据复核共用方案兼容性规则，除清单、参数及采样外，还核对资源、关键负载、权重和 evaluator 内冻结的统计方案。新批准要求 v3 真实区间；旧点估计实验保留，已有历史批准按原口径读取并单独核验。`tests/testpack-compatibility.test.ts`、`tests/customer-summary.test.ts` 验证策略和报告；HTTP/CLI 审批夹具覆盖 v3、历史 v2 阻断、样本改动及两轮混用。
+- 现有 Runner 对被测库摘要进行检查，但评价器与 benchmark 的可执行文件摘要目前由评价程序报告，系统尚未独立从目标机文件核验；冻结前的二进制元数据和公开脱敏归档仍待完善。
+- 统计区间依赖固定采样与分块假设，固定测量顺序仍可能产生系统偏差。没有本轮目标机 A/A 重复实验或人工对照，不能宣称误报率已校准或给出新增性能收益。
 
 后续每项实现的变更、测试结果与剩余限制在集成验证后补充，未记录的检查不视为通过。

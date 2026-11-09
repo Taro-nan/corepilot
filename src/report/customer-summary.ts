@@ -3,6 +3,7 @@ import type { CustomerOptimizationSummary } from '../contracts/customer-report.j
 import type { PerformanceStatistics } from '../contracts/performance-statistics.js';
 import type { ValidationQualityPlan } from '../contracts/validation-quality.js';
 import { assessCandidateVerification } from '../core/candidate-verification.js';
+import { hasCurrentApprovalStatistics } from '../core/approval-statistics.js';
 
 function gate(record?: OptimizationReport['experiments'][number]) {
   return record?.experiment.evaluation?.details?.performance_gate as { weighted_geomean?: number; statistics?: PerformanceStatistics;
@@ -20,6 +21,8 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
   const approvedCurrent = !!approval && verification.ready && approval.candidate_commit === candidate?.source.commit
     && approval.first_formal_experiment_id === verification.formal_experiment_id && approval.revalidation_experiment_id === verification.revalidation_experiment_id;
   const analysis = gate(formal), reanalysis = gate(revalidation);
+  const legacyApprovalEvidence = workflow.enable_performance && verification.ready && !approvedCurrent
+    && (!hasCurrentApprovalStatistics(formal?.experiment) || !hasCurrentApprovalStatistics(revalidation?.experiment));
   const deliveryMatches = !!workflow.delivery && workflow.delivery.candidate_id === candidateId && workflow.delivery.tree === candidate?.source.tree;
   const scope = report.task?.declared_context.correctness_scope as { cases?: Array<{ case_id: string; execution?: { input_id: string } }>; quality?: ValidationQualityPlan; quality_result?: CustomerOptimizationSummary['quality']; reference?: unknown; tolerance?: unknown } | undefined;
   const inputs = scope?.cases?.map(row => row.execution?.input_id ?? row.case_id);
@@ -55,7 +58,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
     : workflow.verification_mode === 'source_only' && workflow.status === 'CANDIDATE_READY' ? 'CANDIDATE_READY'
     : workflow.delivery_operation && workflow.delivery_operation.status !== 'COMPLETED' ? 'DELIVERY_PENDING'
     : verification.ready && workflow.status === 'DELIVERABLE' ? deliveryMatches ? 'DELIVERED' : 'DELIVERY_UNVERIFIED'
-      : verification.ready && workflow.status === 'WAITING_APPROVAL' ? approvedCurrent ? 'READY_FOR_DELIVERY' : 'READY_FOR_REVIEW'
+      : verification.ready && workflow.status === 'WAITING_APPROVAL' ? approvedCurrent ? 'READY_FOR_DELIVERY' : legacyApprovalEvidence ? 'BLOCKED' : 'READY_FOR_REVIEW'
         : ['VALIDATION_BLOCKED', 'BUDGET_EXHAUSTED', 'INTERRUPTED'].includes(workflow.status) ? 'BLOCKED' : 'NO_VERIFIED_RESULT';
   const command = (action: string) => `corepilot workflow ${action} ${workflow.workflow_id}`;
   let next: CustomerOptimizationSummary['next_step'] = { kind: 'INSPECT', message: '查看失败阶段、原始输入和命令记录，再决定修复或新建任务。', command: command('report') };
@@ -66,6 +69,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
   else if (state === 'READY_FOR_REVIEW') next = { kind: 'REVIEW', message: approval ? '已有批准绑定其他实验，请核对历史并使用新的候选重新审阅。' : '审阅源码差异、适用范围和独立复验，准备冻结证据并作出人工批准。', command: null };
   else if (state === 'DELIVERED') next = { kind: 'REPRODUCE', message: '源码交付已记录，可从冻结提交在 Runner 的新目录重建复现。', command: command('reproduce') };
   else if (state === 'DELIVERY_UNVERIFIED') next = { kind: 'INSPECT', message: '核对原交付提交与当前候选的源码身份。历史记录已标记交付，不应再次批准或重复合并。', command: command('report') };
+  else if (legacyApprovalEvidence && workflow.status === 'WAITING_APPROVAL') next = { kind: 'INSPECT', message: '原实验沿用旧版点估计或缺少有效统计区间。请确认新版测试方案，再重新执行正式实验与独立复验；原记录继续保留。', command: command('report') };
   else if (['BUDGET_EXHAUSTED', 'INTERRUPTED'].includes(workflow.status)) next = { kind: 'RESUME', message: '原会话与工作区已保留，可恢复调查；先核对已有 Runner 作业。', command: command('resume') };
   else if (workflow.status === 'VALIDATION_BLOCKED') next = { kind: 'RETRY_VALIDATION', message: (reanalysis ?? analysis)?.statistics?.verdict === 'INCONCLUSIVE'
     ? '当前测量证据不足，候选已保留。先检查噪声；采样条件需要改变时建立新版本，不反复试到通过。'
@@ -76,7 +80,9 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
     : state === 'DELIVERY_UNVERIFIED' ? '历史记录标记为已交付，但缺少与当前候选匹配的交付身份，需要核对原记录。'
     : state === 'READY_FOR_DELIVERY' ? '当前候选已通过验证并记录人工批准，源码尚未交付。'
     : state === 'READY_FOR_REVIEW' ? '当前候选已通过正式实验与独立复验，可进入人工审阅。'
-      : state === 'RUNNING' ? '任务仍在执行，当前报告为进度快照。' : '尚无满足完整验证条件的当前交付建议；已有证据与候选均保留。',
+      : state === 'RUNNING' ? '任务仍在执行，当前报告为进度快照。'
+        : legacyApprovalEvidence && workflow.status === 'WAITING_APPROVAL' ? '原实验通过旧版评价口径，但当前记录不足以支持新的正式批准。'
+          : '尚无满足完整验证条件的当前交付建议；已有证据与候选均保留。',
     candidate_id: candidateId, source_commit: candidate?.source.commit ?? null, formal_experiment_id: formal?.experiment.experiment_id ?? null,
     revalidation_experiment_id: revalidation?.experiment.experiment_id ?? null, formal_speedup: analysis?.weighted_geomean ?? null,
     revalidation_speedup: reanalysis?.weighted_geomean ?? null, overall_interval: analysis?.statistics?.overall_interval ?? null,

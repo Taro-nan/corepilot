@@ -3,7 +3,6 @@ import { resolveCandidateRoot } from '../config/runtime-path.js';
 import { withRunnerValidationStatus } from '../workspace/validation-outcome.js';
 import { RunnerClientError } from '../client/runner-client.js';
 import type { Candidate, Experiment } from '../contracts/optimization-domain.js';
-import type { LoadedFormalEvaluatorBundle } from '../contracts/formal-evaluator.js';
 import type {
   ExperimentExecutionPlan,
   ExperimentExecutionStep,
@@ -22,8 +21,7 @@ import type { ExperimentExecutionBackend } from './experiment-execution-backend.
 import { OptimizationRuntime } from './optimization-runtime.js';
 import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
 import { createFormalEvaluatorSteps } from '../evaluator/formal-plan.js';
-import { formalCaseParameters, formalWorkloadParameters } from '../evaluator/formal-arguments.js';
-import { parametersAreSubset, validationCaseParameters } from '../testpack/validation-parameters.js';
+import { validateFormalTestpackCompatibility } from '../evaluator/testpack-compatibility.js';
 import { remoteWorkspaceBuild } from '../workspace/remote-build.js';
 
 const CONFIRMED_TERMINAL = new Set<ExperimentStatusResponse['status']>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
@@ -502,40 +500,6 @@ function mapFormalArtifactPath(value: string, sourceRoot: string, stagedCandidat
   const relative = path.relative(path.resolve(sourceRoot), configured);
   if (!relative.startsWith('..') && !path.isAbsolute(relative)) return joinForTarget(stagedCandidateRoot, relative);
   return value;
-}
-
-function validateFormalTestpackCompatibility(testpack: ValidationTestpack, bundle: LoadedFormalEvaluatorBundle): void {
-  const caseIds = testpack.correctness.cases.map((item) => item.case_id);
-  const workloadIds = testpack.performance.cases.map((item) => item.case_id);
-  if (JSON.stringify(caseIds) !== JSON.stringify(bundle.manifest.correctness.case_ids)) {
-    throw new Error('formal testpack correctness inventory differs from evaluator bundle');
-  }
-  if (JSON.stringify(workloadIds) !== JSON.stringify(bundle.manifest.performance.workload_ids)) {
-    throw new Error('formal testpack performance inventory differs from evaluator bundle');
-  }
-  for (let index = 0; index < testpack.correctness.cases.length; index += 1) {
-    const testCase = testpack.correctness.cases[index];
-    const declared = bundle.correctness.cases[index];
-    if (!parametersAreSubset(validationCaseParameters(testCase), formalCaseParameters(declared))) {
-      throw new Error(`formal testpack correctness parameters differ for '${testCase.case_id}'`);
-    }
-  }
-  for (let index = 0; index < testpack.performance.cases.length; index += 1) {
-    const testCase = testpack.performance.cases[index];
-    const declared = bundle.workloads.workloads[index];
-    if (!parametersAreSubset(validationCaseParameters(testCase), formalWorkloadParameters(declared))) {
-      throw new Error(`formal testpack performance parameters differ for '${testCase.case_id}'`);
-    }
-  }
-  if (testpack.performance.sampling.warmup !== bundle.manifest.performance.sampling.warmup_count ||
-      testpack.performance.sampling.samples !== bundle.manifest.performance.sampling.sample_count) {
-    throw new Error('formal testpack sampling differs from evaluator bundle');
-  }
-  const resources = bundle.manifest.resource_requirements;
-  if (testpack.resources.cpu_set !== resources.cpu_set || !testpack.resources.numa_nodes.includes(resources.numa_node) ||
-      JSON.stringify(testpack.resources.thread_counts) !== JSON.stringify(resources.thread_counts)) {
-    throw new Error('formal testpack resource policy differs from evaluator bundle');
-  }
 }
 
 function joinForTarget(root: string, relative: string): string {
