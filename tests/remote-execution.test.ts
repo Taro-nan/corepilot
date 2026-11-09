@@ -16,6 +16,7 @@ import { seedBlockedValidation } from './validation-recovery-fixture.js';
 import { PiOptimizationSession } from '../src/agent/pi-optimization-session.js';
 import { COREPILOT_PI_PROVIDER_ID, createPiModels } from '../src/model/pi-provider.js';
 import { loadOptimizationConfig } from '../src/config/optimization-config.js';
+import { startRunnerHttpServer } from '../src/runner/http-server.js';
 
 const build = commandBuild('cmake -S . -B build -DCMAKE_BUILD_TYPE=Release\ncmake --build build --target kernel -j2',
   { executable: '', args: [], cwd: '.', environment: {}, timeout_ms: 1000 });
@@ -108,12 +109,16 @@ test('public Package optimization stages the Control baseline before starting ta
     uploadFile(local, remote) { uploads.push({ local, remote }); return { exit_code: 0, stderr: '' }; },
   } });
   const r = await prepareReviewFixture(f).catch(async error => { await f.close(); throw error; });
+  const runner = await startRunnerHttpServer({ host: '127.0.0.1', port: 0, token: 'workflow-runner-fixture',
+    dbPath: path.join(f.root, 'workflow-runner.sqlite'), workspaceRoot: f.root, resourceEnforcement: 'REQUIRED' });
   let id = '';
   try {
     expected = r.record.baseline_digest;
     const review = await f.projects.validationReview.preview(r.project, r.pkg, r.version, r.target);
     await f.projects.validationReview.approve(r.project, r.pkg, r.version, r.target, { expected_digest: review.evaluator_digest,
       expected_package_digest: review.package_digest, trial_id: r.trialId, reviewer: 'Fixture owner', confirm: true });
+    f.projects.saveConfig(r.project.project_id, { ...f.projects.config(r.project.project_id),
+      runner: { mode: 'rpc', endpoint: runner.url, token: 'workflow-runner-fixture' } });
     const api = new ApiClient(f.url, { token: f.token });
     const start = await api.submitOptimizationWorkflow({ project_id: r.project.project_id }) as { workflow_id: string }; id = start.workflow_id;
     const deadline = Date.now() + 12_000;
@@ -125,11 +130,11 @@ test('public Package optimization stages the Control baseline before starting ta
     assert.notEqual(baselineUploads[0].remote, baselineUploads[0].local);
   } finally {
     if (id) { f.service.cancel(id); const end = Date.now() + 5000; while (f.service.activeWorkflowIds().length && Date.now() < end) await delay(20); }
-    await r.close(); await f.close();
+    await runner.close(); await r.close(); await f.close();
   }
 });
 
-for (const recovery of ['active', 'unlinked'] as const) {
+for (const recovery of ['active', 'unlinked', 'legacy-plan'] as const) {
 test(`public RPC ${recovery} recovery performs no remote staging while an experiment is unresolved`, async () => {
   let remoteCalls = 0;
   const f = await startWebFixture({ rpcTransport: {
@@ -147,26 +152,27 @@ test(`public RPC ${recovery} recovery performs no remote staging while an experi
     record.candidate_evaluation_feedback = null;
     f.store.saveOptimizationWorkflowJson(seeded.workflowId, JSON.stringify(record));
     const previous = f.store.getExperiment(seeded.experiment.experiment_id)!;
-    f.store.saveExperiment({ ...previous, status: 'RUNNING', ended_at: null, validity: 'UNKNOWN', failure_category: null, evaluation: null });
+    f.store.saveExperiment({ ...previous, status: 'RUNNING', ended_at: null, validity: 'UNKNOWN', failure_category: null, evaluation: null,
+      ...(recovery === 'legacy-plan' ? { declared_context: { ...previous.declared_context, runner_execution_plan: { steps: [] } } } : {}) });
     const before = f.store.getExperiment(previous.experiment_id);
     const model = loadOptimizationConfig(f.configPath).config.model;
     const models = createPiModels({ endpoint: model.endpoint, modelId: model.model_id, apiKey: model.api_key! });
     const session = await PiOptimizationSession.open({ id: record.agent_session!.id, directory: record.agent_session!.directory,
       models, model: models.getModel(COREPILOT_PI_PROVIDER_ID, model.model_id)!, systemPrompt: 'Offline RPC recovery fixture.' });
-    await session.checkpoint({ ...seeded.saved, phase: recovery === 'active' ? 'VALIDATION' : 'AGENT', validationOnly: true,
-      activeExperimentId: recovery === 'active' ? previous.experiment_id : null, pendingDecision: null, evaluationFeedback: null });
+    await session.checkpoint({ ...seeded.saved, phase: recovery !== 'unlinked' ? 'VALIDATION' : 'AGENT', validationOnly: true,
+      activeExperimentId: recovery !== 'unlinked' ? previous.experiment_id : null, pendingDecision: null, evaluationFeedback: null });
     await session.close();
     const api = new ApiClient(f.url, { token: f.token });
     await api.resumeOptimizationWorkflow(seeded.workflowId);
     const deadline = Date.now() + 10_000;
     while (f.service.activeWorkflowIds().length && Date.now() < deadline) await delay(20);
     const result = f.service.get(seeded.workflowId)!;
-    assert.equal(result.status, recovery === 'active' ? 'INTERRUPTED' : 'FAILED', result.error ?? 'unexpected status');
-    assert.match(result.error ?? '', recovery === 'active' ? /execution plan is missing/ : /未确认终态/);
+    assert.equal(result.status, recovery !== 'unlinked' ? 'INTERRUPTED' : 'FAILED', result.error ?? 'unexpected status');
+    assert.match(result.error ?? '', recovery === 'active' ? /execution plan is missing/ : recovery === 'legacy-plan' ? /历史实验没有固定 Runner 数据库身份/ : /未确认终态/);
     assert.equal(remoteCalls, 0);
     const after = f.store.getExperiment(previous.experiment_id)!;
     assert.equal(after.experiment_id, before!.experiment_id);
-    assert.equal(after.status, recovery === 'active' ? 'UNKNOWN' : 'RUNNING');
+    assert.equal(after.status, recovery !== 'unlinked' ? 'UNKNOWN' : 'RUNNING');
     assert.equal(after.ended_at, null);
     assert.deepEqual(after.declared_context, before!.declared_context);
     assert.equal(f.store.listExperiments(seeded.candidate.task_id).length, 1);

@@ -11,7 +11,7 @@ import type { SqliteOptimizationWorkflowStore } from '../workflow/optimization-w
 import type { ExperimentExecutionPlan, ExperimentStatusResponse } from '../contracts/runner-rpc.js';
 import { OptimizationRuntime } from '../core/optimization-runtime.js';
 import { isRunnerSubmissionRejected } from '../core/experiment-execution-backend.js';
-import { RunnerClient, RunnerClientError } from '../client/runner-client.js';
+import { requireRunnerArtifactPathCheck, requireRunnerStoreIdentity, RunnerClient, RunnerClientError } from '../client/runner-client.js';
 import { loadOptimizationConfig, resolveRunnerConfig } from '../config/optimization-config.js';
 import { isRegisteredRunner } from '../config/runner-config.js';
 import { ExecutionMachineService } from './execution-machine-service.js';
@@ -25,6 +25,11 @@ import { redactRecord } from '../report/optimization-report.js';
 const execute = promisify(execFile);
 type Job = NonNullable<OptimizationWorkflowRecord['reproduction']>;
 const unfinished = (job?: Job) => !!job && ['PREPARING', 'RUNNING', 'UNKNOWN'].includes(job.status);
+function bindOriginalStore(client: RunnerClient, experiment: import('../contracts/optimization-domain.js').Experiment): void {
+  const instance = experiment.declared_context.runner_store_instance_id;
+  if (typeof instance !== 'string') throw new RunnerClientError(null, 'RUNNER_STORE_IDENTITY_UNAVAILABLE', '历史复现实验没有固定 Runner 数据库身份，请维护者核对原作业。');
+  client.bindStoreIdentity(instance);
+}
 
 /** Rebuild a frozen Candidate using its saved RPC plan; uses the same Runtime, Runner and evaluation functions. */
 export class ReproductionService {
@@ -70,7 +75,7 @@ export class ReproductionService {
     const frozen = readFrozenValidationTestpack(record.testpack_snapshot_path);
     if (frozen.testpack.evaluator?.sha256 !== original.evaluator.digest) throw new Error('测试快照与原实验 evaluator 不一致');
     if (!unfinished(record.reproduction)) {
-      const { runner_execution_plan: _plan, ...context } = original.declared_context;
+      const { runner_execution_plan: _plan, runner_store_instance_id: _storeId, ...context } = original.declared_context;
       const experiment = this.runtime.prepareExperiment({ taskId: record.optimization_task_id, candidateId: candidate.candidate_id, type: 'REVALIDATION', initialStatus: 'PENDING',
         declaredContext: { ...context, purpose: 'DELIVERY_REPRODUCTION', reproduction_of: original.experiment_id } });
       const now = new Date().toISOString();
@@ -111,10 +116,11 @@ export class ReproductionService {
       }
     }
     const { client } = this.connection(record);
-    try { await client.cancelExperiment(experiment.experiment_id); }
-    catch {
-      this.update(workflowId, experimentId, { status: 'UNKNOWN', error: `复现实验 ${experiment.experiment_id} 的取消尚未确认，请核对原 Runner。` });
-      throw new Error('取消请求尚未确认；请核对原实验状态后继续。');
+    try { bindOriginalStore(client, experiment); await client.cancelExperiment(experiment.experiment_id); }
+    catch (error) {
+      const identity = error instanceof RunnerClientError && ['RUNNER_STORE_MISMATCH', 'RUNNER_STORE_IDENTITY_UNAVAILABLE', 'RUNNER_STORE_GUARD_UNAVAILABLE'].includes(error.code) ? ` ${error.message}` : '';
+      this.update(workflowId, experimentId, { status: 'UNKNOWN', error: `复现实验 ${experiment.experiment_id} 的取消尚未确认，请核对原 Runner。${identity}` });
+      throw new Error(`取消请求尚未确认；请核对原实验状态后继续。${identity}`);
     }
   }
 
@@ -158,7 +164,11 @@ export class ReproductionService {
         this.update(id, job.experiment_id, { status: 'CANCELLED', phase: '提交前已取消', error: null });
         return;
       }
+      if (plan) bindOriginalStore(client, experiment);
       const facts = await client.probe(signal);
+      const runnerStoreInstanceId = requireRunnerStoreIdentity(facts.health);
+      client.bindStoreIdentity(runnerStoreInstanceId);
+      if (!plan) requireRunnerArtifactPathCheck(facts.health);
       if (facts.machine.machine_identity_sha256 !== job.machine_identity) throw new Error('执行机器身份与原实验不一致；请恢复原机器连接');
       if (facts.health.capabilities?.exclusive_queue !== 1) throw new Error('请更新 Runner：复现要求统一排队，避免构建和采样相互干扰');
       if (facts.health.resource_enforcement !== 'REQUIRED') throw new Error('复现要求 Runner 启用资源约束与观测；请使用 resource enforcement REQUIRED');
@@ -190,7 +200,7 @@ export class ReproductionService {
           plan.build_directory = path.posix.join(root, 'build'); plan.output_directory = path.posix.join(root, 'logs');
           signal.throwIfAborted();
           if (this.required(id).reproduction?.cancel_requested) throw new Error('提交前已请求取消');
-          this.store.claimReproductionSubmission(id, experiment, plan as unknown as Record<string, unknown>, root, new Date().toISOString());
+          this.store.claimReproductionSubmission(id, experiment, plan as unknown as Record<string, unknown>, root, new Date().toISOString(), runnerStoreInstanceId);
           mayHaveSubmitted = true;
           try {
             const receipt = await client.submitExperiment({ ...plan, experiment }, signal);
@@ -242,6 +252,7 @@ export class ReproductionService {
       if (!rejectedBeforeExecution && !this.canPrepare(current)) mayHaveSubmitted = true;
       if (mayHaveSubmitted && !rejectedBeforeExecution || signal.reason === 'backend shutting down') {
         let message = `复现实验 ${job.experiment_id} 的状态尚未确认，请核对原 Runner；系统不会重新提交。`;
+        if (error instanceof RunnerClientError && ['RUNNER_STORE_MISMATCH', 'RUNNER_STORE_IDENTITY_UNAVAILABLE', 'RUNNER_STORE_GUARD_UNAVAILABLE'].includes(error.code)) message += ` ${error.message}`;
         try { if (mayHaveSubmitted) this.runtime.markRemoteStateUnknown(job.experiment_id, message); }
         catch { message += ' 本地实验状态暂时无法保存。'; }
         this.update(id, job.experiment_id, { status: 'UNKNOWN', error: message });

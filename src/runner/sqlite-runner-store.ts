@@ -21,6 +21,7 @@ export class SqliteRunnerStore implements RunnerStore {
   init(): void {
     this.db.exec(`
       PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS runner_metadata (
         key TEXT PRIMARY KEY,
@@ -72,14 +73,18 @@ export class SqliteRunnerStore implements RunnerStore {
   }
 
   resolveRunnerIdentity(preferredId?: string): string {
-    const row = this.db.prepare("SELECT value FROM runner_metadata WHERE key = 'runner_id'").get() as { value: string } | undefined;
-    if (row) {
-      if (preferredId && preferredId !== row.value) throw new Error(`runner database belongs to '${row.value}', not '${preferredId}'`);
-      return row.value;
-    }
-    const runnerId = preferredId?.trim() || `runner:${randomUUID()}`;
-    this.db.prepare("INSERT INTO runner_metadata (key, value) VALUES ('runner_id', ?)").run(runnerId);
-    return runnerId;
+    const preferred = preferredId?.trim();
+    this.db.prepare("INSERT OR IGNORE INTO runner_metadata (key, value) VALUES ('runner_id', ?)").run(preferred || `runner:${randomUUID()}`);
+    const row = this.db.prepare("SELECT value FROM runner_metadata WHERE key = 'runner_id'").get() as { value: string };
+    if (preferred && preferred !== row.value) throw new Error(`runner database belongs to '${row.value}', not '${preferred}'`);
+    return row.value;
+  }
+
+  resolveStoreInstanceId(): string {
+    // The winning INSERT is authoritative even when two processes upgrade an old database concurrently.
+    this.db.prepare("INSERT OR IGNORE INTO runner_metadata (key, value) VALUES ('store_instance_id', ?)").run(randomUUID());
+    const row = this.db.prepare("SELECT value FROM runner_metadata WHERE key = 'store_instance_id'").get() as { value: string };
+    return row.value;
   }
 
   createExecution(record: ExecutionStateRecord): void {

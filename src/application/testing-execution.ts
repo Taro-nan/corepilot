@@ -13,6 +13,7 @@ import type { TestingStore } from '../storage/testing-store.js';
 import type { TestingAssetService } from './testing-assets.js';
 import { freezeSourceSubject, stageBinarySubject, stageSourceSubject, type TestingBinaryStager, type TestingRunner, type TestingSubjectContext } from './testing-subjects.js';
 import type { ResolvedTestingPlan } from './testing-plan.js';
+import { requireRunnerArtifactPathCheck, requireRunnerStoreIdentity } from '../client/runner-client.js';
 
 export interface TestingPreparation {
   store: TestingStore;
@@ -55,6 +56,9 @@ export async function prepareTestingExecution(context: TestingPreparation): Prom
   }
   record = phase(context, 'CHECKING_MACHINE', '正在核对执行机器、资源与 Runner 能力');
   const probe = await context.runner.probe(context.signal);
+  const runnerStoreInstanceId = requireRunnerStoreIdentity(probe.health);
+  context.runner.bindStoreIdentity(runnerStoreInstanceId);
+  requireRunnerArtifactPathCheck(probe.health);
   if (probe.health.resource_enforcement !== 'REQUIRED' || probe.health.capabilities?.controlled_validation !== 1) throw new Error('执行机器需要支持受控测试并启用资源约束，请由维护者更新 Runner。');
   if (record.input.candidate.kind === 'source' || record.input.baseline?.kind === 'source') {
     if (probe.health.capabilities?.source_archive_upload !== 1) throw new Error('请更新执行机器 Runner，以支持固定源码归档上传。');
@@ -72,13 +76,14 @@ export async function prepareTestingExecution(context: TestingPreparation): Prom
       if (!node || expandCpuSet(resources.cpu_set).some(cpu => !new Set(expandCpuSet(node)).has(cpu))) throw new Error('测试 CPU 集合与所选 NUMA 节点不匹配，请修改测试条件。');
     }
   }
-  context.store.updateTask(context.taskId, task => { task.machine.hardware = probe.machine; task.machine.runner_id = probe.health.runner_id; });
+  context.store.updateTask(context.taskId, task => { task.machine.hardware = probe.machine; task.machine.runner_id = probe.health.runner_id;
+    task.machine.runner_store_instance_id = runnerStoreInstanceId; });
   for (const role of ['candidate', 'baseline'] as const) {
     record = context.store.task(context.taskId);
     const subject = record.input[role]; if (!subject) continue;
     phase(context, 'STAGING_SUBJECTS', `正在准备${role === 'candidate' ? '被测' : '比较'}库及依赖`);
     const subjectContext: TestingSubjectContext = { ...shared, localRoot: path.join(context.store.taskRoot(context.taskId), role),
-      remoteRoot: path.posix.join(record.workspace.run_root, 'subjects', role), machineDigest: probe.machine.machine_identity_sha256 };
+      remoteRoot: path.posix.join(record.workspace.run_root, 'subjects', role), machineDigest: probe.machine.machine_identity_sha256, runnerStoreInstanceId };
     let prepared = record.subjects[role];
     if (subject.kind === 'source') {
       buildSteps.push(await stageSourceSubject(prepared!, subjectContext));
@@ -113,7 +118,7 @@ export async function prepareTestingExecution(context: TestingPreparation): Prom
       version: record.plan.evaluator.version, digest: record.plan.evaluator.digest }, baseline: record.subjects.baseline ? subjectIdentity(baseline) : { id: 'none' },
     declared_context: { classification: 'INDEPENDENT_TEST', mode: record.input.mode, formal_evidence: false,
       test_plan: record.plan.test_plan, evaluator_digest: record.plan.evaluator.digest,
-      machine_identity_sha256: probe.machine.machine_identity_sha256, subjects: record.subjects },
+      machine_identity_sha256: probe.machine.machine_identity_sha256, runner_store_instance_id: runnerStoreInstanceId, subjects: record.subjects },
     observed_context: null, evaluation: null, started_at: null, ended_at: null, created_at: record.created_at, updated_at: new Date().toISOString() };
   const plan: ExperimentExecutionPlan = { experiment, steps, output_directory: record.workspace.logs_root };
   phase(context, 'SUBMITTING', '正在向 Runner 提交固定测试计划');

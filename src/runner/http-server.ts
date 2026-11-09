@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { ApiError } from '../core/api-error.js';
-import { RUNNER_PROTOCOL_VERSION, type RunnerHealth } from '../contracts/runner-rpc.js';
+import { RUNNER_PROTOCOL_VERSION, RUNNER_STORE_ROUTE, type RunnerHealth } from '../contracts/runner-rpc.js';
 import { DuplicateExperimentError, ExperimentExecutor, RunnerPlanError } from './experiment-executor.js';
 import { probeRunnerMachine } from './machine-probe.js';
 import { probeRunnerToolchain } from './toolchain-probe.js';
@@ -30,6 +30,7 @@ export interface RunnerHttpServerOptions {
 
 export interface RunningRunnerServer {
   runnerId: string;
+  storeInstanceId: string;
   host: string;
   port: number;
   url: string;
@@ -47,14 +48,16 @@ export async function startRunnerHttpServer(options: RunnerHttpServerOptions): P
     ...(options.allowTargetValidatedDigest ? { allowTargetValidatedDigest: options.allowTargetValidatedDigest } : {}),
   });
   let initialized: ReturnType<ExperimentExecutor['initialize']>;
+  let storeInstanceId: string;
   try {
     initialized = executor.initialize();
+    storeInstanceId = store.resolveStoreInstanceId();
   } catch (error) {
     executor.closeStore();
     throw error;
   }
   const server = http.createServer((req, res) => {
-    void handle(req, res, options.token, executor, options.workspaceRoot, options.toolchainProbe).catch((error: unknown) => {
+    void handle(req, res, options.token, executor, storeInstanceId, options.workspaceRoot, options.toolchainProbe).catch((error: unknown) => {
       const apiError = toApiError(error);
       if (!res.headersSent) {
         if (apiError.statusCode === 401) res.setHeader('www-authenticate', 'Bearer');
@@ -78,6 +81,7 @@ export async function startRunnerHttpServer(options: RunnerHttpServerOptions): P
   let closed = false;
   return {
     runnerId: initialized.runnerId,
+    storeInstanceId,
     host: options.host,
     port: address.port,
     url: `http://${formatHost(options.host)}:${address.port}`,
@@ -96,13 +100,22 @@ async function handle(
   res: http.ServerResponse,
   token: string,
   executor: ExperimentExecutor,
+  storeInstanceId: string,
   workspaceRoot: string,
   toolchainProbe?: () => Promise<RunnerToolchain>,
 ): Promise<void> {
   if (!authorized(req.headers.authorization, token)) throw new ApiError(401, 'UNAUTHORIZED', 'valid bearer token required');
   const url = new URL(req.url ?? '/', 'http://runner.local');
   const method = req.method ?? 'GET';
-  const pathname = url.pathname;
+  let pathname = url.pathname;
+  if (pathname.startsWith(RUNNER_STORE_ROUTE)) {
+    const rest = pathname.slice(RUNNER_STORE_ROUTE.length);
+    const slash = rest.indexOf('/');
+    if (slash < 1 || rest.slice(0, slash) !== storeInstanceId) {
+      throw new ApiError(409, 'RUNNER_STORE_MISMATCH', 'Runner 数据库身份与原任务不一致；请恢复原 Runner 后核对。');
+    }
+    pathname = rest.slice(slash);
+  }
   if (method === 'GET' && pathname === '/toolchain') {
     sendJson(res, 200, await (toolchainProbe ? toolchainProbe() : probeRunnerToolchain(executor.runnerId))); return;
   }
@@ -110,11 +123,12 @@ async function handle(
   if (method === 'GET' && pathname === '/health') {
     const response: RunnerHealth = {
       runner_id: executor.runnerId,
+      store_instance_id: storeInstanceId,
       version: COREPILOT_RUNNER_VERSION,
       protocol_version: RUNNER_PROTOCOL_VERSION,
       status: 'READY',
       resource_enforcement: executor.resourceEnforcementMode,
-      capabilities: { controlled_validation: 1, source_archive_upload: 1, execution_logs: 1, resource_matrix: 1, exclusive_queue: 1 },
+      capabilities: { controlled_validation: 1, source_archive_upload: 1, execution_logs: 1, resource_matrix: 1, exclusive_queue: 1, store_identity_guard: 1, artifact_path_check: 1 },
     };
     sendJson(res, 200, response);
     return;

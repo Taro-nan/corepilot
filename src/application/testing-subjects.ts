@@ -13,7 +13,7 @@ import type { TestingAssetService } from './testing-assets.js';
 import type { ResolvedTestingPlan } from './testing-plan.js';
 import type { RunnerClient } from '../client/runner-client.js';
 
-export type TestingRunner = Pick<RunnerClient, 'probe' | 'submitExperiment' | 'getExperiment' | 'cancelExperiment' |
+export type TestingRunner = Pick<RunnerClient, 'probe' | 'bindStoreIdentity' | 'submitExperiment' | 'getExperiment' | 'cancelExperiment' |
   'getCommandExecutions' | 'getMeasurements' | 'getExecutionOutput' | 'uploadSourceArchive'>;
 export type TestingBinaryStager = typeof stageAndInspectBaselineBundle;
 export interface TestingSubjectContext {
@@ -26,6 +26,7 @@ export interface TestingSubjectContext {
   localRoot: string;
   remoteRoot: string;
   machineDigest: string;
+  runnerStoreInstanceId: string;
   signal: AbortSignal;
 }
 
@@ -70,7 +71,7 @@ export async function stageBinarySubject(subject: Extract<TestingSubject, { kind
   if (runner.mode !== 'rpc') throw new Error('测试需要 Runner RPC 执行机器。');
   const inspection = await context.stageBinary({ localRoot: context.assets.filesRoot(asset.asset_id), remoteRoot: context.remoteRoot,
     entryPath: asset.entry_path, files: asset.files, target: context.machine.target as TargetConfig,
-    runner: { endpoint: runner.endpoint, token: runner.token, requestTimeoutMs: runner.requestTimeoutMs } });
+    runner: { endpoint: runner.endpoint, token: runner.token, requestTimeoutMs: runner.requestTimeoutMs, storeInstanceId: context.runnerStoreInstanceId } });
   context.signal.throwIfAborted();
   if (!inspection.ok) throw new Error(`库文件依赖检查失败：${inspection.issues.join('；')}`);
   if (inspection.machine_identity_sha256 !== context.machineDigest) throw new Error('库文件检查返回了另一台执行机器，请核对机器连接。');

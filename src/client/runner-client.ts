@@ -10,7 +10,7 @@ import type {
   StagedSourceArchive,
   RunnerExecutionOutput,
 } from '../contracts/runner-rpc.js';
-import { RUNNER_PROTOCOL_VERSION } from '../contracts/runner-rpc.js';
+import { RUNNER_PROTOCOL_VERSION, RUNNER_STORE_ROUTE } from '../contracts/runner-rpc.js';
 import type { RunnerToolchain } from '../contracts/build-planning.js';
 import type { RunnerBundleInspection, RunnerBundleInspectionRequest } from '../contracts/baseline-bundle.js';
 
@@ -29,6 +29,21 @@ export class RunnerClientError extends Error {
   }
 }
 
+const STORE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function requireRunnerStoreIdentity(health: RunnerHealth): string {
+  if (health.capabilities?.store_identity_guard !== 1 || typeof health.store_instance_id !== 'string' || !STORE_ID.test(health.store_instance_id)) {
+    throw new RunnerClientError(null, 'RUNNER_STORE_IDENTITY_UNAVAILABLE', 'Runner 不支持数据库身份核验，请由维护者升级 Runner 后再开始新实验。');
+  }
+  return health.store_instance_id;
+}
+
+export function requireRunnerArtifactPathCheck(health: RunnerHealth): void {
+  if (health.capabilities?.artifact_path_check !== 1) {
+    throw new RunnerClientError(null, 'RUNNER_ARTIFACT_PATH_CHECK_UNAVAILABLE', 'Runner 尚不支持库产物路径核对，请由维护者升级 Runner 后再开始新的测试或正式实验。');
+  }
+}
+
 export interface RunnerClientOptions {
   baseUrl: string;
   token: string;
@@ -40,6 +55,7 @@ export interface RunnerClientOptions {
 export class RunnerClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof globalThis.fetch;
+  private storeInstanceId: string | null = null;
 
   constructor(private readonly options: RunnerClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
@@ -48,6 +64,18 @@ export class RunnerClient {
     if (options.requestTimeoutMs !== undefined && (!Number.isInteger(options.requestTimeoutMs) || options.requestTimeoutMs < 1)) {
       throw new Error('runner request timeout must be a positive integer');
     }
+  }
+
+  bindStoreIdentity(storeInstanceId: string): void {
+    if (!STORE_ID.test(storeInstanceId)) throw new RunnerClientError(null, 'RUNNER_STORE_IDENTITY_UNAVAILABLE', '原任务缺少可核验的 Runner 数据库身份，请由维护者核对原作业。');
+    if (this.storeInstanceId && this.storeInstanceId !== storeInstanceId) throw new RunnerClientError(null, 'RUNNER_STORE_MISMATCH', 'Runner 数据库身份与原任务不一致；请恢复原 Runner 后核对。');
+    this.storeInstanceId = storeInstanceId;
+  }
+
+  get boundStoreIdentity(): string | null { return this.storeInstanceId; }
+
+  private guardedPath(pathname: string): string {
+    return this.storeInstanceId ? `${RUNNER_STORE_ROUTE}${this.storeInstanceId}${pathname}` : pathname;
   }
 
   health(signal?: AbortSignal): Promise<RunnerHealth> {
@@ -68,6 +96,7 @@ export class RunnerClient {
       || !['REQUIRED', 'DISABLED'].includes(health.resource_enforcement)) {
       throw new RunnerClientError(null, 'PROTOCOL_MISMATCH', 'Runner 未就绪或协议版本不兼容，请检查 RPC 地址与 Runner 版本。');
     }
+    if (health.capabilities?.store_identity_guard === 1) this.bindStoreIdentity(requireRunnerStoreIdentity(health));
     const machine = await this.machine(signal);
     if (!machine || typeof machine.hostname !== 'string' || typeof machine.architecture !== 'string'
       || !Number.isInteger(machine.cpu_count) || machine.cpu_count < 1 || typeof machine.machine_identity_sha256 !== 'string') {
@@ -109,13 +138,18 @@ export class RunnerClient {
     const stream = createReadStream(input.filename);
     const query = new URLSearchParams({ sha256: input.sha256, workspace_path: input.workspacePath });
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}/source-archives?${query}`, { method: 'PUT',
+      const response = await this.fetchImpl(`${this.baseUrl}${this.guardedPath(`/source-archives?${query}`)}`, { method: 'PUT',
         headers: { authorization: `Bearer ${this.options.token}`, 'content-type': 'application/gzip' },
         body: stream as unknown as RequestInit['body'], duplex: 'half',
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(900_000)]) : AbortSignal.timeout(900_000),
       } as RequestInit);
       const result = await response.json() as StagedSourceArchive & RunnerErrorBody;
-      if (!response.ok) throw new RunnerClientError(response.status, result.error?.code ?? 'SOURCE_UPLOAD_FAILED', result.error?.message ?? `HTTP ${response.status}`);
+      if (!response.ok) {
+        if (this.storeInstanceId && response.status === 404 && (!result.error?.code || result.error.code === 'NOT_FOUND')) {
+          throw new RunnerClientError(404, 'RUNNER_STORE_GUARD_UNAVAILABLE', '原 Runner 可能尚未升级，或代理未转发数据库身份保护路径；请维护者检查原连接。');
+        }
+        throw new RunnerClientError(response.status, result.error?.code ?? 'SOURCE_UPLOAD_FAILED', result.error?.message ?? `HTTP ${response.status}`);
+      }
       return result;
     } finally { stream.destroy(); }
   }
@@ -136,7 +170,7 @@ export class RunnerClient {
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
     try {
-      response = await this.fetchImpl(this.baseUrl + pathname, {
+      response = await this.fetchImpl(this.baseUrl + this.guardedPath(pathname), {
         method,
         headers: {
           // Staging currently uses synchronous SSH/scp and can block the
@@ -163,6 +197,9 @@ export class RunnerClient {
     catch { parsed = {}; }
     if (!response.ok) {
       const error = parsed as RunnerErrorBody;
+      if (this.storeInstanceId && response.status === 404 && (!error.error?.code || error.error.code === 'NOT_FOUND')) {
+        throw new RunnerClientError(404, 'RUNNER_STORE_GUARD_UNAVAILABLE', '原 Runner 可能尚未升级，或代理未转发数据库身份保护路径；请维护者检查原连接。');
+      }
       throw new RunnerClientError(response.status, error.error?.code ?? 'HTTP_ERROR', error.error?.message ?? `HTTP ${response.status}`);
     }
     return parsed as T;

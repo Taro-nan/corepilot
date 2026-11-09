@@ -447,6 +447,25 @@ export class OptimizationWorkflowService {
           requestTimeoutMs: preflight.runner.requestTimeoutMs,
         });
         const backend = new RunnerClientExperimentExecutionBackend(runnerClient);
+        const resumedExperiment = resumableExperimentId ? this.options.store.getExperiment(resumableExperimentId) : null;
+        const remoteResumeId = resumedExperiment && (resumedExperiment.declared_context.runner_execution_plan || resumedExperiment.status !== 'PENDING' ||
+          resumedExperiment.started_at !== null || resumedExperiment.ended_at !== null || resumedExperiment.runner_terminal_facts ||
+          this.options.store.listCommandExecutions(resumedExperiment.experiment_id).length || this.options.store.listMeasurements(resumedExperiment.experiment_id).length)
+          ? resumedExperiment.experiment_id : null;
+        const preserveUnknownResume = (error: unknown): never => {
+          let message = `原实验 ${remoteResumeId} 的 Runner 身份尚未确认：${clean((error as Error).message)}。请维护者核对原作业。`;
+          try { this.runtime.markRemoteStateUnknown(remoteResumeId!, message); }
+          catch { message += ' 本地未知状态暂时无法保存。'; }
+          throw new RemoteExperimentUnknownError(remoteResumeId!, message);
+        };
+        if (remoteResumeId) {
+          try {
+            if (!resumedExperiment!.declared_context.runner_execution_plan) throw new Error('Saved Runner execution plan is missing; remote work was not restarted');
+            const instance = resumedExperiment!.declared_context.runner_store_instance_id;
+            if (typeof instance !== 'string') throw new Error('历史实验没有固定 Runner 数据库身份，不能自动核对或取消');
+            backend.bindStoreIdentity(instance);
+          } catch (error) { preserveUnknownResume(error); }
+        }
         const pendingDevelopment = await session.readRecord<ExperimentExecutionPlan | null>('development-job');
         if (pendingDevelopment) {
           const id = pendingDevelopment.experiment.experiment_id;
@@ -473,9 +492,11 @@ export class OptimizationWorkflowService {
           const binding = preflight.libraryPackage ? packageBaselineBinding(preflight.libraryPackage, comparisonBaseline.path) : null;
           if (binding?.bundle && binding.bundleRoot && binding.entryPath) {
             stageSignal?.throwIfAborted();
+            const storeInstanceId = runnerClient.boundStoreIdentity;
+            if (!storeInstanceId) throw new Error('Runner 数据库身份尚未核验，无法检查比较库。');
             return stageVerifiedBinaryBaseline({ bundle: binding.bundle, bundleRoot: binding.bundleRoot,
               entryPath: binding.entryPath, expectedDigest: comparisonBaseline.sha256, remoteRoot: remoteWorkspace,
-              target: preflight.config.config.target, runner: rpcRunner });
+              target: preflight.config.config.target, runner: { ...rpcRunner, storeInstanceId } });
           }
           return stageRemoteBaseline({ sourceArtifact: comparisonBaseline.path,
             ...(preflight.libraryPackage ? { sourceLocation: 'control' as const } : {}),
@@ -560,7 +581,8 @@ export class OptimizationWorkflowService {
           requireQualified: true,
           expected: { evaluatorId: evaluatorSpec.id, version: evaluatorSpec.version, digest: evaluatorSpec.sha256 },
         });
-        await experimentExecution.preflight(signal);
+        try { await experimentExecution.preflight(signal, { allowLegacyArtifactPathCheck: !!remoteResumeId }); }
+        catch (error) { if (remoteResumeId) preserveUnknownResume(error); throw error; }
         const hasUnresolvedExperiment = this.options.store.listExperiments(taskId).some(experiment =>
           ['FORMAL_EVALUATION', 'REVALIDATION'].includes(experiment.type) && ['PENDING', 'RUNNING', 'UNKNOWN'].includes(experiment.status));
         // A resumed Runner job may still be reading this shared baseline; reconcile it first.

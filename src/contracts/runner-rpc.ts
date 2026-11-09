@@ -9,14 +9,18 @@ import type { ValidationCommand } from './validation-testpack.js';
 import type { ExperimentFailureClassification, ViolationReason } from './experiment-failure.js';
 
 export const RUNNER_PROTOCOL_VERSION = 1;
+/** A versioned route prevents old Runners from ignoring an identity guard. */
+export const RUNNER_STORE_ROUTE = '/_corepilot/runner-stores/';
 
 export interface RunnerHealth {
   runner_id: string;
+  /** Identity of this SQLite store, not the configurable Runner name. */
+  store_instance_id?: string;
   version: string;
   protocol_version: typeof RUNNER_PROTOCOL_VERSION;
   status: 'READY';
   resource_enforcement: 'DISABLED' | 'REQUIRED';
-  capabilities?: { controlled_validation: 1; source_archive_upload?: 1; execution_logs?: 1; resource_matrix?: 1; exclusive_queue?: 1 };
+  capabilities?: { controlled_validation: 1; source_archive_upload?: 1; execution_logs?: 1; resource_matrix?: 1; exclusive_queue?: 1; store_identity_guard?: 1; artifact_path_check?: 1 };
 }
 
 export interface RunnerQueueState {

@@ -59,9 +59,10 @@ export function createTestingFixture(options: { testPlan?: boolean } = {}) {
   let stagingGate: Promise<void> | null = null, submitGate: Promise<void> | null = null;
   const uploads: Array<{ sha256: string; workspacePath: string }> = [];
   const runner: TestingRunner = {
-    async probe() { return { health: { status: 'READY', runner_id: 'fixture-runner', protocol_version: RUNNER_PROTOCOL_VERSION, resource_enforcement: 'REQUIRED',
-      capabilities: { controlled_validation: 1, source_archive_upload: 1, resource_matrix: 1 } },
+    async probe() { return { health: { status: 'READY', runner_id: 'fixture-runner', store_instance_id: '11111111-1111-4111-8111-111111111111', protocol_version: RUNNER_PROTOCOL_VERSION, resource_enforcement: 'REQUIRED',
+      capabilities: { controlled_validation: 1, source_archive_upload: 1, resource_matrix: 1, store_identity_guard: 1, artifact_path_check: 1 } },
       machine: { hostname: 'mock-cpu', architecture: 'aarch64', cpu_count: 4, machine_identity_sha256: 'a'.repeat(64), cpu_topology: { online_cpus: '0-3', node_cpu_lists: { node0: '0-3' } } } }; },
+    bindStoreIdentity() {},
     async submitExperiment(plan) { if (!failSubmit || acceptedOnFailure) plans.push(plan); await submitGate; if (failSubmit) throw failSubmit; return { experiment_id: plan.experiment.experiment_id, status: 'PENDING' }; },
     async getExperiment(id) { getCalls++; const experiment = plans.find(plan => plan.experiment.experiment_id === id)!.experiment;
       return { ...experiment, status: remoteStatus, current_step: remoteStatus === 'RUNNING' ? 'PERFORMANCE' : null, cancel_requested: cancelRequested, failure: null }; },
@@ -102,8 +103,16 @@ export function createTestingFixture(options: { testPlan?: boolean } = {}) {
     projects.set(project.project_id, project); return { project, commit, nextCommit };
   }
   function measurement(task: TestingTaskRecord, data: Partial<Measurement>): Measurement {
+    const current = service.list().find(item => item.task_id === task.task_id);
+    const subject = data.role === 'BASELINE' ? current?.subjects.baseline : current?.subjects.candidate;
+    if (!subject) throw new Error('testing fixture must finish preparing the measured subject');
+    const artifactPath = subject.artifact_path, fileId = { device: '1', inode: '42' };
+    const artifactIdentity = { sha256: subject.artifact_sha256 ?? 'f'.repeat(64), input_path: artifactPath, resolved_symbol_path: artifactPath };
+    const pathCheck = { planned_path: artifactPath, input_realpath: artifactPath, input_file_id: fileId,
+      reported_paths: ['input_path', 'resolved_symbol_path'].map(field => ({ field, path: artifactPath, realpath: artifactPath, file_id: fileId })) };
     return { schema_version: 1, measurement_id: randomUUID(), experiment_id: task.task_id, evaluator: null, kind: 'PERFORMANCE_SAMPLE', role: 'CANDIDATE',
-      subject_id: 'workload-1', sample_index: 0, value: 1, unit: 'seconds', validity: 'VALID', domain_payload: {}, recorded_at: new Date().toISOString(), ...data };
+      subject_id: 'workload-1', sample_index: 0, value: 1, unit: 'seconds', validity: 'VALID',
+      domain_payload: { fixture: true, artifact_identity: artifactIdentity, runner_artifact_path_check: pathCheck }, recorded_at: new Date().toISOString(), ...data };
   }
   function complete(task: TestingTaskRecord) {
     measurements = Array.from({ length: 9 }, (_, i) => [measurement(task, { role: 'CANDIDATE', sample_index: i, value: 1 }), measurement(task, { role: 'BASELINE', sample_index: i, value: 2 })]).flat();

@@ -72,7 +72,7 @@ export interface TestingTaskRecord {
   input: CreateTestingTask;
   plan: TestingPlanPreview;
   machine: { machine_id: string; name: string; revision: number; connection_key: string;
-    runner_id: string | null; hardware: RunnerMachineInfo | null };
+    runner_id: string | null; hardware: RunnerMachineInfo | null; runner_store_instance_id?: string };
   subjects: { candidate: TestingPreparedSubject | null; baseline: TestingPreparedSubject | null };
   workspace: { run_root: string; logs_root: string; assets_root: string; runtime_root: string };
   execution: { status: TestingExecutionStatus; phase: string; message: string | null; cancel_requested: boolean;

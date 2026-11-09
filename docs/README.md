@@ -9,6 +9,7 @@
 | 阅读目的 | 当前文档 |
 | --- | --- |
 | 当前调用链、状态所有权、目标模块边界与迁移条件 | [系统架构与演进边界](architecture/corepilot-system.md) |
+| Runner 数据库身份、兼容旧任务及恢复保护范围 | [Runner 数据库身份与恢复](architecture/runner-store-identity.md) |
 | 下一阶段深度改进、优先级与验收标准 | [性能工程清单](roadmap/performance-depth.md) |
 | 技术评审整改状态、验证结果与外部阻塞 | [技术评审整改记录](engineering/corepilot-review-execution.md) |
 | 测试辨别力、Runner 排队、统计区间、A/A 校准与源码复现 | [性能可信度与复现](guides/performance-assurance.md) |

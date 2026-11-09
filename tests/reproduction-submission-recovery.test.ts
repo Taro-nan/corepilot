@@ -11,26 +11,39 @@ import { SqliteTaskStore } from '../src/storage/sqlite-task-store.js';
 import type { OptimizationWorkflowRecord } from '../src/contracts/workflow.js';
 import { startWebFixture } from './web-fixture.js';
 import { prepareReproductionFixture } from './reproduction-fixture.js';
+import { startRunnerHttpServer } from '../src/runner/http-server.js';
+import { RunnerClient } from '../src/client/runner-client.js';
 
 /** A local proxy loses responses only after the real local Runner has accepted the plan. */
-async function proxyRunner(target: string, mode: '500' | 'disconnect' | 'reject' | 'pass' | 'hold-upload') {
-  let posts = 0; let uploads = 0; let hideExperiment = false; let failCancel = false;
-  const base = new URL(target);
+async function proxyRunner(target: string, mode: '500' | 'disconnect' | 'reject' | 'pass' | 'hold-upload' | 'no-artifact') {
+  let posts = 0; let uploads = 0; let checks = 0; let cancels = 0; let hideExperiment = false; let failCancel = false;
+  let hideArtifactCapability = mode === 'no-artifact';
+  let base = new URL(target);
   const server = http.createServer((req, res) => {
     const url = req.url ?? '/';
-    if (req.method === 'PUT' && url.startsWith('/source-archives') && mode === 'hold-upload') { uploads++; req.resume(); return; }
-    if (req.method === 'POST' && url === '/experiments') {
+    if (req.method === 'PUT' && url.includes('/source-archives?')) {
+      uploads++;
+      if (mode === 'hold-upload') { req.resume(); return; }
+    }
+    if (req.method === 'POST' && url.endsWith('/experiments')) {
       posts++;
       if (mode === 'reject') { req.resume(); res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"error":{"code":"INVALID_EXPERIMENT_PLAN","message":"fixture rejected"}}'); return; }
     }
-    if (req.method === 'GET' && url.startsWith('/experiments/') && hideExperiment) {
+    if (req.method === 'GET' && url.includes('/experiments/')) checks++;
+    if (req.method === 'POST' && url.endsWith('/cancel')) cancels++;
+    if (req.method === 'GET' && url.includes('/experiments/') && hideExperiment) {
       res.writeHead(404, { 'content-type': 'application/json' }); res.end('{"error":{"code":"EXPERIMENT_NOT_FOUND"}}'); return;
     }
     if (req.method === 'POST' && url.endsWith('/cancel') && failCancel) {
       req.resume(); res.writeHead(503, { 'content-type': 'application/json' }); res.end('{"error":{"code":"UNAVAILABLE"}}'); return;
     }
     const upstream = http.request(new URL(url, base), { method: req.method, headers: { ...req.headers, host: base.host } }, response => {
-      if (req.method === 'POST' && url === '/experiments' && response.statusCode === 202 && mode !== 'pass') {
+      if (req.method === 'GET' && url.endsWith('/health') && hideArtifactCapability && response.statusCode === 200) {
+        const chunks: Buffer[] = []; response.on('data', chunk => chunks.push(Buffer.from(chunk)));
+        response.on('end', () => { const health = JSON.parse(Buffer.concat(chunks).toString()); delete health.capabilities.artifact_path_check;
+          res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(health)); }); return;
+      }
+      if (req.method === 'POST' && url.endsWith('/experiments') && response.statusCode === 202 && mode !== 'pass') {
         response.resume();
         if (mode === 'disconnect') res.destroy();
         else { res.writeHead(500, { 'content-type': 'application/json' }); res.end('{"error":{"code":"INTERNAL","message":"fixture-secret-token"}}'); }
@@ -43,8 +56,9 @@ async function proxyRunner(target: string, mode: '500' | 'disconnect' | 'reject'
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); assert.ok(address && typeof address === 'object');
-  return { url: `http://127.0.0.1:${address.port}`, get posts() { return posts; }, get uploads() { return uploads; }, hide() { hideExperiment = true; },
-    failCancel() { failCancel = true; }, async close() { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+  return { url: `http://127.0.0.1:${address.port}`, get posts() { return posts; }, get uploads() { return uploads; }, get checks() { return checks; }, get cancels() { return cancels; }, hide() { hideExperiment = true; },
+    failCancel() { failCancel = true; }, setTarget(value: string) { base = new URL(value); }, hideArtifact() { hideArtifactCapability = true; },
+    async close() { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
 }
 
 function useProxy(configPath: string, endpoint: string) {
@@ -94,6 +108,82 @@ for (const mode of ['500', 'disconnect'] as const) test(`accepted reproduction P
     assert.equal(f.service.get(r.record.workflow_id)?.reproduction?.status, 'UNKNOWN');
     assert.equal(f.service.get(r.record.workflow_id)?.reproduction?.cancel_requested, true);
     assert.notEqual((await r.client.getExperiment(job.experiment_id)).status, 'CANCELLED');
+  } finally { await restarted?.stop(); await f.service.reproductions.stop(); await proxy.close(); await r.runner.close(); await f.close(); }
+});
+
+test('historical submitted reproduction without store identity is read locally but never queried or cancelled automatically', async () => {
+  const f = await startWebFixture(); const r = await prepareReproductionFixture(f, { buildGate: path.join(f.root, 'gate') });
+  const proxy = await proxyRunner(r.runner.url, '500'); useProxy(f.configPath, proxy.url);
+  let restarted: OptimizationWorkflowService | undefined;
+  try {
+    const api = new ApiClient(f.url, { token: f.token });
+    const job = await api.reproduceWorkflow(r.record.workflow_id) as NonNullable<OptimizationWorkflowRecord['reproduction']>;
+    assert.equal((await settled(f.service, r.record.workflow_id)).status, 'UNKNOWN');
+    const old = f.store.getExperiment(job.experiment_id)!; delete old.declared_context.runner_store_instance_id; f.store.saveExperiment(old);
+    const checks = proxy.checks, cancels = proxy.cancels;
+    await f.service.reproductions.stop(); restarted = new OptimizationWorkflowService({ store: f.store });
+    restarted.reproductions.start(r.record.workflow_id);
+    assert.match((await settled(restarted, r.record.workflow_id)).error!, /历史复现实验没有固定 Runner 数据库身份/);
+    await assert.rejects(api.cancelReproduction(r.record.workflow_id), /历史复现实验没有固定 Runner 数据库身份/);
+    assert.equal(proxy.checks, checks); assert.equal(proxy.cancels, cancels); assert.equal(proxy.posts, 1);
+    assert.equal(f.store.getExperiment(job.experiment_id)?.declared_context.runner_store_instance_id, undefined);
+    assert.equal(f.service.reproductions.manifest(r.record.workflow_id).reproduction?.experiment_id, job.experiment_id);
+  } finally { await restarted?.stop(); await f.service.reproductions.stop(); await proxy.close(); await r.runner.close(); await f.close(); }
+});
+
+test('reproduction resumes and cancels only against its frozen Runner store', async () => {
+  const f = await startWebFixture(); const r = await prepareReproductionFixture(f, { buildGate: path.join(f.root, 'gate') });
+  const proxy = await proxyRunner(r.runner.url, '500'); useProxy(f.configPath, proxy.url);
+  const replacement = await startRunnerHttpServer({ host: '127.0.0.1', port: 0, token: 'fixture-runner', runnerId: r.runner.runnerId,
+    dbPath: path.join(f.root, 'replacement.sqlite'), workspaceRoot: r.runnerRoot, resourceEnforcement: 'REQUIRED' });
+  let restarted: OptimizationWorkflowService | undefined;
+  try {
+    const api = new ApiClient(f.url, { token: f.token });
+    const job = await api.reproduceWorkflow(r.record.workflow_id) as NonNullable<OptimizationWorkflowRecord['reproduction']>;
+    assert.equal((await settled(f.service, r.record.workflow_id)).status, 'UNKNOWN');
+    assert.equal(f.store.getExperiment(job.experiment_id)?.declared_context.runner_store_instance_id, r.runner.storeInstanceId);
+    assert.equal(proxy.posts, 1); await f.service.reproductions.stop();
+    proxy.setTarget(replacement.url);
+    restarted = new OptimizationWorkflowService({ store: f.store }); restarted.reproductions.start(r.record.workflow_id);
+    const unknown = await settled(restarted, r.record.workflow_id);
+    assert.equal(unknown.status, 'UNKNOWN'); assert.match(unknown.error!, /数据库身份与原任务不一致/);
+    await assert.rejects(api.cancelReproduction(r.record.workflow_id), /数据库身份与原任务不一致/);
+    await assert.rejects(new RunnerClient({ baseUrl: replacement.url, token: 'fixture-runner' }).getExperiment(job.experiment_id), /not found/i);
+    assert.ok(['PENDING', 'RUNNING'].includes((await r.client.getExperiment(job.experiment_id)).status));
+    assert.equal(proxy.posts, 1);
+    proxy.setTarget(r.runner.url);
+    restarted.reproductions.start(r.record.workflow_id);
+    const stopped = await settled(restarted, r.record.workflow_id);
+    assert.equal(stopped.status, 'CANCELLED'); assert.equal(proxy.posts, 1);
+  } finally {
+    await restarted?.stop(); await f.service.reproductions.stop(); await proxy.close(); await replacement.close(); await r.runner.close(); await f.close();
+  }
+});
+
+test('a new reproduction rejects missing path checks before any upload or submission', async () => {
+  const f = await startWebFixture(); const r = await prepareReproductionFixture(f);
+  const proxy = await proxyRunner(r.runner.url, 'no-artifact'); useProxy(f.configPath, proxy.url);
+  try {
+    const job = await new ApiClient(f.url, { token: f.token }).reproduceWorkflow(r.record.workflow_id) as NonNullable<OptimizationWorkflowRecord['reproduction']>;
+    const failed = await settled(f.service, r.record.workflow_id);
+    assert.equal(failed.status, 'FAILED'); assert.match(failed.error!, /升级 Runner/);
+    assert.equal(proxy.uploads, 0); assert.equal(proxy.posts, 0);
+    assert.equal(f.store.getExperiment(job.experiment_id)?.declared_context.runner_store_instance_id, undefined);
+  } finally { await f.service.reproductions.stop(); await proxy.close(); await r.runner.close(); await f.close(); }
+});
+
+test('an already submitted reproduction can be reconciled even if the Runner does not advertise new path checks', async () => {
+  const f = await startWebFixture(); const r = await prepareReproductionFixture(f, { buildGate: path.join(f.root, 'gate') });
+  const proxy = await proxyRunner(r.runner.url, '500'); useProxy(f.configPath, proxy.url);
+  let restarted: OptimizationWorkflowService | undefined;
+  try {
+    const api = new ApiClient(f.url, { token: f.token });
+    const job = await api.reproduceWorkflow(r.record.workflow_id) as NonNullable<OptimizationWorkflowRecord['reproduction']>;
+    assert.equal((await settled(f.service, r.record.workflow_id)).status, 'UNKNOWN');
+    proxy.hideArtifact(); await api.cancelReproduction(r.record.workflow_id);
+    restarted = new OptimizationWorkflowService({ store: f.store }); restarted.reproductions.start(r.record.workflow_id);
+    assert.equal((await settled(restarted, r.record.workflow_id)).status, 'CANCELLED');
+    assert.equal(f.store.getExperiment(job.experiment_id)?.status, 'CANCELLED'); assert.equal(proxy.posts, 1);
   } finally { await restarted?.stop(); await f.service.reproductions.stop(); await proxy.close(); await r.runner.close(); await f.close(); }
 });
 

@@ -228,13 +228,13 @@ test('missing, duplicate and invalid samples never become a correctness pass or 
   try {
     const candidate = await f.binary('candidate'), baseline = await f.binary('baseline');
     const task = await f.service.start({ machine_id: f.machine.identity.machine_id, plan: testingPlanRef, mode: 'both', candidate, baseline });
-    await waitTestingPreparation(f.service, task.task_id);
-    const samples = [f.measurement(task, { role: 'BASELINE', value: 2 }), f.measurement(task, { role: 'CANDIDATE', value: 1 })];
-    assert.equal(summarizeTestingTask(task, samples).correctness.status, 'NOT_MEASURED');
-    assert.equal(summarizeTestingTask(task, samples).performance.status, 'INCOMPLETE');
-    assert.equal(summarizeTestingTask(task, [...samples, samples[1]]).performance.status, 'INVALID');
-    const wrong = f.measurement(task, { kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', subject_id: 'case-1', sample_index: null, unit: null, value: 'PASS', validity: 'UNKNOWN' });
-    assert.equal(summarizeTestingTask(task, [wrong]).correctness.status, 'INVALID');
+    const prepared = await waitTestingPreparation(f.service, task.task_id);
+    const samples = [f.measurement(prepared, { role: 'BASELINE', value: 2 }), f.measurement(prepared, { role: 'CANDIDATE', value: 1 })];
+    assert.equal(summarizeTestingTask(prepared, samples).correctness.status, 'NOT_MEASURED');
+    assert.equal(summarizeTestingTask(prepared, samples).performance.status, 'INCOMPLETE');
+    assert.equal(summarizeTestingTask(prepared, [...samples, samples[1]]).performance.status, 'INVALID');
+    const wrong = f.measurement(prepared, { kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', subject_id: 'case-1', sample_index: null, unit: null, value: 'PASS', validity: 'UNKNOWN' });
+    assert.equal(summarizeTestingTask(prepared, [wrong]).correctness.status, 'INVALID');
   } finally { f.close(); }
 });
 

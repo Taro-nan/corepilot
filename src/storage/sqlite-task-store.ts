@@ -491,7 +491,7 @@ export class SqliteTaskStore implements TaskStore {
     });
   }
 
-  claimReproductionSubmission(workflowId: string, expected: Experiment, plan: Record<string, unknown>, remoteRoot: string, timestamp: string): void {
+  claimReproductionSubmission(workflowId: string, expected: Experiment, plan: Record<string, unknown>, remoteRoot: string, timestamp: string, runnerStoreInstanceId?: string): void {
     this.transaction(() => {
       const workflowJson = this.getOptimizationWorkflowJson(workflowId);
       const workflow = workflowJson ? JSON.parse(workflowJson) as OptimizationWorkflowRecord : null;
@@ -507,7 +507,8 @@ export class SqliteTaskStore implements TaskStore {
         throw new Error('复现实验状态已变化或无法证明尚未提交，请核对原实验。');
       }
       this.saveExperiment({ ...current, updated_at: timestamp, declared_context: { ...current.declared_context,
-        runner_execution_plan: structuredClone(plan), reproduction_submission_intent: { schema_version: 1, experiment_id: current.experiment_id, recorded_at: timestamp } } });
+        runner_execution_plan: structuredClone(plan), ...(runnerStoreInstanceId ? { runner_store_instance_id: runnerStoreInstanceId } : {}),
+        reproduction_submission_intent: { schema_version: 1, experiment_id: current.experiment_id, recorded_at: timestamp } } });
       workflow.reproduction.remote_root = remoteRoot;
       workflow.reproduction.updated_at = timestamp;
       workflow.updated_at = timestamp;

@@ -23,7 +23,7 @@ export async function stageAndInspectBaselineBundle(input: {
   localRoot: string;
   remoteRoot: string;
   target: TargetConfig;
-  runner: { endpoint: string; token: string; requestTimeoutMs: number };
+  runner: { endpoint: string; token: string; requestTimeoutMs: number; storeInstanceId?: string };
   entryPath: string;
   files: BaselineBundleFile[];
 }): Promise<RunnerBundleInspection> {
@@ -42,13 +42,14 @@ export async function stageAndInspectBaselineBundle(input: {
   }
   const client = new RunnerClient({ baseUrl: input.runner.endpoint, token: input.runner.token,
     requestTimeoutMs: Math.max(input.runner.requestTimeoutMs, 300_000) });
+  if (input.runner.storeInstanceId) client.bindStoreIdentity(input.runner.storeInstanceId);
   return client.inspectBaselineBundle({ bundle_root: remoteRoot, entry_path: input.entryPath, files: input.files });
 }
 
 /** Shared by draft comparisons and formal optimization; both use the same frozen bundle checks. */
 export async function stageVerifiedBinaryBaseline(input: {
   bundle: BinaryBundleBaselineDefinition; bundleRoot: string; entryPath: string; expectedDigest: string;
-  remoteRoot: string; target: TargetConfig; runner: { endpoint: string; token: string; requestTimeoutMs: number };
+  remoteRoot: string; target: TargetConfig; runner: { endpoint: string; token: string; requestTimeoutMs: number; storeInstanceId?: string };
 }): Promise<StagedRemoteBaseline> {
   const files = [...input.bundle.headers, ...input.bundle.libraries].map(file => ({
     path: file.path, sha256: file.sha256, bytes: fs.statSync(path.join(input.bundleRoot, ...file.path.split('/'))).size }));

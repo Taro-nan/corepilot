@@ -306,11 +306,12 @@ export class OptimizationRuntime {
   }
 
   /** Keep the already-staged submission so recovery never rebuilds a live remote directory. */
-  recordRemoteExecutionPlan(experimentId: string, plan: Record<string, unknown>): void {
+  recordRemoteExecutionPlan(experimentId: string, plan: Record<string, unknown>, runnerStoreInstanceId?: string): void {
     const experiment = this.getExperiment(experimentId);
     const existing = experiment.declared_context.runner_execution_plan;
     if (experiment.status !== 'PENDING' || existing) throw new ExperimentStateChangedError(experimentId);
-    this.store.saveExperimentIfCurrent(experiment, { ...experiment, declared_context: { ...experiment.declared_context, runner_execution_plan: structuredClone(plan) } });
+    this.store.saveExperimentIfCurrent(experiment, { ...experiment, declared_context: { ...experiment.declared_context, runner_execution_plan: structuredClone(plan),
+      ...(runnerStoreInstanceId ? { runner_store_instance_id: runnerStoreInstanceId } : {}) } });
   }
 
   updateTask(taskId: string, patch: Partial<Pick<OptimizationTask,

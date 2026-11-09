@@ -20,7 +20,7 @@ import { createFormalEvaluatorFixture } from './formal-evaluator-fixture.js';
 import { candidateEvaluationFeedback } from '../src/workspace/candidate-evaluation-feedback.js';
 import { proposeFixtureHypothesis } from './hypothesis-fixture.js';
 
-async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailure?: 'aborted' | 'aborted-400' | '500' | '409' | 'rejected' | 'http-lost' | 'progress-error' | 'sync-and-unknown-error' | 'preexisting-plan') {
+async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailure?: 'aborted' | 'aborted-400' | '500' | '409' | 'rejected' | 'http-lost' | 'progress-error' | 'sync-and-unknown-error' | 'preexisting-plan' | 'old-runner' | 'old-artifact-check') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-rpc-transition-'));
   const runnerRoot = path.join(root, 'runner');
   const localRepository = path.join(root, 'local-source');
@@ -119,12 +119,14 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
   const cancellation = new AbortController();
   let submissions = 0; let cancellations = 0; let runnerMissing = false; let runnerStopped = false;
   let proxy: http.Server | undefined;
+  let replacement: Awaited<ReturnType<typeof startRunnerHttpServer>> | undefined;
+  let proxyTarget = server.url;
   let runnerUrl = server.url;
   if (submissionFailure === 'http-lost') {
     proxy = http.createServer((request, response) => {
       void (async () => {
         const url = request.url ?? '/';
-        if (request.method === 'POST' && url === '/experiments') {
+        if (request.method === 'POST' && url.endsWith('/experiments')) {
           submissions++;
           const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
           const accepted = await fetch(server.url + url, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: Buffer.concat(chunks) });
@@ -136,10 +138,10 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
         if (request.method === 'POST' && url.endsWith('/cancel')) {
           cancellations++; response.writeHead(503, { 'content-type': 'application/json' }); response.end('{"error":{"code":"UNAVAILABLE"}}'); return;
         }
-        if (runnerMissing && request.method === 'GET' && url.startsWith('/experiments/')) {
+        if (runnerMissing && request.method === 'GET' && url.includes('/experiments/')) {
           response.writeHead(404, { 'content-type': 'application/json' }); response.end('{"error":{"code":"EXPERIMENT_NOT_FOUND"}}'); return;
         }
-        const result = await fetch(server.url + url, { headers: { authorization: `Bearer ${token}` } });
+        const result = await fetch(proxyTarget + url, { headers: { authorization: `Bearer ${token}` } });
         response.writeHead(result.status, { 'content-type': 'application/json' }); response.end(await result.text());
       })().catch(error => { if (!response.destroyed) { response.writeHead(500); response.end(String(error)); } });
     });
@@ -149,7 +151,12 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
   const runnerClient = new RunnerClient({ baseUrl: runnerUrl, token });
   const realBackend = new RunnerClientExperimentExecutionBackend(runnerClient);
   const backend: ExperimentExecutionBackend = submissionFailure && submissionFailure !== 'http-lost' ? {
-    mode: 'rpc', preflight: signal => realBackend.preflight(signal),
+    mode: 'rpc', async preflight(signal) {
+      const result = await realBackend.preflight(signal);
+      if (submissionFailure === 'old-runner') { delete result.health.store_instance_id; if (result.health.capabilities) delete result.health.capabilities.store_identity_guard; }
+      if (submissionFailure === 'old-artifact-check' && result.health.capabilities) delete result.health.capabilities.artifact_path_check;
+      return result;
+    }, bindStoreIdentity: id => realBackend.bindStoreIdentity(id),
     submitExperiment: async () => {
       submissions++;
       if (['aborted', 'aborted-400', 'progress-error', 'sync-and-unknown-error'].includes(submissionFailure!)) cancellation.abort('cancelled by user');
@@ -197,6 +204,16 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
       assert.equal(submissions, 0, 'an existing plan is never submitted again');
       assert.deepEqual([candidateStageCalls, evaluatorStageCalls, baselineStageCalls], [0, 0, 0], 'an existing plan is detected before any staging');
       assert.deepEqual(runtime.getExperiment(experiment.experiment_id).declared_context.runner_execution_plan, { previously_saved: true });
+      await assert.rejects(adapter.executeValidation({ experimentId: experiment.experiment_id, workspace, build, testpack,
+        sourceRoot: localRepository, includePerformance: true, resume: true }), /历史实验没有固定 Runner 数据库身份/);
+      assert.equal(runtime.getExperiment(experiment.experiment_id).declared_context.runner_store_instance_id, undefined);
+      return;
+    }
+    if (submissionFailure === 'old-runner' || submissionFailure === 'old-artifact-check') {
+      await assert.rejects(adapter.executeValidation({ experimentId: experiment.experiment_id, workspace, build, testpack,
+        sourceRoot: localRepository, includePerformance: true }), /升级 Runner/);
+      assert.equal(submissions, 0); assert.deepEqual([candidateStageCalls, evaluatorStageCalls, baselineStageCalls], [0, 0, 0]);
+      assert.equal(runtime.getExperiment(experiment.experiment_id).declared_context.runner_store_instance_id, undefined);
       return;
     }
     if (submissionFailure) {
@@ -220,6 +237,28 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
       assert.equal(unknown.ended_at, null);
       assert.equal(unknown.evaluation, null);
       assert.ok(unknown.declared_context.runner_execution_plan, 'the original plan must remain available for reconciliation');
+      assert.equal(unknown.declared_context.runner_store_instance_id, server.storeInstanceId);
+      if (submissionFailure === 'http-lost') {
+        const preflight = realBackend.preflight.bind(realBackend);
+        realBackend.preflight = async signal => { const response = await preflight(signal);
+          if (response.health.capabilities) delete response.health.capabilities.artifact_path_check;
+          return response; };
+        const historical = new RpcExperimentTransitionAdapter({ backend: realBackend, runtime, pollIntervalMs: 10,
+          stageCandidate: async () => { throw new Error('historical query must not stage'); },
+          stageEvaluator: async () => { throw new Error('historical query must not stage'); } });
+        try {
+          await historical.preflight(undefined, { allowLegacyArtifactPathCheck: true });
+          assert.equal((await realBackend.getExperiment(experiment.experiment_id)).experiment_id, experiment.experiment_id);
+        } finally { realBackend.preflight = preflight; }
+        replacement = await startRunnerHttpServer({ host: '127.0.0.1', port: 0, token, runnerId: server.runnerId,
+          dbPath: path.join(root, 'replacement.sqlite'), workspaceRoot: runnerRoot });
+        proxyTarget = replacement.url;
+        await assert.rejects(adapter.executeValidation({ ...input, resume: true }), /Runner 数据库身份与原任务不一致/);
+        assert.equal(runtime.getExperiment(experiment.experiment_id).status, 'UNKNOWN');
+        await assert.rejects(new RunnerClient({ baseUrl: replacement.url, token }).getExperiment(experiment.experiment_id), /not found/i);
+        assert.equal(submissions, 1);
+        proxyTarget = server.url;
+      }
       runnerMissing = true;
       await assert.rejects(adapter.executeValidation({ ...input, resume: true }), RemoteExperimentUnknownError);
       assert.equal(submissions, 1, 'a Runner 404 cannot prove that it is safe to resubmit');
@@ -322,6 +361,7 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
     assert.equal(store.listExperiments(task.task_id).length, 1, 'reconnecting observes the original execution');
   } finally {
     if (proxy) { proxy.closeAllConnections(); await new Promise<void>(resolve => proxy!.close(() => resolve())); }
+    await replacement?.close();
     await server.close();
     store.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -337,6 +377,8 @@ test('cancel racing with a rejection still checks the original experiment', () =
 test('a server error after submission checks the original experiment', () => verifyRpcTransition(undefined, '500'));
 test('a duplicate experiment response checks the original experiment', () => verifyRpcTransition(undefined, '409'));
 test('an existing Runner plan is never restaged or submitted', () => verifyRpcTransition(undefined, 'preexisting-plan'));
+test('new formal execution reports an upgrade requirement before staging on an old Runner', () => verifyRpcTransition(undefined, 'old-runner'));
+test('new formal execution requires artifact path verification before staging', () => verifyRpcTransition(undefined, 'old-artifact-check'));
 test('an explicitly rejected plan retains its diagnostic', () => verifyRpcTransition(undefined, 'rejected'));
 test('a real Runner keeps the original job when an accepted POST response is lost during cancellation', () => verifyRpcTransition(undefined, 'http-lost'));
 test('progress persistence failure during cancellation stays unknown', () => verifyRpcTransition(undefined, 'progress-error'));

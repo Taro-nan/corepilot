@@ -14,6 +14,7 @@ import {
 /** Thin Optimization Runtime boundary over an Execution Plane. */
 export interface ExperimentExecutionBackend {
   readonly mode: 'rpc';
+  bindStoreIdentity(storeInstanceId: string): void;
   preflight(signal?: AbortSignal): Promise<{ health: RunnerHealth; machine: RunnerMachineInfo }>;
   submitExperiment(plan: ExperimentExecutionPlan, signal?: AbortSignal): Promise<SubmitExperimentResponse>;
   getExperiment(experimentId: string, signal?: AbortSignal): Promise<ExperimentStatusResponse>;
@@ -38,13 +39,14 @@ export class RunnerClientExperimentExecutionBackend implements ExperimentExecuti
 
   constructor(private readonly client: RunnerClient) {}
 
+  bindStoreIdentity(storeInstanceId: string): void { this.client.bindStoreIdentity(storeInstanceId); }
+
   async preflight(signal?: AbortSignal): Promise<{ health: RunnerHealth; machine: RunnerMachineInfo }> {
-    const health = await this.client.health(signal);
+    const { health, machine } = await this.client.probe(signal);
     if (health.status !== 'READY') throw new Error(`runner '${health.runner_id}' is not ready`);
     if (health.protocol_version !== RUNNER_PROTOCOL_VERSION) {
       throw new Error(`runner protocol ${health.protocol_version} is incompatible with control protocol ${RUNNER_PROTOCOL_VERSION}`);
     }
-    const machine = await this.client.machine(signal);
     return { health, machine };
   }
 

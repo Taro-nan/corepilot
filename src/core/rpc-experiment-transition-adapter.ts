@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { resolveCandidateRoot } from '../config/runtime-path.js';
 import { withRunnerValidationStatus } from '../workspace/validation-outcome.js';
-import { RunnerClientError } from '../client/runner-client.js';
+import { requireRunnerArtifactPathCheck, requireRunnerStoreIdentity, RunnerClientError } from '../client/runner-client.js';
 import type { Candidate, Experiment } from '../contracts/optimization-domain.js';
 import type {
   ExperimentExecutionPlan,
@@ -109,7 +109,7 @@ export class RemoteExperimentCancelledError extends Error {
 export class RpcExperimentTransitionAdapter {
   private readonly pollIntervalMs: number;
   private readonly cancelConfirmationMs: number;
-  private preflightResult: { runnerId: string; machine: RunnerMachineInfo } | null = null;
+  private preflightResult: { runnerId: string; storeInstanceId: string; machine: RunnerMachineInfo; artifactPathCheck: boolean } | null = null;
 
   constructor(private readonly options: RpcExperimentTransitionAdapterOptions) {
     if (!Number.isInteger(options.pollIntervalMs) || options.pollIntervalMs < 1) throw new Error('runner poll interval must be a positive integer');
@@ -117,9 +117,13 @@ export class RpcExperimentTransitionAdapter {
     this.cancelConfirmationMs = options.cancelConfirmationMs ?? 10_000;
   }
 
-  async preflight(signal?: AbortSignal): Promise<{ runnerId: string; machine: RunnerMachineInfo }> {
+  async preflight(signal?: AbortSignal, options?: { allowLegacyArtifactPathCheck?: boolean }): Promise<{ runnerId: string; storeInstanceId: string; machine: RunnerMachineInfo }> {
     const result = await this.options.backend.preflight(signal);
-    this.preflightResult = { runnerId: result.health.runner_id, machine: result.machine };
+    const storeInstanceId = requireRunnerStoreIdentity(result.health);
+    if (!options?.allowLegacyArtifactPathCheck) requireRunnerArtifactPathCheck(result.health);
+    this.options.backend.bindStoreIdentity(storeInstanceId);
+    this.preflightResult = { runnerId: result.health.runner_id, storeInstanceId, machine: result.machine,
+      artifactPathCheck: result.health.capabilities?.artifact_path_check === 1 };
     return this.preflightResult;
   }
 
@@ -135,6 +139,8 @@ export class RpcExperimentTransitionAdapter {
   }): Promise<ValidationCycleResult> {
     if (input.resume) return this.resumeValidation(input.experimentId, input.testpack, input.includePerformance, input.signal);
     const experiment = this.pendingExperiment(input.experimentId);
+    if (!this.preflightResult) await this.preflight(input.signal);
+    this.requireCurrentArtifactPathCheck();
     const candidate = this.options.runtime.getCandidate(experiment.candidate_id);
     const staged = await this.stage(experiment, candidate, input.workspace, input.signal);
     const evaluator = await this.stageEvaluator(experiment, requireEvaluator(input.testpack), input.signal);
@@ -182,6 +188,8 @@ export class RpcExperimentTransitionAdapter {
       return { formal, independent: null, performance_gate: null, passed: formal.passed };
     }
     const experiment = this.pendingExperiment(input.experimentId);
+    if (!this.preflightResult) await this.preflight(input.signal);
+    this.requireCurrentArtifactPathCheck();
     const candidate = this.options.runtime.getCandidate(experiment.candidate_id);
     const staged = await this.stage(experiment, candidate, input.workspace, input.signal);
     const evaluator = await this.stageEvaluator(experiment, requireEvaluator(input.testpack), input.signal);
@@ -217,6 +225,7 @@ export class RpcExperimentTransitionAdapter {
   async reconcile(experimentId: string, signal?: AbortSignal): Promise<ExperimentStatusResponse> {
     let status: ExperimentStatusResponse;
     try {
+      this.bindExistingExperiment(experimentId);
       status = await this.options.backend.reconcileExperiment(experimentId, signal);
     } catch (error) {
       throw this.unknown(experimentId, isNotFound(error)
@@ -245,6 +254,8 @@ export class RpcExperimentTransitionAdapter {
     if (!saved) {
       throw this.unknown(experimentId, 'Saved Runner execution plan is missing; remote work was not restarted.');
     }
+    try { this.bindExistingExperiment(experimentId); }
+    catch (error) { throw this.unknown(experimentId, (error as Error).message); }
     // A 404 does not prove that an earlier submission never reached a Runner:
     // the request can still be in flight, or the Runner store can have changed.
     // Never automatically resubmit a historical experiment from a checkpoint.
@@ -260,6 +271,17 @@ export class RpcExperimentTransitionAdapter {
       if (signal?.aborted) throw this.unknown(experimentId, `实验已结束，但结果尚未完成解析：${(error as Error).message}`);
       throw error;
     }
+  }
+
+  private bindExistingExperiment(experimentId: string): void {
+    const instance = this.options.runtime.getExperiment(experimentId).declared_context.runner_store_instance_id;
+    if (typeof instance !== 'string') throw new Error('历史实验没有固定 Runner 数据库身份，不能自动核对或取消；请维护者检查原 Runner 和实验 ID。');
+    this.options.backend.bindStoreIdentity(instance);
+  }
+
+  private requireCurrentArtifactPathCheck(): void {
+    if (!this.preflightResult?.artifactPathCheck) throw new RunnerClientError(null, 'RUNNER_ARTIFACT_PATH_CHECK_UNAVAILABLE',
+      'Runner 尚不支持库产物路径核对，请由维护者升级 Runner 后再开始新的测试或正式实验。');
   }
 
   private async stage(
@@ -326,7 +348,7 @@ export class RpcExperimentTransitionAdapter {
     if (!this.preflightResult) await this.preflight(signal);
     signal?.throwIfAborted();
     const { experiment: _experiment, ...stagedPlan } = plan;
-    try { this.options.runtime.recordRemoteExecutionPlan(plan.experiment.experiment_id, stagedPlan); }
+    try { this.options.runtime.recordRemoteExecutionPlan(plan.experiment.experiment_id, stagedPlan, this.preflightResult!.storeInstanceId); }
     catch (error) {
       if (error instanceof ExperimentStateChangedError) throw this.unknown(plan.experiment.experiment_id, '提交前实验状态已变化，请先核对原实验。');
       throw error;

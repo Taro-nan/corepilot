@@ -17,6 +17,7 @@ import { TestingAssetService } from './testing-assets.js';
 import { previewTestingPlan } from './testing-plan.js';
 import { parseTestingInput, testingRequestDigest } from './testing-input.js';
 import { snapshotValidationAssets } from './validation-asset-files.js';
+import { assertGeneratedHarnessApis, assertGeneratedHarnessResolution } from '../evaluator/generated-harness-compatibility.js';
 import { summarizeTestingTask } from './testing-results.js';
 import { prepareTestingExecution, testingConnectionKey } from './testing-execution.js';
 import type { TestingBinaryStager, TestingRunner } from './testing-subjects.js';
@@ -59,6 +60,13 @@ export class TestingService {
     if (testingConnectionKey(machine) !== task.machine.connection_key) throw new ApiError(409, 'TESTING_MACHINE_CHANGED', '机器连接已变化，无法用新连接核对原作业。请由维护者恢复原连接后查询原任务；系统不会重复提交。');
     return machine;
   }
+  private runnerForExistingTask(task: TestingTaskRecord): TestingRunner {
+    const instance = task.machine.runner_store_instance_id;
+    if (!instance) throw new ApiError(409, 'TESTING_RUNNER_IDENTITY_UNKNOWN', '历史测试没有固定 Runner 数据库身份；请维护者核对原 Runner 和任务，系统不会自动查询或取消。');
+    const runner = this.runner(this.connection(task));
+    runner.bindStoreIdentity(instance);
+    return runner;
+  }
   private diagnostic(error: unknown, machine?: ResolvedExecutionMachine): string {
     let message = error instanceof Error ? error.message : String(error);
     if (machine?.runner.token) message = message.split(machine.runner.token).join('[redacted]');
@@ -80,6 +88,10 @@ export class TestingService {
     catch (error) { throw new ApiError(400, 'INVALID_TESTING_PLAN', `无法读取测试方案：${(error as Error).message}`); }
     if ((input.expected_evaluator_digest && input.expected_evaluator_digest !== preview.evaluator.digest) ||
       (input.expected_package_digest && input.expected_package_digest !== preview.package_digest)) throw new ApiError(409, 'TESTING_PLAN_CHANGED', '测试方案或构建设置已变化，请重新读取并确认后开始。');
+    try {
+      assertGeneratedHarnessResolution(resolved.bundle);
+      assertGeneratedHarnessApis(resolved.bundle, { correctness: input.mode !== 'performance', performance: input.mode !== 'correctness', baseline: !!input.baseline });
+    } catch (error) { throw new ApiError(400, 'TESTING_GENERATED_HARNESS_UNSAFE', (error as Error).message); }
     if (!preview.code.setup || (input.mode !== 'performance' && !preview.code.correctness) || (input.mode !== 'correctness' && !preview.code.performance)) throw new ApiError(400, 'TESTING_CODE_NOT_READY', '所选测试代码尚未完成，请上传或生成代码后再开始。');
     for (const subject of [input.candidate, input.baseline]) if (subject?.kind === 'binary' && this.assets.get(subject.asset_id).state !== 'READY') throw new ApiError(400, 'TEST_ASSET_NOT_READY', '请先选择上传库的入口并固定版本。');
     const machine = this.options.machines.resolve(input.machine_id), createdAt = new Date().toISOString();
@@ -149,10 +161,10 @@ export class TestingService {
   private async readDetails(taskId: string): Promise<TestingTaskDetails> {
     let task = this.localRecord(this.store.task(taskId));
     const cached = this.store.cache(taskId);
-    if (!task.execution.submission_attempted || (terminal.has(task.execution.status) && (cached || task.execution.failure?.code === 'TESTING_PREPARATION_FAILED')) ||
+    if (!task.execution.submission_attempted || (terminal.has(task.execution.status) && (cached || !task.machine.runner_store_instance_id || task.execution.failure?.code === 'TESTING_PREPARATION_FAILED')) ||
       (this.preparing.has(taskId) && task.execution.phase !== 'SUBMITTED')) return this.details(task);
     try {
-      const runner = this.runner(this.connection(task));
+      const runner = this.runnerForExistingTask(task);
       const status = await runner.getExperiment(taskId);
       if (status.experiment_id !== taskId) throw new Error('Runner 返回了其他测试任务，无法确认本次状态。');
       const [commands, measurements, output] = await Promise.all([runner.getCommandExecutions(taskId), runner.getMeasurements(taskId), runner.getExecutionOutput(taskId)]);
@@ -166,7 +178,9 @@ export class TestingService {
       this.store.saveResult(details); return details;
     } catch (error) {
       const machine = (() => { try { return this.options.machines.resolve(task.machine.machine_id); } catch { return undefined; } })();
-      task = this.store.updateTask(taskId, record => { record.execution.status = 'UNKNOWN'; record.execution.message = error instanceof ApiError ? error.message : '暂时无法核对 Runner 状态，请继续查询原任务；系统不会重复提交。';
+      const identityProblem = error instanceof RunnerClientError && ['RUNNER_STORE_MISMATCH', 'RUNNER_STORE_IDENTITY_UNAVAILABLE', 'RUNNER_STORE_GUARD_UNAVAILABLE'].includes(error.code);
+      task = this.store.updateTask(taskId, record => { record.execution.status = 'UNKNOWN'; record.execution.message = error instanceof ApiError ? error.message : identityProblem
+        ? this.diagnostic(error, machine) : '暂时无法核对 Runner 状态，请继续查询原任务；系统不会重复提交。';
         record.execution.failure = { code: error instanceof ApiError ? error.code : error instanceof RunnerClientError ? error.code : 'TESTING_RECONCILIATION_FAILED', stage: 'RECONCILE', message: this.diagnostic(error, machine) }; });
       return this.details(task);
     }
@@ -182,7 +196,7 @@ export class TestingService {
       return this.details(task);
     }
     try {
-      const receipt = await this.runner(this.connection(task)).cancelExperiment(taskId);
+      const receipt = await this.runnerForExistingTask(task).cancelExperiment(taskId);
       if (receipt.experiment_id !== taskId) throw new Error('Runner 取消回执与测试任务身份不一致。');
       task = this.store.updateTask(taskId, record => { record.execution.status = receipt.status; record.execution.cancel_requested = true; });
     } catch (error) {
