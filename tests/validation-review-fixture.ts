@@ -20,10 +20,18 @@ export async function prepareReviewFixture(f: Awaited<ReturnType<typeof startWeb
     enforcement: { cpu_set: 'ENFORCED', numa_node: 'ENFORCED', threads: 'ENFORCED' }, errors: [] };
   const now = new Date().toISOString();
   const trialId = `validation:${randomUUID()}`;
+  // Simulated Runner receipt, used only by the review API fixture.
+  const payload = (role: string) => {
+    const input = `/fixture/${role}.so`, fileId = { device: '1', inode: '42' };
+    return { artifact_identity: { input_path: input, resolved_symbol_path: input, sha256: 'a'.repeat(64) },
+      runner_artifact_path_check: { input_realpath: input, input_file_id: fileId,
+        reported_paths: [{ field: 'input_path', path: input, realpath: input, file_id: fileId },
+          { field: 'resolved_symbol_path', path: input, realpath: input, file_id: fileId }] } };
+  };
   const state = { status: 'SUCCEEDED', commandValidity: 'VALID', measurements: [
-    { experiment_id: trialId, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', subject_id: 'kernel-check', sample_index: null, value: 'PASS', unit: null, validity: 'VALID' },
+    { experiment_id: trialId, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', subject_id: 'kernel-check', sample_index: null, value: 'PASS', unit: null, validity: 'VALID', domain_payload: payload('candidate') },
     ...(['BASELINE', 'CANDIDATE'] as const).flatMap(role => [0, 1].map(index => ({ experiment_id: trialId, kind: 'PERFORMANCE_SAMPLE', role,
-      subject_id: 'small', sample_index: index, value: role === 'BASELINE' ? 2 : 1, unit: 'seconds', validity: 'VALID' }))),
+      subject_id: 'small', sample_index: index, value: role === 'BASELINE' ? 2 : 1, unit: 'seconds', validity: 'VALID', domain_payload: payload(role) }))),
   ] };
   const runner = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');

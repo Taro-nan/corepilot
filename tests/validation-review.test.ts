@@ -56,6 +56,20 @@ test('missing samples, invalid resource observations and edits after a trial rem
   } finally { await r.close(); await f.close(); }
 });
 
+test('an older trial without Runner path checks cannot qualify a new test plan', async () => {
+  const f = await startWebFixture(); const r = await prepareReviewFixture(f).catch(async error => { await f.close(); throw error; });
+  try {
+    const original = structuredClone(r.state.measurements[0].domain_payload);
+    delete (r.state.measurements[0].domain_payload as { runner_artifact_path_check?: unknown }).runner_artifact_path_check;
+    const review = await f.projects.validationReview.preview(r.project, r.pkg, r.version, r.target);
+    assert.equal(review.state, 'BLOCKED');
+    assert.match(review.blockers.join(' '), /升级 Runner 并重新试跑/);
+    assert.equal(f.projects.validationAssets.get(r.project, r.pkg, r.version, r.target).qualification, 'DRAFT');
+    r.state.measurements[0].domain_payload = original;
+    assert.equal((await f.projects.validationReview.preview(r.project, r.pkg, r.version, r.target)).state, 'READY_FOR_REVIEW');
+  } finally { await r.close(); await f.close(); }
+});
+
 test('review refuses conflicting, duplicate, foreign and unplanned trial measurements', async () => {
   const f = await startWebFixture(); const r = await prepareReviewFixture(f).catch(async error => { await f.close(); throw error; });
   try {

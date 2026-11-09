@@ -4,6 +4,7 @@ import type { LoadedFormalEvaluatorBundle } from '../contracts/formal-evaluator.
 import type { ExperimentExecutionPlan, FormalExecutionContext } from '../contracts/runner-rpc.js';
 import { formalCaseParameters, formalWorkloadParameters } from '../evaluator/formal-arguments.js';
 import { measurementPayload } from '../evaluator/measurement-protocol.js';
+import { runnerArtifactPathCheckMatches } from '../evaluator/runner-artifact-path-check.js';
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const sha = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
@@ -89,6 +90,9 @@ export function assertMeasurementTrace(input: { candidate: Candidate; experiment
       if (output[field] !== row[field]) return fail(`用例 ${context.subject_id} 的测量与命令输出不一致`);
     }
     const recordedPayload = { ...row.domain_payload }, outputPayload = { ...output.domain_payload };
+    // The path check is Runner-owned and must never originate in evaluator stdout.
+    if (Object.hasOwn(outputPayload, 'runner_artifact_path_check')) return fail(`用例 ${context.subject_id} 的评价程序使用了 Runner 保留字段`);
+    delete recordedPayload.runner_artifact_path_check;
     // Runner overwrites these two fields with its own observations after parsing stdout.
     for (const key of ['evaluator_identity', 'resource_policy']) { delete recordedPayload[key]; delete outputPayload[key]; }
     if (!equal(recordedPayload, outputPayload)) return fail(`用例 ${context.subject_id} 的测量内容与命令输出不一致`);
@@ -101,10 +105,18 @@ export function assertMeasurementTrace(input: { candidate: Candidate; experiment
     if (!equal(actual, expected)) return fail(`用例 ${context.subject_id} 的输入参数与固定计划不一致`);
     const identity = row.domain_payload.artifact_identity;
     const apiKey = `resolved_${bundle.manifest.domain.api.replace(/[^A-Za-z0-9_]/g, '_')}_path`;
-    const resolved = object(identity) ? identity.resolved_symbol_path ?? identity[apiKey] : null;
-    if (!object(identity) || !sha(identity.sha256) || typeof resolved !== 'string' || !resolved.trim() ||
-        (identity.input_path !== undefined && (typeof identity.input_path !== 'string' || !samePath(identity.input_path, context.artifact.path)))) {
+    const pathFields = object(identity) ? ['resolved_symbol_path', apiKey].filter((key, index, fields) =>
+      fields.indexOf(key) === index && Object.hasOwn(identity, key)) : [];
+    const checkedFields = object(identity) ? [...(Object.hasOwn(identity, 'input_path') ? ['input_path'] : []), ...pathFields] : [];
+    if (!object(identity) || !sha(identity.sha256) || pathFields.length === 0 ||
+        checkedFields.some(key => typeof identity[key] !== 'string' || !(identity[key] as string).trim())) {
       return fail(`用例 ${context.subject_id} 缺少库产物身份`);
+    }
+    const pathCheck = row.domain_payload.runner_artifact_path_check;
+    if (pathCheck === undefined) {
+      return fail(`用例 ${context.subject_id} 缺少 Runner 库路径核对记录；请升级 Runner 并重新执行正式实验和独立复验`);
+    } else if (!runnerArtifactPathCheckMatches(identity, pathCheck, bundle.manifest.domain.api)) {
+      return fail(`用例 ${context.subject_id} 的 Runner 库路径核对记录无效`);
     }
     const digest = identity.sha256.toLowerCase();
     if (isCorrectness || role === 'CANDIDATE') {

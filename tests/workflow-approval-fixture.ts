@@ -127,9 +127,14 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
         exit_code: 0, stdout: output ? `${prefix} ${JSON.stringify(output)}\n` : '', stderr: '', timeout_ms: step.command.timeout_ms,
         timed_out: false, cancelled: false, resource_context: context ? { validity: 'VALID' } : null });
       if (output && !(omit && sample && (options.omitRevalidationSamples || context?.role === 'CANDIDATE' && context.iteration_index === options.omitRevalidationCandidateSample))) {
+        // Simulated Runner-owned path check; this is not a hardware observation.
+        const fileId = { device: '1', inode: '42' };
         f.store.appendMeasurement({ ...output, schema_version: 1, measurement_id: `measurement:${randomUUID()}`, experiment_id: experiment.experiment_id,
           evaluator: { id: manifest.evaluator_id, version: manifest.version, digest }, recorded_at: now,
-          domain_payload: { ...output.domain_payload, evaluator_identity: { id: manifest.evaluator_id, version: manifest.version, digest }, resource_policy: { validity: 'VALID' } } });
+          domain_payload: { ...output.domain_payload, evaluator_identity: { id: manifest.evaluator_id, version: manifest.version, digest }, resource_policy: { validity: 'VALID' },
+            runner_artifact_path_check: { input_realpath: context!.artifact.path, input_file_id: fileId,
+              reported_paths: [{ field: 'input_path', path: context!.artifact.path, realpath: context!.artifact.path, file_id: fileId },
+                { field: 'resolved_symbol_path', path: context!.artifact.path, realpath: context!.artifact.path, file_id: fileId }] } } });
       }
     }
     const saved = f.store.getExperiment(experiment.experiment_id)!;

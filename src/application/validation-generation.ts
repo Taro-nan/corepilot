@@ -153,6 +153,9 @@ Pass API names, sizes and inner_iterations to the adapter from saved data; no fi
 Do not introduce extra warmup loops, repetition counts or calibration that override the saved sampling plan.
 For kernel timing with a ctypes-loaded native library, Python time.perf_counter around ctypes calls is rejected.
 Put BOTH timestamps and the exact inner_iterations call loop inside native C/C++; Python can call that timer once.
+Pass the API function pointer obtained from ctx.load_library() to the native timer; do not re-resolve a different
+function in the timer. The protocol's separate symbol lookup at emission does not prove which function was called;
+reviewers must independently inspect and qualify the adapter and correctness checks.
 The native timer must return TOTAL loop elapsed seconds, and Python must explicitly divide this by
 ctx.inner_iterations before ctx.emit_performance. Do not silently mix total-loop seconds and seconds-per-call.
 Supply setup_script to compile the native adapter in runtime_root. A support/build-evaluator.sh file is just a

@@ -31,6 +31,7 @@ import { containedRunnerPath } from './source-archive.js';
 import { executionOutput, openExecutionOutput } from './execution-output.js';
 import { buildArtifactRoots, inventoryBuildRoots, captureBuildArtifacts } from './build-artifacts.js';
 import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
+import { assertGeneratedHarnessResolution } from '../evaluator/generated-harness-compatibility.js';
 import type { ValidationTestPlan } from '../contracts/validation-assets.js';
 import { readValidationTestPlan, performanceRoles } from '../evaluator/validation-test-plan.js';
 import { entryResources } from '../evaluator/execution-matrix.js';
@@ -377,6 +378,15 @@ export class ExperimentExecutor {
         command_execution_id: null,
       });
       return;
+    }
+
+    if (formalBundle) {
+      try { assertGeneratedHarnessResolution(formalBundle); }
+      catch (error) {
+        this.fail(record, 'INVALID_EXPERIMENT', { code: 'FORMAL_CONTRACT_VIOLATION', violation_reason: 'INVALID_EVIDENCE',
+          message: boundedMessage((error as Error).message), step: null, command_execution_id: null });
+        return;
+      }
     }
 
     const startedAt = this.timestamp();
@@ -1412,11 +1422,12 @@ function validateFormalStepOutput(
   if (!sameJson(observedParameters, declaredParameters)) {
     throw new MeasurementContractError(`formal measurement parameters differ from declared context for '${context.subject_id}'`, 'INVALID_EVIDENCE');
   }
-  validateMeasurementArtifactIdentity(observation, context, artifactDigest, bundle);
+  const artifactPathCheck = validateMeasurementArtifactIdentity(observation, context, artifactDigest, bundle);
   return [{
     ...observation,
     domain_payload: {
       ...structuredClone(observation.domain_payload),
+      runner_artifact_path_check: artifactPathCheck,
       ...(bundle ? { evaluator_identity: evaluatorIdentity({
         evaluator_id: bundle.manifest.evaluator_id,
         version: bundle.manifest.version,
@@ -1433,21 +1444,52 @@ function validateMeasurementArtifactIdentity(
   context: FormalExecutionContext,
   artifactDigest: string,
   bundle: LoadedFormalEvaluatorBundle | null,
-): void {
+): { input_realpath: string; input_file_id: { device: string; inode: string }; reported_paths: Array<{
+  field: string; path: string; realpath: string; file_id: { device: string; inode: string };
+}> } {
+  if (Object.hasOwn(observation.domain_payload, 'runner_artifact_path_check')) {
+    throw new MeasurementContractError(`formal measurement '${context.subject_id}' uses a Runner-reserved field`, 'INVALID_EVIDENCE');
+  }
   const artifact = observation.domain_payload.artifact_identity;
   if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) throw new Error(`formal measurement '${context.subject_id}' is missing artifact identity`);
   const raw = artifact as Record<string, unknown>;
   const apiKey = `resolved_${bundle?.manifest.domain.api.replace(/[^A-Za-z0-9_]/g, '_') ?? ''}_path`;
-  const resolvedPath = raw.resolved_symbol_path ?? raw[apiKey];
+  const pathFields = ['resolved_symbol_path', apiKey].filter((key, index, fields) =>
+    fields.indexOf(key) === index && Object.hasOwn(raw, key));
+  const checkedFields = [...(Object.hasOwn(raw, 'input_path') ? ['input_path'] : []), ...pathFields];
   if (typeof raw.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(raw.sha256) ||
-      typeof resolvedPath !== 'string' || resolvedPath.trim() === '') {
+      pathFields.length === 0 || checkedFields.some(key => typeof raw[key] !== 'string' || !(raw[key] as string).trim())) {
     throw new Error(`formal measurement '${context.subject_id}' has invalid artifact identity`);
   }
   if (raw.sha256.toLowerCase() !== artifactDigest) {
     throw new Error(`formal measurement '${context.subject_id}' artifact digest differs from staged identity`);
   }
-  if (typeof raw.input_path === 'string' && path.resolve(raw.input_path) !== context.artifact.path) {
-    throw new Error(`formal measurement '${context.subject_id}' artifact path differs from staged identity`);
+  // A producer's path is still a self-report. The Runner can at least reject a
+  // report which resolves to a different file than the staged artifact. Keep
+  // its own check separately from the unmodified command output for review.
+  let inputRealpath: string;
+  let inputStat: fs.BigIntStats;
+  const reportedPaths: Array<{ field: string; path: string; realpath: string; file_id: { device: string; inode: string } }> = [];
+  try {
+    inputRealpath = fs.realpathSync(context.artifact.path);
+    inputStat = fs.statSync(inputRealpath, { bigint: true });
+    if (!inputStat.isFile()) throw new Error('staged artifact is not a regular file');
+    for (const field of checkedFields) {
+      const reported = raw[field] as string;
+      if (!path.isAbsolute(reported)) throw new Error('reported symbol path is not absolute');
+      const realpath = fs.realpathSync(reported);
+      const stat = fs.statSync(realpath, { bigint: true });
+      const samePath = process.platform === 'win32'
+        ? realpath.toLowerCase() === inputRealpath.toLowerCase() : realpath === inputRealpath;
+      const comparableIds = stat.dev !== 0n && stat.ino !== 0n && inputStat.dev !== 0n && inputStat.ino !== 0n;
+      const sameFile = comparableIds && stat.dev === inputStat.dev && stat.ino === inputStat.ino;
+      if (!stat.isFile() || (!samePath && !sameFile) || (comparableIds && !sameFile)) {
+        throw new Error('reported symbol path identifies a different file');
+      }
+      reportedPaths.push({ field, path: reported, realpath, file_id: { device: String(stat.dev), inode: String(stat.ino) } });
+    }
+  } catch (error) {
+    throw new MeasurementContractError(`formal measurement '${context.subject_id}' library path cannot be matched to the staged artifact: ${(error as Error).message}`, 'INVALID_EVIDENCE');
   }
   const binaryField = context.phase === 'CORRECTNESS_CASE' ? 'evaluator_binary_identity' : 'benchmark_identity';
   const binary = observation.domain_payload[binaryField];
@@ -1456,6 +1498,7 @@ function validateMeasurementArtifactIdentity(
       !/^[0-9a-f]{64}$/i.test((binary as Record<string, unknown>).sha256 as string)) {
     throw new Error(`formal measurement '${context.subject_id}' has invalid ${binaryField}`);
   }
+  return { input_realpath: inputRealpath, input_file_id: { device: String(inputStat.dev), inode: String(inputStat.ino) }, reported_paths: reportedPaths };
 }
 
 function evaluatorIdentity(evaluator: StagedEvaluatorIdentity): Record<string, string> {

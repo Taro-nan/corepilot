@@ -1,11 +1,49 @@
 /** Shared Python protocol adapter; generated code supplies library calls and reference logic. */
 export const VALIDATION_PYTHON_HARNESS = `import ctypes
+import ctypes.util
 import hashlib
 import json
 import os
 import pathlib
 import subprocess
 import sys
+
+def _symbol_library_path(function):
+    """Report the loader's owner for a symbol pointer; this does not prove it was called."""
+    address = ctypes.cast(function, ctypes.c_void_p)
+    if not address.value:
+        raise RuntimeError('Cannot observe a null API symbol address')
+    if sys.platform == 'win32':
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.GetModuleHandleExW.argtypes = [ctypes.c_uint32, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        kernel.GetModuleHandleExW.restype = ctypes.c_int
+        kernel.GetModuleFileNameW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar), ctypes.c_uint32]
+        kernel.GetModuleFileNameW.restype = ctypes.c_uint32
+        module = ctypes.c_void_p()
+        if not kernel.GetModuleHandleExW(0x00000006, address, ctypes.byref(module)):
+            raise RuntimeError('Cannot identify the module containing the API symbol')
+        filename = ctypes.create_unicode_buffer(32768)
+        size = kernel.GetModuleFileNameW(module, filename, len(filename))
+        if not size or size >= len(filename):
+            raise RuntimeError('Cannot identify the API symbol module path')
+        return str(pathlib.Path(filename.value).resolve(strict=True))
+    class DlInfo(ctypes.Structure):
+        _fields_ = [('dli_fname', ctypes.c_char_p), ('dli_fbase', ctypes.c_void_p),
+                    ('dli_sname', ctypes.c_char_p), ('dli_saddr', ctypes.c_void_p)]
+    loader = ctypes.CDLL(None)
+    try:
+        dladdr = loader.dladdr
+    except AttributeError:
+        name = ctypes.util.find_library('dl')
+        if not name:
+            raise RuntimeError('Cannot observe API symbol ownership: dladdr is unavailable')
+        dladdr = ctypes.CDLL(name).dladdr
+    dladdr.argtypes = [ctypes.c_void_p, ctypes.POINTER(DlInfo)]
+    dladdr.restype = ctypes.c_int
+    info = DlInfo()
+    if not dladdr(address, ctypes.byref(info)) or not info.dli_fname:
+        raise RuntimeError('Cannot identify the library containing the API symbol')
+    return str(pathlib.Path(os.fsdecode(info.dli_fname)).resolve(strict=True))
 
 class _Library(ctypes.CDLL):
     def __getitem__(self, name):
@@ -94,13 +132,19 @@ class TestContext:
             self._emit(seconds_per_call, diagnostics)
 
     def _emit(self, value, diagnostics):
+        if not hasattr(self, '_library'):
+            raise RuntimeError('Test must load the artifact through ctx.load_library()')
+        api = self.plan['baseline_api'] if self.role == 'BASELINE' else self.plan['candidate_api']
+        if not isinstance(api, str) or not api.strip():
+            raise RuntimeError('Test plan must name the API for symbol resolution')
+        resolved_path = _symbol_library_path(self._library[api])
         payload = {"parameters": self.parameters, "input_id": self.input_id, "seed": self.seed,
             "artifact_identity": {"sha256": self.sha256_file(self.artifact_path),
-                "input_path": self.artifact_path, "resolved_symbol_path": self.artifact_path},
+                "input_path": self.artifact_path, "resolved_symbol_path": resolved_path},
+            "symbol_resolution": {"api": api, "method": "ctypes_lookup_at_emit"},
             "evaluator_binary_identity" if self.correctness else "benchmark_identity": {"sha256": self.sha256_file(self.script_path)},
             "diagnostics": diagnostics}
-        if hasattr(self, '_library'):
-            payload['api_resolutions'] = self._library.__dict__.get('_corepilot_api_resolutions', {})
+        payload['api_resolutions'] = self._library.__dict__.get('_corepilot_api_resolutions', {})
         print("COREPILOT_MEASUREMENT " + json.dumps({"kind": "CORRECTNESS_CASE" if self.correctness else "PERFORMANCE_SAMPLE",
             "role": self.role, "subject_id": self.subject_id, "sample_index": self.sample_index, "value": value,
             "unit": None if self.correctness else "seconds", "validity": "VALID", "domain_payload": payload}))

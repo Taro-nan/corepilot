@@ -32,6 +32,7 @@ test('new evidence rejects wrong units, parameters, binary identities, missing p
       writeRow.run(JSON.stringify(next), row.measurement_id);
       if (outputMatches) {
         const rawPayload = { ...next.domain_payload }; delete rawPayload.evaluator_identity; delete rawPayload.resource_policy;
+        delete rawPayload.runner_artifact_path_check;
         const observation = { kind: next.kind, role: next.role, subject_id: next.subject_id, sample_index: next.sample_index,
           value: next.value, unit: next.unit, validity: next.validity, domain_payload: rawPayload };
         writeCommand.run(JSON.stringify({ ...command, stdout: `COREPILOT_MEASUREMENT ${JSON.stringify(observation)}\n` }), command.command_execution_id);
@@ -42,6 +43,8 @@ test('new evidence rejects wrong units, parameters, binary identities, missing p
       { experiment: facts.first.experiment_id, kind: 'PERFORMANCE_SAMPLE', role: 'CANDIDATE', change: row => { (row.domain_payload.parameters as Record<string, unknown>).n = 99; } },
       { experiment: facts.first.experiment_id, kind: 'PERFORMANCE_SAMPLE', role: 'BASELINE', change: row => { (row.domain_payload.artifact_identity as Record<string, unknown>).sha256 = '8'.repeat(64); } },
       { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { delete row.domain_payload.artifact_identity; } },
+      { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { (row.domain_payload.artifact_identity as Record<string, unknown>).resolved_symbol_path = '/another/library.so'; } },
+      { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { (row.domain_payload.artifact_identity as Record<string, unknown>)[`resolved_${facts.workflow.function_name}_path`] = '/another/library.so'; } },
       { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { delete row.domain_payload.evaluator_binary_identity; } },
       { experiment: facts.first.experiment_id, kind: 'PERFORMANCE_SAMPLE', role: 'CANDIDATE', change: row => { delete row.domain_payload.benchmark_identity; } },
       { experiment: facts.repeated.experiment_id, kind: 'PERFORMANCE_SAMPLE', role: 'CANDIDATE', change: row => { (row.domain_payload.artifact_identity as Record<string, unknown>).sha256 = '2'.repeat(64); } },
@@ -80,6 +83,41 @@ test('new evidence rejects wrong units, parameters, binary identities, missing p
     update(optionalThreads.row, optionalThreads.command, row => { delete (row.domain_payload.parameters as Record<string, unknown>).threads; });
     assert.ok((await api.prepareWorkflowEvidence(seeded.workflowId)).snapshot);
     assert.equal(f.store.getCandidateApproval(seeded.candidate.candidate_id), null);
+  } finally { db?.close(); await f.close(); }
+});
+
+test('new evidence permits a remote alias only with a consistent Runner file identity check', async () => {
+  const f = await startWebFixture();
+  let db: DatabaseSync | undefined;
+  try {
+    const seeded = await seedBlockedValidation(f, true);
+    const facts = seedApprovalFacts(f, seeded.workflowId);
+    const api = new ApiClient(f.url, { token: f.token });
+    const row = f.store.listMeasurements(facts.first.experiment_id).find(item => item.kind === 'CORRECTNESS_CASE')!;
+    const command = f.store.listCommandExecutions(facts.first.experiment_id).find(item => item.stdout.includes(`"subject_id":"${row.subject_id}"`))!;
+    db = new DatabaseSync(path.join(f.root, 'db.sqlite'));
+    const writeRow = db.prepare('UPDATE optimization_measurements SET record_json = ? WHERE measurement_id = ?');
+    const writeCommand = db.prepare('UPDATE optimization_experiment_commands SET record_json = ? WHERE command_id = ?');
+    const altered = structuredClone(row);
+    (altered.domain_payload.artifact_identity as Record<string, unknown>).resolved_symbol_path = '/runner/alias/library.so';
+    const raw = { ...altered.domain_payload }; delete raw.evaluator_identity; delete raw.resource_policy; delete raw.runner_artifact_path_check;
+    const observation = { kind: altered.kind, role: altered.role, subject_id: altered.subject_id, sample_index: altered.sample_index,
+      value: altered.value, unit: altered.unit, validity: altered.validity, domain_payload: raw };
+    writeCommand.run(JSON.stringify({ ...command, stdout: `COREPILOT_MEASUREMENT ${JSON.stringify(observation)}\n` }), command.command_execution_id);
+    delete altered.domain_payload.runner_artifact_path_check;
+    writeRow.run(JSON.stringify(altered), altered.measurement_id);
+    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /缺少 Runner 库路径核对记录/);
+    const fileId = { device: '1', inode: '42' };
+    const inputPath = (altered.domain_payload.artifact_identity as { input_path: string }).input_path;
+    altered.domain_payload.runner_artifact_path_check = { input_realpath: '/runner/real/library.so', input_file_id: fileId,
+      reported_paths: [{ field: 'input_path', path: inputPath, realpath: '/runner/real/library.so', file_id: fileId },
+        { field: 'resolved_symbol_path', path: '/runner/alias/library.so', realpath: '/runner/other.so', file_id: { ...fileId, inode: '99' } }] };
+    writeRow.run(JSON.stringify(altered), altered.measurement_id);
+    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /Runner 库路径核对记录无效/);
+    const reported = (altered.domain_payload.runner_artifact_path_check as { reported_paths: Array<{ realpath: string; file_id: { inode: string } }> }).reported_paths[1];
+    reported.realpath = '/runner/real/library.so'; reported.file_id.inode = '42';
+    writeRow.run(JSON.stringify(altered), altered.measurement_id);
+    assert.ok((await api.prepareWorkflowEvidence(seeded.workflowId)).snapshot);
   } finally { db?.close(); await f.close(); }
 });
 

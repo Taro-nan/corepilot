@@ -14,6 +14,7 @@ import { hasCurrentApprovalStatistics } from '../core/approval-statistics.js';
 import { OptimizationRuntime } from '../core/optimization-runtime.js';
 import { listFormalEvaluatorFiles, loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
 import { validateFormalTestpackCompatibility } from '../evaluator/testpack-compatibility.js';
+import { assertGeneratedHarnessResolution } from '../evaluator/generated-harness-compatibility.js';
 import { readFrozenValidationTestpack } from '../testpack/validation-freeze.js';
 import { freezeEvidenceFiles } from '../workspace/freeze-evidence.js';
 import { verifyFrozenEvidenceArtifact } from '../workspace/frozen-evidence.js';
@@ -142,6 +143,7 @@ export class WorkflowApprovalService {
       return workflow.review_evidence;
     }
     const inspected = this.runtime.inspectCandidateApproval(input);
+    assertGeneratedHarnessResolution(inspected.evaluatorBundle);
     requireCurrentApprovalStatistics(frozen.testpack, inspected.first, inspected.repeated);
     const firstMeasurements = this.store.listMeasurements(inspected.first.experiment_id);
     const repeatedMeasurements = this.store.listMeasurements(inspected.repeated.experiment_id);
@@ -213,6 +215,7 @@ export class WorkflowApprovalService {
     // The current qualification and the archived copy must both remain valid.
     const bundle = loadFormalEvaluatorBundle(facts.evaluatorRoot, { requireQualified: true,
       expected: { evaluatorId: facts.task.evaluator.id, version: facts.task.evaluator.version!, digest: facts.task.evaluator.digest! } });
+    if (!existingApproval) assertGeneratedHarnessResolution(bundle);
     for (const experiment of [first, repeated]) {
       const rows = this.store.listMeasurements(experiment.experiment_id);
       assertRawEvidenceComplete(experiment, rows, bundle, facts.frozen.testpack);

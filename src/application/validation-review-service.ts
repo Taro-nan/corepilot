@@ -11,6 +11,8 @@ import { isolatedWorkspaceBuild } from '../config/build-command.js';
 import { LibraryPackageLoader } from '../library-package/loader.js';
 import { packageBaselineBinding } from '../library-package/task-definition.js';
 import { inspectFormalEvaluatorBundle, loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
+import { assertGeneratedHarnessResolution } from '../evaluator/generated-harness-compatibility.js';
+import { runnerArtifactPathCheckMatches } from '../evaluator/runner-artifact-path-check.js';
 import type { ValidationTrialService } from './validation-trial-service.js';
 
 const encoded = (value: unknown) => JSON.stringify(value, null, 2) + '\n';
@@ -49,6 +51,8 @@ export class ValidationReviewService {
       }
       return { preview, resolved, result: null };
     }
+    try { assertGeneratedHarnessResolution(resolved.bundle); }
+    catch (error) { preview.blockers.push((error as Error).message); }
     const records = this.trials.list(project).filter(item => item.package_id === packageId && item.package_version === version &&
       item.target_id === targetId && item.purpose === 'VALIDATION_DRAFT' && item.mode === 'comparison');
     const record = records[0];
@@ -84,6 +88,13 @@ export class ValidationReviewService {
     if (!result.passed || !result.summary.correctness.planned || !result.summary.performance.planned) {
       preview.blockers.push('最近一次两库对比尚未完整通过，请查看该次试跑的失败或缺失测量。');
     }
+    const measured = result.measurements.filter(row => row.kind === 'CORRECTNESS_CASE' || row.kind === 'PERFORMANCE_SAMPLE' ||
+      row.kind === 'OBSERVATION' && row.domain_payload?.classification === 'TEST_SENSITIVITY');
+    if (measured.some(row => {
+      const payload = object(row.domain_payload), identity = object(payload.artifact_identity);
+      return typeof identity.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(identity.sha256) ||
+        !runnerArtifactPathCheckMatches(identity, payload.runner_artifact_path_check, resolved.bundle.manifest.domain.api);
+    })) preview.blockers.push('试跑缺少有效的 Runner 库路径核对记录，请升级 Runner 并重新试跑；原试跑会保留。');
     if (result.summary.quality.probes.some(probe => !probe.detected)) preview.blockers.push('正确性测试没有识别全部已知错误实现；请检查输入覆盖和结果判断后重新试跑。');
     if (resources.length === 0 || resources.some(command => command.resource_context?.validity !== 'VALID' || command.exit_code !== 0 && !(command.diagnostic_probe && command.exit_code === 1))) {
       preview.blockers.push('试跑缺少有效的线程、CPU 和 NUMA 执行记录，请使用受控 Runner 重新试跑。');
