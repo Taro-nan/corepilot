@@ -67,6 +67,8 @@ export interface StartExperimentInput {
   taskId: string;
   candidateId: string;
   type: ExperimentType;
+  /** An application-owned, persisted creation intent may supply its stable ID. */
+  experimentId?: string;
   evaluator?: DomainIdentity;
   baseline?: DomainIdentity;
   declaredContext?: Record<string, unknown>;
@@ -370,6 +372,7 @@ export class OptimizationRuntime {
 
   /** Prepare the same validated fact for a caller that must persist it with another record. */
   prepareExperiment(input: StartExperimentInput): Experiment {
+    if (input.experimentId !== undefined && !/^experiment:[A-Za-z0-9_-]{1,128}$/.test(input.experimentId)) throw new Error('invalid experiment creation identity');
     const task = this.getTask(input.taskId);
     const evaluator = input.evaluator ?? task.evaluator;
     if (!task.evaluator || !evaluator) throw new Error('当前任务未绑定测试方案，请创建独立测试任务验证此源码候选。');
@@ -381,7 +384,7 @@ export class OptimizationRuntime {
     const status = input.initialStatus ?? 'RUNNING';
     const experiment: Experiment = {
       schema_version: OPTIMIZATION_DOMAIN_SCHEMA_VERSION,
-      experiment_id: this.id('experiment'),
+      experiment_id: input.experimentId ?? this.id('experiment'),
       task_id: input.taskId,
       candidate_id: input.candidateId,
       type: input.type,

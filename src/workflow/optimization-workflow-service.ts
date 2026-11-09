@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { createStagingCache } from './staging-cache.js';
 import { candidateRelativePath } from '../config/runtime-path.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { TaskStore } from '../storage/task-store.js';
@@ -390,7 +392,7 @@ export class OptimizationWorkflowService {
           || resumeFrom.workspace.candidate_commit !== candidate.source.commit || resumeFrom.workspace.candidate_tree !== candidate.source.tree) {
           throw new Error('保存的源码检查点与当前冻结候选不一致，未启动重试。');
         }
-        resumeFrom = { ...resumeFrom, phase: 'VALIDATION', validationOnly: true, activeExperimentId: null,
+        resumeFrom = { ...resumeFrom, phase: 'VALIDATION', validationOnly: true, activeExperimentId: null, experimentIntent: null,
           evaluationFeedback: null, pendingDecision: null, pendingParentHypothesisId: null,
           validation: null, performance: null, revalidation: null };
         await session.checkpoint(resumeFrom);
@@ -398,10 +400,31 @@ export class OptimizationWorkflowService {
       } else if (resumeFrom?.validationOnly && !resumeFrom.activeExperimentId && resumeFrom.evaluationFeedback
         && (resumeFrom.validation?.build.ok === false || resumeFrom.evaluationFeedback.correctness_status === 'FAILED'
           || resumeFrom.evaluationFeedback.performance_summary.status === 'FAILED')) {
-        resumeFrom = { ...resumeFrom, phase: 'AGENT', validationOnly: false, pendingDecision: null,
+        resumeFrom = { ...resumeFrom, phase: 'AGENT', validationOnly: false, pendingDecision: null, experimentIntent: null,
           prompt: buildCandidateFeedbackPrompt(preflight, resumeFrom.evaluationFeedback) };
         afterSavedEvaluation = true;
         await session.checkpoint(resumeFrom);
+      }
+      if (resumeFrom?.activeExperimentId) {
+        const experiment = this.runtime.getExperiment(resumeFrom.activeExperimentId);
+        const workflow = this.records.get(workflowId)!;
+        const type = resumeFrom.phase === 'VALIDATION' ? 'FORMAL_EVALUATION' : resumeFrom.phase === 'REVALIDATION' ? 'REVALIDATION' : null;
+        const reference = type === 'FORMAL_EVALUATION' ? workflow.experiment_id : workflow.revalidation_experiment_id;
+        const declaredIntent = experiment.declared_context.workflow_experiment_intent;
+        if (!type || experiment.task_id !== taskId || experiment.candidate_id !== resumeFrom.candidateId ||
+            workflow.candidate_id !== resumeFrom.candidateId || experiment.type !== type || reference !== experiment.experiment_id ||
+            (resumeFrom.experimentIntent ? !isDeepStrictEqual(declaredIntent, resumeFrom.experimentIntent) ||
+              !isDeepStrictEqual(workflow.experiment_creation_intent, resumeFrom.experimentIntent) : declaredIntent !== undefined)) {
+          throw new Error(`保存的原实验 ${experiment.experiment_id} 与任务、候选或阶段不一致，请保留现场并核对。`);
+        }
+      }
+      const resumableExperimentId = resumeFrom?.phase === 'VALIDATION' || resumeFrom?.phase === 'REVALIDATION'
+        ? resumeFrom.activeExperimentId ?? resumeFrom.experimentIntent?.experiment_id ?? null : null;
+      const unrelatedActive = this.options.store.listExperiments(taskId).find(experiment =>
+        ['FORMAL_EVALUATION', 'REVALIDATION'].includes(experiment.type) &&
+        ['PENDING', 'RUNNING', 'UNKNOWN'].includes(experiment.status) && experiment.experiment_id !== resumableExperimentId);
+      if (unrelatedActive) {
+        throw new Error(`任务仍有未确认终态的原实验 ${unrelatedActive.experiment_id}；请先核对原实验，系统不会继续调查或启动新实验。`);
       }
       if (!resumeFrom?.validationOnly) {
         const verification = await verifyToolCalling(modelConfig, { models, timeoutMs: preflight.config.config.model.timeout_ms, signal, fetch: modelFetch });
@@ -418,7 +441,6 @@ export class OptimizationWorkflowService {
         const evaluatorSpec = preflight.testpack.testpack.evaluator;
         if (!evaluatorSpec) throw new Error('RPC formal execution requires a verified evaluator bundle');
         const evaluatorStages = new Map<string, Promise<StagedRemoteEvaluator>>();
-        let stagedBaseline: Promise<StagedRemoteBaseline> | undefined;
         const runnerClient = new RunnerClient({
           baseUrl: preflight.runner.endpoint,
           token: preflight.runner.token,
@@ -449,24 +471,21 @@ export class OptimizationWorkflowService {
           } catch (error) { throw new RemoteExperimentUnknownError(id, `开发实验现场已保留：${(error as Error).message}`); }
         }
         const comparisonBaseline = preflight.testpack.testpack.performance.baselines.comparison;
-        const prepareComparisonBaseline = async (stageSignal?: AbortSignal): Promise<StagedRemoteBaseline> => {
+        const prepareComparisonBaseline = createStagingCache(async (stageSignal?: AbortSignal): Promise<StagedRemoteBaseline> => {
           const root = preflight.config.config.target.workspace_root.replace(/\\/g, '/').replace(/\/+$/, '');
           const remoteWorkspace = path.posix.join(root, runId, 'baselines', safePathSegment(comparisonBaseline.id),
             safePathSegment(comparisonBaseline.version), comparisonBaseline.sha256.toLowerCase());
-          stagedBaseline ??= (async () => {
-            const binding = preflight.libraryPackage ? packageBaselineBinding(preflight.libraryPackage, comparisonBaseline.path) : null;
-            if (binding?.bundle && binding.bundleRoot && binding.entryPath) {
-              stageSignal?.throwIfAborted();
-              return stageVerifiedBinaryBaseline({ bundle: binding.bundle, bundleRoot: binding.bundleRoot,
-                entryPath: binding.entryPath, expectedDigest: comparisonBaseline.sha256, remoteRoot: remoteWorkspace,
-                target: preflight.config.config.target, runner: rpcRunner });
-            }
-            return stageRemoteBaseline({ sourceArtifact: comparisonBaseline.path,
-              ...(preflight.libraryPackage ? { sourceLocation: 'control' as const } : {}),
-              expectedDigest: comparisonBaseline.sha256, transport, remoteWorkspace, signal: stageSignal });
-          })();
-          return stagedBaseline;
-        };
+          const binding = preflight.libraryPackage ? packageBaselineBinding(preflight.libraryPackage, comparisonBaseline.path) : null;
+          if (binding?.bundle && binding.bundleRoot && binding.entryPath) {
+            stageSignal?.throwIfAborted();
+            return stageVerifiedBinaryBaseline({ bundle: binding.bundle, bundleRoot: binding.bundleRoot,
+              entryPath: binding.entryPath, expectedDigest: comparisonBaseline.sha256, remoteRoot: remoteWorkspace,
+              target: preflight.config.config.target, runner: rpcRunner });
+          }
+          return stageRemoteBaseline({ sourceArtifact: comparisonBaseline.path,
+            ...(preflight.libraryPackage ? { sourceLocation: 'control' as const } : {}),
+            expectedDigest: comparisonBaseline.sha256, transport, remoteWorkspace, signal: stageSignal });
+        });
         experimentExecution = new RpcExperimentTransitionAdapter({
           backend,
           runtime: this.runtime,
@@ -547,94 +566,104 @@ export class OptimizationWorkflowService {
           expected: { evaluatorId: evaluatorSpec.id, version: evaluatorSpec.version, digest: evaluatorSpec.sha256 },
         });
         await experimentExecution.preflight(signal);
-        update({ progress: { phase: 'PREPARING_BASELINE', last_event: '正在将已固定比较基线同步到 Runner，并核验文件身份' } });
-        const developmentBaseline = await prepareComparisonBaseline(signal);
-        update({ progress: { phase: 'BASELINE_READY', last_event: `比较基线已准备：${developmentBaseline.remote_artifact}` } });
+        const hasUnresolvedExperiment = this.options.store.listExperiments(taskId).some(experiment =>
+          ['FORMAL_EVALUATION', 'REVALIDATION'].includes(experiment.type) && ['PENDING', 'RUNNING', 'UNKNOWN'].includes(experiment.status));
+        // A resumed Runner job may still be reading this shared baseline; reconcile it first.
+        if (!resumeFrom?.activeExperimentId && !hasUnresolvedExperiment) {
+          update({ progress: { phase: 'PREPARING_BASELINE', last_event: '正在将已固定比较基线同步到 Runner，并核验文件身份' } });
+          const staged = await prepareComparisonBaseline(signal);
+          update({ progress: { phase: 'BASELINE_READY', last_event: `比较基线已准备：${staged.remote_artifact}` } });
+        }
         const developmentBuild = preflight.config.config.build;
         createDevelopmentInvestigation = (workspace) => {
           const snapshots = new Map<string, Promise<PreparedDevelopmentWorkspace>>();
           let assets: ReturnType<typeof stageRemoteDevelopmentAssets> | undefined;
-          const controller = new RunnerDevelopmentInvestigation({
-            backend,
-            taskId,
-            buildCommand: {
-              executable: developmentBuild.executable,
-              args: [...developmentBuild.args],
-              cwd: path.resolve(workspace.repository, developmentBuild.cwd),
-              environment: { ...developmentBuild.environment },
-              timeout_ms: developmentBuild.timeout_ms,
-            },
-            buildCwdRelative: developmentBuild.cwd,
-            candidateArtifactRelativePath: candidateArtifactRelativePath(preflight.testpack.testpack.performance.baselines.current.path),
-            baseline: {
-              id: comparisonBaseline.id,
-              version: comparisonBaseline.version,
-              digest: comparisonBaseline.sha256,
-              details: { path: developmentBaseline.remote_artifact, library: comparisonBaseline.library,
-                libraryPaths: developmentBaseline.library_paths, dependencies: developmentBaseline.dependencies },
-            },
-            resources: {
-              cpuSet: preflight.testpack.testpack.resources.cpu_set,
-              numaNode: preflight.testpack.testpack.resources.numa_nodes[0] ?? 0,
-            },
-            workloads: developmentBundle.workloads.workloads.filter((item) => !preflight.libraryPackage ||
-              preflight.libraryPackage.target.development_benchmark.workload_ids.includes(item.workload_id)),
-            evaluatorSetup: {
-              executable: developmentBundle.manifest.correctness.command.executable,
-              script: 'scripts/build-evaluator.sh',
-            },
-            performanceCommand: developmentBundle.manifest.performance.command,
-            testPlan: readValidationTestPlan(developmentBundle.root, developmentBundle.manifest, developmentBundle.manifest.domain.api),
-            inspectionSymbols: [
-              preflight.request.function_name,
-              developmentBundle.manifest.domain.api,
-            ],
-            pollIntervalMs: rpcRunner.pollIntervalMs,
-            onPlan: plan => session!.record('development-job', plan),
-            onCompleted: () => session!.record('development-job', null),
-            prepareWorkspace: async ({ signal: developmentSignal }) => {
-              const source = await snapshotEditingSource(workspace);
-              const existing = snapshots.get(source.tree);
-              if (existing) return existing;
-              const targetRoot = preflight.config.config.target.workspace_root.replace(/\\/g, '/').replace(/\/+$/, '');
-              const generation = this.records.get(workflowId)?.continuation_count ?? 0;
-              const requestRoot = path.posix.join(targetRoot, runId, 'development', 'sources', source.tree, `${source.commit.slice(0, 12)}-c${generation}`);
-              const prepared = (async (): Promise<PreparedDevelopmentWorkspace> => {
-              const staged = await stageRpcSource({ repository: workspace.repository, commit: source.commit,
-                runner: runnerClient, remoteRoot: requestRoot, localDirectory: path.join(snapshotDir, 'source-archives'), signal: developmentSignal });
-              assets ??= stageRemoteDevelopmentAssets({
-                evaluatorRoot: evaluatorSpec.root,
-                transport,
-                remoteWorkspace: path.posix.join(targetRoot, runId, 'development', 'assets'),
-                signal: developmentSignal,
-              });
-              const stagedAssets = await assets;
-              return {
-                candidate: {
-                  candidate_id: `development-source:${source.commit}`,
-                  commit: source.commit,
-                  tree: source.tree,
-                  source_sha256: staged.source_sha256,
-                  workspace_path: staged.workspace_path,
-                },
-                assetsRoot: stagedAssets.remote_workspace,
-              };
-              })();
-              snapshots.set(source.tree, prepared);
-              try { return await prepared; }
-              catch (error) { snapshots.delete(source.tree); assets = undefined; throw error; }
-            },
+          const getController = createStagingCache(async (developmentSignal?: AbortSignal) => {
+            update({ progress: { phase: 'PREPARING_BASELINE', last_event: '正在将已固定比较基线同步到 Runner，并核验文件身份' } });
+            const developmentBaseline = await prepareComparisonBaseline(developmentSignal);
+            update({ progress: { phase: 'BASELINE_READY', last_event: `比较基线已准备：${developmentBaseline.remote_artifact}` } });
+            return new RunnerDevelopmentInvestigation({
+              backend,
+              taskId,
+              buildCommand: {
+                executable: developmentBuild.executable,
+                args: [...developmentBuild.args],
+                cwd: path.resolve(workspace.repository, developmentBuild.cwd),
+                environment: { ...developmentBuild.environment },
+                timeout_ms: developmentBuild.timeout_ms,
+              },
+              buildCwdRelative: developmentBuild.cwd,
+              candidateArtifactRelativePath: candidateArtifactRelativePath(preflight.testpack.testpack.performance.baselines.current.path),
+              baseline: {
+                id: comparisonBaseline.id,
+                version: comparisonBaseline.version,
+                digest: comparisonBaseline.sha256,
+                details: { path: developmentBaseline.remote_artifact, library: comparisonBaseline.library,
+                  libraryPaths: developmentBaseline.library_paths, dependencies: developmentBaseline.dependencies },
+              },
+              resources: {
+                cpuSet: preflight.testpack.testpack.resources.cpu_set,
+                numaNode: preflight.testpack.testpack.resources.numa_nodes[0] ?? 0,
+              },
+              workloads: developmentBundle.workloads.workloads.filter((item) => !preflight.libraryPackage ||
+                preflight.libraryPackage.target.development_benchmark.workload_ids.includes(item.workload_id)),
+              evaluatorSetup: {
+                executable: developmentBundle.manifest.correctness.command.executable,
+                script: 'scripts/build-evaluator.sh',
+              },
+              performanceCommand: developmentBundle.manifest.performance.command,
+              testPlan: readValidationTestPlan(developmentBundle.root, developmentBundle.manifest, developmentBundle.manifest.domain.api),
+              inspectionSymbols: [
+                preflight.request.function_name,
+                developmentBundle.manifest.domain.api,
+              ],
+              pollIntervalMs: rpcRunner.pollIntervalMs,
+              onPlan: plan => session!.record('development-job', plan),
+              onCompleted: () => session!.record('development-job', null),
+              prepareWorkspace: async ({ signal: developmentSignal }) => {
+                const source = await snapshotEditingSource(workspace);
+                const existing = snapshots.get(source.tree);
+                if (existing) return existing;
+                const targetRoot = preflight.config.config.target.workspace_root.replace(/\\/g, '/').replace(/\/+$/, '');
+                const generation = this.records.get(workflowId)?.continuation_count ?? 0;
+                const requestRoot = path.posix.join(targetRoot, runId, 'development', 'sources', source.tree, `${source.commit.slice(0, 12)}-c${generation}`);
+                const prepared = (async (): Promise<PreparedDevelopmentWorkspace> => {
+                  const staged = await stageRpcSource({ repository: workspace.repository, commit: source.commit,
+                    runner: runnerClient, remoteRoot: requestRoot, localDirectory: path.join(snapshotDir, 'source-archives'), signal: developmentSignal });
+                  assets ??= stageRemoteDevelopmentAssets({
+                    evaluatorRoot: evaluatorSpec.root,
+                    transport,
+                    remoteWorkspace: path.posix.join(targetRoot, runId, 'development', 'assets'),
+                    signal: developmentSignal,
+                  });
+                  const stagedAssets = await assets;
+                  return {
+                    candidate: {
+                      candidate_id: `development-source:${source.commit}`,
+                      commit: source.commit,
+                      tree: source.tree,
+                      source_sha256: staged.source_sha256,
+                      workspace_path: staged.workspace_path,
+                    },
+                    assetsRoot: stagedAssets.remote_workspace,
+                  };
+                })();
+                snapshots.set(source.tree, prepared);
+                try { return await prepared; }
+                catch (error) { snapshots.delete(source.tree); assets = undefined; throw error; }
+              },
+            });
           });
           return {
             toolOptions: {
               requireDevelopmentFindingsBeforeMutation: true,
-              inspectMachine: async (developmentSignal) => developmentToolText(await controller.inspectMachine(developmentSignal)),
-              inspectBinary: async (toolInput, developmentSignal) => developmentToolText(await controller.inspectBinary(toolInput, developmentSignal)),
-              disassemble: async (toolInput, developmentSignal) => developmentToolText(await controller.disassemble(toolInput, developmentSignal)),
-              runDevBenchmark: async (toolInput, developmentSignal) => developmentToolText(await controller.runDevBenchmark(toolInput, developmentSignal)),
-              profilePerfStat: async (toolInput, developmentSignal) => developmentToolText(await controller.profilePerfStat(toolInput, developmentSignal)),
+              inspectMachine: async (developmentSignal) => developmentToolText(await (await getController(developmentSignal)).inspectMachine(developmentSignal)),
+              inspectBinary: async (toolInput, developmentSignal) => developmentToolText(await (await getController(developmentSignal)).inspectBinary(toolInput, developmentSignal)),
+              disassemble: async (toolInput, developmentSignal) => developmentToolText(await (await getController(developmentSignal)).disassemble(toolInput, developmentSignal)),
+              runDevBenchmark: async (toolInput, developmentSignal) => developmentToolText(await (await getController(developmentSignal)).runDevBenchmark(toolInput, developmentSignal)),
+              profilePerfStat: async (toolInput, developmentSignal) => developmentToolText(await (await getController(developmentSignal)).profilePerfStat(toolInput, developmentSignal)),
             },
-            runGate: (workloadIds, developmentSignal) => controller.runDevelopmentGate(workloadIds, developmentSignal),
+            runGate: async (workloadIds, developmentSignal) => (await getController(developmentSignal)).runDevelopmentGate(workloadIds, developmentSignal),
           };
         };
       }
@@ -681,15 +710,11 @@ export class OptimizationWorkflowService {
             });
             return this.options.store.attachOptimizationCandidate(workflowId, candidate).candidate_id;
           },
-          experimentStarted: ({ candidateId }) => {
-            const experiment = this.runtime.startExperiment({
-              taskId,
-              candidateId,
-              type: 'FORMAL_EVALUATION',
-              initialStatus: preflight.runner.mode === 'rpc' ? 'PENDING' : 'RUNNING',
-            });
-            update({ experiment_id: experiment.experiment_id });
-            return experiment.experiment_id;
+          experimentStarted: ({ candidateId, intent }) => {
+            const experiment = this.runtime.prepareExperiment({ taskId, candidateId, type: 'FORMAL_EVALUATION',
+              experimentId: intent.experiment_id, declaredContext: { ...this.runtime.getTask(taskId).declared_context, workflow_experiment_intent: intent },
+              initialStatus: preflight.runner.mode === 'rpc' ? 'PENDING' : 'RUNNING' });
+            return this.options.store.attachOptimizationExperiment(workflowId, experiment, intent).experiment_id;
           },
           experimentCompleted: ({ experimentId, validation, performance }) => {
             this.runtime.completeValidationExperiment({
@@ -699,15 +724,11 @@ export class OptimizationWorkflowService {
               factsAlreadyPersisted: preflight.runner.mode === 'rpc',
             });
           },
-          revalidationStarted: ({ candidateId }) => {
-            const experiment = this.runtime.startExperiment({
-              taskId,
-              candidateId,
-              type: 'REVALIDATION',
-              initialStatus: preflight.runner.mode === 'rpc' ? 'PENDING' : 'RUNNING',
-            });
-            update({ revalidation_experiment_id: experiment.experiment_id });
-            return experiment.experiment_id;
+          revalidationStarted: ({ candidateId, intent }) => {
+            const experiment = this.runtime.prepareExperiment({ taskId, candidateId, type: 'REVALIDATION',
+              experimentId: intent.experiment_id, declaredContext: { ...this.runtime.getTask(taskId).declared_context, workflow_experiment_intent: intent },
+              initialStatus: preflight.runner.mode === 'rpc' ? 'PENDING' : 'RUNNING' });
+            return this.options.store.attachOptimizationExperiment(workflowId, experiment, intent).experiment_id;
           },
           revalidationCompleted: ({ experimentId, revalidation: result_ }) => {
             this.runtime.completeRevalidationExperiment({

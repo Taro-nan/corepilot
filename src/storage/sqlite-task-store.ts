@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { isDeepStrictEqual } from 'node:util';
 import type { CommandRecord } from '../contracts/command.js';
 import type { Event, EventType, MockScenario, RunnerJob, Target, Task, TaskStatus } from '../contracts/index.js';
 import type {
@@ -15,7 +16,7 @@ import type { HypothesisOutcome, OptimizationHypothesis } from '../contracts/opt
 import type { OptimizationApprovalRecord } from '../contracts/optimization-approval.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
-import { taskStatusForExecutionOutcome, type OptimizationWorkflowRecord, type WorkflowExecutionOutcomePatch } from '../contracts/workflow.js';
+import { taskStatusForExecutionOutcome, type OptimizationWorkflowRecord, type WorkflowExecutionOutcomePatch, type WorkflowExperimentIntent } from '../contracts/workflow.js';
 
 interface TaskRow {
   task_id: string; request_id: string; status: string; target_json: string; schema_version: number; is_mock: number;
@@ -350,6 +351,52 @@ export class SqliteTaskStore implements TaskStore {
         this.saveOptimizationWorkflowJson(workflowId, JSON.stringify({ ...workflow, candidate_id: resolved.candidate_id, updated_at: new Date().toISOString() }));
       }
       return resolved;
+    });
+  }
+
+  attachOptimizationExperiment(workflowId: string, experiment: Experiment, intent: WorkflowExperimentIntent): Experiment {
+    return this.transaction(() => {
+      const json = this.getOptimizationWorkflowJson(workflowId);
+      const workflow = json ? JSON.parse(json) as OptimizationWorkflowRecord : null;
+      const task = this.getOptimizationTask(experiment.task_id);
+      const candidate = this.getCandidate(experiment.candidate_id);
+      if (!workflow || workflow.optimization_task_id !== experiment.task_id || workflow.status !== 'GENERATING' ||
+          workflow.candidate_id !== experiment.candidate_id || !task || task.workflow_id !== workflowId || task.status !== 'RUNNING' ||
+          !candidate || candidate.task_id !== experiment.task_id || intent.schema_version !== 1 ||
+          !/^experiment:[A-Za-z0-9_-]{1,128}$/.test(intent.experiment_id) || !Number.isSafeInteger(intent.round) || intent.round < 1 ||
+          !['FORMAL_EVALUATION', 'REVALIDATION'].includes(intent.type) || experiment.experiment_id !== intent.experiment_id ||
+          experiment.candidate_id !== intent.candidate_id || experiment.type !== intent.type ||
+          !isDeepStrictEqual(experiment.declared_context, { ...task.declared_context, workflow_experiment_intent: intent }) ||
+          !task.evaluator || !isDeepStrictEqual(experiment.evaluator, task.evaluator) ||
+          !isDeepStrictEqual(experiment.baseline, task.performance_baseline ?? task.source_baseline) ||
+          !['PENDING', 'RUNNING'].includes(experiment.status) || experiment.validity !== 'UNKNOWN' || experiment.failure_category !== null ||
+          experiment.observed_context !== null || experiment.ended_at !== null || experiment.evaluation !== null) {
+        throw new Error('实验创建意图与当前工作流、候选或阶段不匹配，请保留现场并核对。');
+      }
+      const unresolved = this.listExperiments(experiment.task_id).filter(item =>
+        ['PENDING', 'RUNNING', 'UNKNOWN'].includes(item.status) && item.experiment_id !== intent.experiment_id);
+      if (unresolved.length) throw new Error(`任务仍有未确认终态的原实验 ${unresolved[0].experiment_id}；请先核对原实验，系统不会自动新建或重发。`);
+      const existing = this.getExperiment(intent.experiment_id);
+      const reference = intent.type === 'FORMAL_EVALUATION' ? 'experiment_id' : 'revalidation_experiment_id';
+      if (existing) {
+        if (!isDeepStrictEqual(workflow.experiment_creation_intent, intent) || workflow[reference] !== intent.experiment_id ||
+            existing.task_id !== experiment.task_id || existing.candidate_id !== intent.candidate_id || existing.type !== intent.type ||
+            existing.status !== experiment.status || existing.validity !== 'UNKNOWN' || existing.failure_category !== null ||
+            existing.ended_at !== null || existing.evaluation !== null || existing.observed_context !== null ||
+            !isDeepStrictEqual(existing.evaluator, experiment.evaluator) || !isDeepStrictEqual(existing.baseline, experiment.baseline) ||
+            !isDeepStrictEqual(existing.declared_context, experiment.declared_context) ||
+            this.listCommandExecutions(existing.experiment_id).length || this.listMeasurements(existing.experiment_id).length) {
+          throw new Error(`原实验 ${intent.experiment_id} 的身份或执行状态无法安全确认；请保留现场并核对。`);
+        }
+        return existing;
+      }
+      if (workflow.experiment_creation_intent?.experiment_id === intent.experiment_id) {
+        throw new Error(`工作流引用的原实验 ${intent.experiment_id} 缺失，请保留现场并核对。`);
+      }
+      this.createExperiment(experiment);
+      this.saveOptimizationWorkflowJson(workflowId, JSON.stringify({ ...workflow, [reference]: intent.experiment_id,
+        experiment_creation_intent: structuredClone(intent), updated_at: new Date().toISOString() }));
+      return experiment;
     });
   }
 

@@ -15,7 +15,8 @@ import type { startWebFixture } from './web-fixture.js';
  * no accepted measurement, and a stale ABANDON decision in the native session. */
 export async function seedBlockedValidation(f: Awaited<ReturnType<typeof startWebFixture>>, enablePerformance = false) {
   const { workflowId } = f.service.submitPublic({ function_name: 'kernel', entry_file: 'kernel.c',
-    config_path: f.configPath, repository_root: f.repo, source_branch: 'main', enable_performance: enablePerformance });
+    config_path: f.configPath, repository_root: f.repo, source_branch: 'main', enable_performance: enablePerformance },
+    { packageLoader: f.projects.packageLoader });
   const record = f.service.get(workflowId)!;
   const runtime = new OptimizationRuntime(f.store);
   const workspace = createCandidateWorkspace({ repository: f.repo, worktreeRoot: path.join(f.root, 'worktrees'), runId: 'recovery', baselineCommit: f.git('rev-parse', 'HEAD') });

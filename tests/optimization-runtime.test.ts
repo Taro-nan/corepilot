@@ -246,11 +246,11 @@ test('the public optimization workflow appends candidate and experiment facts on
         hypothesis: agent.hypothesis ?? agent.text,
         agentIdentity: { model: 'test-model' },
       }).candidate_id,
-      experimentStarted: ({ candidateId }) => runtime.startExperiment({ taskId: task.task_id, candidateId, type: 'FORMAL_EVALUATION' }).experiment_id,
+      experimentStarted: ({ candidateId, intent }) => runtime.startExperiment({ taskId: task.task_id, candidateId, type: 'FORMAL_EVALUATION', experimentId: intent.experiment_id }).experiment_id,
       experimentCompleted: ({ experimentId, validation: result_, performance: performance_ }) => {
         runtime.completeValidationExperiment({ experimentId, validation: result_, performance: performance_ });
       },
-      revalidationStarted: ({ candidateId }) => runtime.startExperiment({ taskId: task.task_id, candidateId, type: 'REVALIDATION' }).experiment_id,
+      revalidationStarted: ({ candidateId, intent }) => runtime.startExperiment({ taskId: task.task_id, candidateId, type: 'REVALIDATION', experimentId: intent.experiment_id }).experiment_id,
       revalidationCompleted: ({ experimentId, revalidation: result_ }) => {
         runtime.completeRevalidationExperiment({ experimentId, revalidation: result_ });
       },

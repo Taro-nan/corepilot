@@ -218,6 +218,121 @@ test('a lost acknowledgement after Candidate and Workflow commit resumes the sam
   } finally { f.store.attachOptimizationCandidate = attach; await f.close(); }
 });
 
+test('a legacy unlinked active formal experiment blocks recovery without creating another', async () => {
+  const f = await fixture(0);
+  const attach = f.store.attachOptimizationExperiment.bind(f.store);
+  let interrupted = false;
+  try {
+    f.store.attachOptimizationExperiment = (_workflowId, experiment) => {
+      const { workflow_experiment_intent: _intent, ...declared_context } = experiment.declared_context;
+      f.store.createExperiment({ ...experiment, declared_context });
+      interrupted = true;
+      throw new Error('injected interruption after legacy experiment insert');
+    };
+    const id = await f.start();
+    let first = f.service.get(id)!;
+    for (let i = 0; i < 800; i++) {
+      first = f.service.get(id)!;
+      if (first.status === 'FAILED' && !f.service.activeWorkflowIds().length) break;
+      await delay(25);
+    }
+    assert.equal(interrupted, true);
+    assert.equal(first.status, 'FAILED');
+    const before = f.store.listExperiments(first.optimization_task_id!);
+    assert.equal(before.length, 1);
+    assert.equal(before[0].status, 'RUNNING');
+    f.store.attachOptimizationExperiment = attach;
+    await f.restart();
+    await f.api.resumeOptimizationWorkflow(id);
+    let after = f.service.get(id)!;
+    for (let i = 0; i < 800; i++) {
+      after = f.service.get(id)!;
+      if (!f.service.activeWorkflowIds().length) break;
+      await delay(25);
+    }
+    assert.equal(after.status, 'FAILED', 'an unlinked active experiment must block automatic creation');
+    assert.match(after.error ?? '', /原实验|未关联|核对/);
+    assert.deepEqual(f.store.listExperiments(first.optimization_task_id!), before);
+  } finally { f.store.attachOptimizationExperiment = attach; await f.close(); }
+});
+
+for (const type of ['FORMAL_EVALUATION', 'REVALIDATION'] as const) {
+  test(`lost ${type} creation acknowledgement restores the same experiment intent through HTTP`, async () => {
+    const f = await fixture(0);
+    const attach = f.store.attachOptimizationExperiment.bind(f.store);
+    let interrupted = false;
+    try {
+      f.store.attachOptimizationExperiment = (workflowId, experiment, intent) => {
+        const saved = attach(workflowId, experiment, intent);
+        if (!interrupted && experiment.type === type) {
+          interrupted = true;
+          throw new Error('injected lost experiment creation acknowledgement');
+        }
+        return saved;
+      };
+      const id = await f.start();
+      let first = f.service.get(id)!;
+      for (let i = 0; i < 800; i++) {
+        first = f.service.get(id)!;
+        if (first.status === 'FAILED' && !f.service.activeWorkflowIds().length) break;
+        await delay(25);
+      }
+      assert.equal(interrupted, true);
+      assert.equal(first.status, 'FAILED');
+      const before = f.store.listExperiments(first.optimization_task_id!);
+      const original = before.at(-1)!;
+      assert.equal(original.type, type);
+      assert.equal(original.status, 'RUNNING');
+      assert.equal(first.experiment_creation_intent?.experiment_id, original.experiment_id);
+      assert.equal(type === 'FORMAL_EVALUATION' ? first.experiment_id : first.revalidation_experiment_id, original.experiment_id);
+      assert.equal(f.store.listCommandExecutions(original.experiment_id).length, 0);
+      f.store.attachOptimizationExperiment = attach;
+      await f.restart();
+      await f.api.resumeOptimizationWorkflow(id);
+      const finished = await f.wait('WAITING_APPROVAL');
+      const after = f.store.listExperiments(finished.optimization_task_id!);
+      assert.equal(after.length, 3, 'each actual formal or revalidation run is represented once');
+      assert.equal(after.filter(item => item.experiment_id === original.experiment_id).length, 1);
+      assert.equal(after.find(item => item.experiment_id === original.experiment_id)?.status, 'SUCCEEDED');
+      assert.equal(finished.revalidation_experiment_id, after.at(-1)!.experiment_id);
+      assert.notEqual(after[1].experiment_id, after[2].experiment_id);
+    } finally { f.store.attachOptimizationExperiment = attach; await f.close(); }
+  });
+}
+
+test('a saved active local experiment is reported interrupted rather than executed again', async () => {
+  const f = await fixture(0);
+  const save = f.store.saveOptimizationWorkflowJson.bind(f.store);
+  let interrupted = false;
+  try {
+    f.store.saveOptimizationWorkflowJson = (id, json) => {
+      if (!interrupted && JSON.parse(json).progress?.phase === 'CHECKPOINT_READY') {
+        interrupted = true;
+        throw new Error('injected failure before local validation execution');
+      }
+      save(id, json);
+    };
+    const id = await f.start();
+    let first = f.service.get(id)!;
+    for (let i = 0; i < 800; i++) {
+      first = f.service.get(id)!;
+      if (first.status === 'FAILED' && !f.service.activeWorkflowIds().length) break;
+      await delay(25);
+    }
+    assert.equal(interrupted, true);
+    const before = f.store.listExperiments(first.optimization_task_id!);
+    assert.equal(before.length, 1);
+    assert.equal(before[0].status, 'RUNNING');
+    f.store.saveOptimizationWorkflowJson = save;
+    await f.restart();
+    await f.api.resumeOptimizationWorkflow(id);
+    const after = await f.wait('INTERRUPTED');
+    assert.match(after.error ?? '', /本地进程状态未确认/);
+    assert.deepEqual(f.store.listExperiments(first.optimization_task_id!), before);
+    assert.equal(after.experiment_id, before[0].experiment_id);
+  } finally { f.store.saveOptimizationWorkflowJson = save; await f.close(); }
+});
+
 test('stopping Control preserves an in-progress Agent session and allows continuation after restart', async () => {
   const f = await fixture(0, undefined, true);
   try {

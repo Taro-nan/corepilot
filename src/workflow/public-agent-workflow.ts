@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
 import type { AgentTool, PiAgentRuntimeResult } from '../agent/pi-agent-runtime.js';
 import { WorkspaceToolset, type WorkspaceToolOptions } from '../agent/workspace-tools.js';
@@ -27,8 +28,11 @@ import { candidateDecisionTool, hypothesisDecisionTool } from '../agent/candidat
 import { hypothesisProposalTool, optimizationHistoryTool } from '../agent/hypothesis-tool.js';
 import { isValidationBlocked } from '../workspace/validation-outcome.js';
 import type { HypothesisProposal, OptimizationHypothesis, OptimizationReasoningHistory } from '../contracts/optimization-hypothesis.js';
+import type { WorkflowExperimentIntent } from '../contracts/workflow.js';
 
 export type PublicAgentWorkflowStatus = 'WAITING_APPROVAL' | 'PERFORMANCE_THRESHOLD_NOT_MET' | 'NO_CANDIDATE' | 'BUDGET_EXHAUSTED' | 'INTERRUPTED' | 'VALIDATION_BLOCKED' | 'FAILED' | 'CANCELLED';
+
+class LocalExperimentUnknownError extends Error {}
 
 export interface PublicAgentWorkflowCheckpoint {
   version: 1;
@@ -40,6 +44,8 @@ export interface PublicAgentWorkflowCheckpoint {
   checkpoint: CandidateCheckpoint | null;
   candidateId: string | null;
   activeExperimentId: string | null;
+  /** Saved before the application creates an Experiment, absent in older checkpoints. */
+  experimentIntent?: WorkflowExperimentIntent | null;
   activeHypothesisId: string | null;
   evaluatedHypothesisId: string | null;
   evaluationFeedback: CandidateEvaluationFeedback | null;
@@ -91,7 +97,7 @@ export interface PublicAgentLifecycleRecorder {
     checkpoint: CandidateCheckpoint;
     agent: PiAgentRuntimeResult;
   }): string | Promise<string>;
-  experimentStarted(input: { round: number; candidateId: string }): string | Promise<string>;
+  experimentStarted(input: { round: number; candidateId: string; intent: WorkflowExperimentIntent }): string | Promise<string>;
   experimentCompleted(input: {
     round: number;
     candidateId: string;
@@ -99,7 +105,7 @@ export interface PublicAgentLifecycleRecorder {
     validation: ValidationCycleResult;
     performance: PerformanceGateResult | null;
   }): void | Promise<void>;
-  revalidationStarted(input: { round: number; candidateId: string }): string | Promise<string>;
+  revalidationStarted(input: { round: number; candidateId: string; intent: WorkflowExperimentIntent }): string | Promise<string>;
   revalidationCompleted(input: {
     round: number;
     candidateId: string;
@@ -279,6 +285,8 @@ export async function runPublicAgentWorkflow(input: {
   let agent = saved?.agent ?? null;
   let developmentGate = saved?.developmentGate ?? null;
   let activeExperimentId = saved?.activeExperimentId ?? null;
+  let experimentIntent = saved?.experimentIntent ?? null;
+  let executionMayHaveStarted = false;
   let prompt = saved?.prompt ?? buildDomainAgentPrompt(input.preflight);
   let phase = saved?.phase ?? 'AGENT';
   let currentRound = saved?.round ?? 1;
@@ -287,9 +295,29 @@ export async function runPublicAgentWorkflow(input: {
     currentRound = nextRound;
     await input.saveCheckpoint?.({ version: 1, phase, round: currentRound, workspace, checkpoint, candidateId,
       ...(saved?.validationOnly ? { validationOnly: true } : {}),
-      activeExperimentId, activeHypothesisId, evaluatedHypothesisId, evaluationFeedback, pendingDecision,
+      activeExperimentId, experimentIntent, activeHypothesisId, evaluatedHypothesisId, evaluationFeedback, pendingDecision,
       pendingParentHypothesisId, developmentFindings: toolset.developmentFindings(), developmentGate,
       agent: agent ? { ...agent, messages: [] } : null, validation, performance, revalidation, prompt });
+  };
+  const startExperiment = async (type: WorkflowExperimentIntent['type'], round: number): Promise<string | null> => {
+    if (!input.lifecycle || !candidateId) return activeExperimentId;
+    if (experimentIntent && (experimentIntent.schema_version !== 1 || !/^experiment:[A-Za-z0-9_-]{1,128}$/.test(experimentIntent.experiment_id) ||
+        experimentIntent.candidate_id !== candidateId || experimentIntent.type !== type || experimentIntent.round !== round ||
+        (activeExperimentId !== null && activeExperimentId !== experimentIntent.experiment_id))) {
+      throw new Error('保存的实验创建意图与当前候选或阶段不一致，请保留现场并核对。');
+    }
+    if (activeExperimentId) return activeExperimentId;
+    if (!experimentIntent) {
+      experimentIntent = { schema_version: 1, experiment_id: `experiment:${randomUUID()}`, candidate_id: candidateId, type, round };
+      // The intent is durable before the Control database creates the Experiment;
+      // execution cannot start before a second checkpoint records its ID.
+      await capture(type === 'FORMAL_EVALUATION' ? 'VALIDATION' : 'REVALIDATION');
+    }
+    const id = type === 'FORMAL_EVALUATION'
+      ? await input.lifecycle.experimentStarted({ round, candidateId, intent: experimentIntent })
+      : await input.lifecycle.revalidationStarted({ round, candidateId, intent: experimentIntent });
+    if (id !== experimentIntent.experiment_id) throw new Error('实验创建结果与固定意图不一致，请保留现场并核对。');
+    return id;
   };
   if (saved?.developmentFindings) toolset.restoreDevelopmentFindings(saved.developmentFindings);
   let evaluatedThisContinuation = saved && !['AGENT', 'CHECKPOINT'].includes(saved.phase) ? 1 : 0;
@@ -440,11 +468,12 @@ export async function runPublicAgentWorkflow(input: {
         await capture('VALIDATION');
       }
       if (phase === 'VALIDATION') {
-        activeExperimentId ??= candidateId && input.lifecycle
-          ? await input.lifecycle.experimentStarted({ round, candidateId })
-          : null;
+        activeExperimentId = await startExperiment('FORMAL_EVALUATION', round);
         await capture('VALIDATION');
         const experimentId = activeExperimentId;
+        if (activeExperimentId && saved?.phase === 'VALIDATION' && saved.activeExperimentId === activeExperimentId && !input.experimentExecution) {
+          throw new LocalExperimentUnknownError(`原实验 ${activeExperimentId} 的本地进程状态未确认，不能自动重新执行；请核对原实验。`);
+        }
         if (!input.experimentExecution && input.remote) {
           remote = await stageRemoteCandidate({
             workspace,
@@ -454,6 +483,7 @@ export async function runPublicAgentWorkflow(input: {
           });
         }
         await input.onProgress?.({ phase: 'CHECKPOINT_READY', round, workspace, checkpoint, last_event: 'candidate source checkpoint created' });
+        executionMayHaveStarted = true;
         validation = input.experimentExecution && activeExperimentId
           ? await input.experimentExecution.executeValidation({
               experimentId: activeExperimentId,
@@ -485,6 +515,8 @@ export async function runPublicAgentWorkflow(input: {
             performance: performanceResult,
           });
           activeExperimentId = null;
+          experimentIntent = null;
+          executionMayHaveStarted = false;
         };
         const feedback = (performanceResult: PerformanceGateResult | null = null) => candidateEvaluationFeedback({ validation: validation as ValidationCycleResult, candidateId, experimentId, performance: performanceResult, developmentGate });
         evaluatedHypothesisId = activeHypothesisId;
@@ -533,11 +565,13 @@ export async function runPublicAgentWorkflow(input: {
         await capture('REVALIDATION');
       }
 
-      activeExperimentId ??= candidateId && input.lifecycle
-        ? await input.lifecycle.revalidationStarted({ round, candidateId })
-        : null;
+      activeExperimentId = await startExperiment('REVALIDATION', round);
       await capture('REVALIDATION');
       const revalidationExperimentId = activeExperimentId;
+      if (activeExperimentId && saved?.phase === 'REVALIDATION' && saved.activeExperimentId === activeExperimentId && !input.experimentExecution) {
+        throw new LocalExperimentUnknownError(`原复验 ${activeExperimentId} 的本地进程状态未确认，不能自动重新执行；请核对原实验。`);
+      }
+      executionMayHaveStarted = true;
       revalidation = input.experimentExecution && activeExperimentId
         ? await input.experimentExecution.executeRevalidation({
             experimentId: activeExperimentId,
@@ -561,6 +595,8 @@ export async function runPublicAgentWorkflow(input: {
       if (input.lifecycle && candidateId && activeExperimentId) {
         await input.lifecycle.revalidationCompleted({ round, candidateId, experimentId: activeExperimentId, revalidation });
         activeExperimentId = null;
+        experimentIntent = null;
+        executionMayHaveStarted = false;
       }
       await input.onProgress?.({ phase: revalidation.passed ? 'REVALIDATION_PASSED' : 'REVALIDATION_FAILED', round, workspace, checkpoint, validation, performance, revalidation, last_event: revalidation.passed ? 'formal and independent revalidation passed' : 'revalidation failed' });
       if (revalidation.passed) return { status: 'WAITING_APPROVAL', rounds: round, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: null };
@@ -591,7 +627,7 @@ export async function runPublicAgentWorkflow(input: {
       error: null,
     };
   } catch (error) {
-    if (activeExperimentId && input.lifecycle) {
+    if (activeExperimentId && input.lifecycle && executionMayHaveStarted) {
       try {
         await input.lifecycle.experimentFailed({
           experimentId: activeExperimentId,
@@ -605,6 +641,6 @@ export async function runPublicAgentWorkflow(input: {
       }
       activeExperimentId = null;
     }
-    return { status: error instanceof RemoteExperimentUnknownError || input.signal?.reason === 'backend shutting down' ? 'INTERRUPTED' : input.signal?.aborted ? 'CANCELLED' : 'FAILED', rounds: currentRound, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: (error as Error).message };
+    return { status: error instanceof RemoteExperimentUnknownError || error instanceof LocalExperimentUnknownError || input.signal?.reason === 'backend shutting down' ? 'INTERRUPTED' : input.signal?.aborted ? 'CANCELLED' : 'FAILED', rounds: currentRound, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: (error as Error).message };
   }
 }

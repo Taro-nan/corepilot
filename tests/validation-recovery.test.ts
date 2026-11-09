@@ -13,6 +13,9 @@ import type { RpcExperimentTransitionAdapter } from '../src/core/rpc-experiment-
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
 import { loadOptimizationConfig } from '../src/config/optimization-config.js';
 import { DEFAULT_STATISTICS } from '../src/contracts/performance-statistics.js';
+import type { RemoteValidationTransport } from '../src/workspace/validation-runner.js';
+import { PiOptimizationSession } from '../src/agent/pi-optimization-session.js';
+import { createPiModels, COREPILOT_PI_PROVIDER_ID } from '../src/model/pi-provider.js';
 
 test('insufficient statistical evidence stops the workflow with its frozen candidate and no additional model turn', async () => {
   const f = await startWebFixture();
@@ -46,7 +49,7 @@ test('evaluator failure stops before another Agent turn and never counts rejecte
     const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath, repository_root: f.repo });
     let modelCalls = 0; let completed = 0;
     const result = await runPublicAgentWorkflow({ preflight, repository: f.repo, worktreeRoot: path.join(f.root, 'unused'), runId: 'recovery',
-      resumeFrom: { ...seeded.saved, phase: 'VALIDATION', pendingDecision: null, evaluationFeedback: null },
+      resumeFrom: { ...seeded.saved, phase: 'VALIDATION', activeExperimentId: seeded.experiment.experiment_id, pendingDecision: null, evaluationFeedback: null },
       maxRounds: 8, runAgent: async () => { modelCalls++; throw new Error('No candidate repair is justified by evaluator failure'); },
       lifecycle: { candidateCheckpointed: () => { throw new Error('No new Candidate'); }, experimentStarted: () => seeded.experiment.experiment_id,
         experimentCompleted: () => { completed++; }, revalidationStarted: () => { throw new Error('No revalidation on invalid correctness'); },
@@ -71,6 +74,75 @@ test('evaluator failure stops before another Agent turn and never counts rejecte
     assert.equal(completedRevalidation.evaluation!.correctness_coverage!.complete, false);
   } finally { await f.close(); }
 });
+
+for (const phase of ['VALIDATION', 'REVALIDATION'] as const) {
+  test(`unconfirmed legacy ${phase} is interrupted before any remote staging`, async () => {
+    const f = await startWebFixture();
+    try {
+      const seeded = await seedBlockedValidation(f);
+      const runtime = new OptimizationRuntime(f.store);
+      const experiment = phase === 'VALIDATION' ? seeded.experiment : runtime.startExperiment({ taskId: seeded.candidate.task_id,
+        candidateId: seeded.candidate.candidate_id, type: 'REVALIDATION', initialStatus: 'RUNNING' });
+      const before = f.store.getExperiment(experiment.experiment_id);
+      const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath, repository_root: f.repo });
+      let transportCalls = 0, failedCalls = 0;
+      const transport = { runRemote() { transportCalls++; throw new Error('unconfirmed work must not be staged'); } } as unknown as RemoteValidationTransport;
+      const result = await runPublicAgentWorkflow({ preflight, repository: f.repo, worktreeRoot: path.join(f.root, 'unused'), runId: 'recovery',
+        resumeFrom: { ...seeded.saved, phase, activeExperimentId: experiment.experiment_id, pendingDecision: null, evaluationFeedback: null },
+        remote: { transport, workspace_root: '/fixture' }, maxRounds: 8,
+        runAgent: async () => { throw new Error('model should not run'); },
+        lifecycle: { candidateCheckpointed: () => { throw new Error('candidate should not change'); },
+          experimentStarted: () => { throw new Error('experiment should not be created'); }, experimentCompleted: () => {},
+          revalidationStarted: () => { throw new Error('revalidation should not be created'); }, revalidationCompleted: () => {},
+          experimentFailed: () => { failedCalls++; } },
+      });
+      assert.equal(result.status, 'INTERRUPTED');
+      assert.match(result.error!, /进程状态未确认/);
+      assert.equal(transportCalls, 0);
+      assert.equal(failedCalls, 0, 'an unknown execution must not be marked failed');
+      assert.deepEqual(f.store.getExperiment(experiment.experiment_id), before);
+    } finally { await f.close(); }
+  });
+}
+
+for (const mismatch of ['candidate', 'task', 'type', 'intent'] as const) {
+test(`public resume refuses an active experiment with a mismatched ${mismatch}`, async () => {
+  const f = await startWebFixture();
+  try {
+    const seeded = await seedBlockedValidation(f);
+    const record = f.service.get(seeded.workflowId)!;
+    record.status = 'INTERRUPTED';
+    record.candidate_evaluation_feedback = null;
+    if (mismatch === 'type') record.revalidation_experiment_id = seeded.experiment.experiment_id;
+    f.store.saveOptimizationWorkflowJson(seeded.workflowId, JSON.stringify(record));
+    if (mismatch === 'task') {
+      const experiment = f.store.getExperiment(seeded.experiment.experiment_id)!;
+      f.store.saveExperiment({ ...experiment, task_id: 'task:other' });
+    }
+    const model = loadOptimizationConfig(f.configPath).config.model;
+    const models = createPiModels({ endpoint: model.endpoint, modelId: model.model_id, apiKey: model.api_key! });
+    const session = await PiOptimizationSession.open({ id: record.agent_session!.id, directory: record.agent_session!.directory,
+      models, model: models.getModel(COREPILOT_PI_PROVIDER_ID, model.model_id)!, systemPrompt: 'Offline corrupted checkpoint fixture.' });
+    await session.checkpoint({ ...seeded.saved, phase: mismatch === 'type' ? 'REVALIDATION' : 'VALIDATION',
+      activeExperimentId: seeded.experiment.experiment_id,
+      candidateId: mismatch === 'candidate' ? 'candidate:other' : seeded.candidate.candidate_id,
+      ...(mismatch === 'intent' ? { experimentIntent: { schema_version: 1 as const, experiment_id: seeded.experiment.experiment_id,
+        candidate_id: seeded.candidate.candidate_id, type: 'FORMAL_EVALUATION' as const, round: seeded.saved.round } } : {}),
+      pendingDecision: null, evaluationFeedback: null });
+    await session.close();
+    const before = JSON.stringify(f.store.getExperiment(seeded.experiment.experiment_id));
+    const api = new ApiClient(f.url, { token: f.token });
+    await api.resumeOptimizationWorkflow(seeded.workflowId);
+    for (let count = 0; count < 500 && f.service.activeWorkflowIds().length; count++) await delay(20);
+    const failed = f.service.get(seeded.workflowId)!;
+    assert.equal(failed.status, 'FAILED');
+    assert.match(failed.error!, /原实验.*任务、候选或阶段不一致/);
+    assert.equal(JSON.stringify(f.store.getExperiment(seeded.experiment.experiment_id)), before);
+    assert.equal(f.store.listExperiments(seeded.candidate.task_id).length, 1);
+    assert.equal(f.modelRequests.inference, 0);
+  } finally { await f.close(); }
+});
+}
 
 test('public CLI/API retries the same frozen candidate with new experiments, no model request and no stale ABANDON replay', async () => {
   const f = await startWebFixture();

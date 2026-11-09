@@ -15,6 +15,15 @@ export interface SourceScopeAuthorization {
   previous_candidate_id?: string | null;
 }
 
+/** One durable creation attempt; retry or independent revalidation has a new ID. */
+export interface WorkflowExperimentIntent {
+  schema_version: 1;
+  experiment_id: string;
+  candidate_id: string;
+  type: 'FORMAL_EVALUATION' | 'REVALIDATION';
+  round: number;
+}
+
 /** public optimize 工作流的持久化状态；不包含旧候选补丁或授权对象。 */
 export type OptimizationWorkflowStatus =
   | 'CREATED'
@@ -69,6 +78,8 @@ export interface OptimizationWorkflowRecord {
   hypothesis_id?: string;
   experiment_id?: string;
   revalidation_experiment_id?: string;
+  /** The latest creation identity, atomically linked to its Experiment. */
+  experiment_creation_intent?: WorkflowExperimentIntent;
   status: OptimizationWorkflowStatus;
   function_name: string;
   entry_file: string | null;
