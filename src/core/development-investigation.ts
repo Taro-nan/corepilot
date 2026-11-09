@@ -24,7 +24,7 @@ import type {
 } from '../contracts/runner-rpc.js';
 import type { FormalEvaluatorCommandContract, FormalWorkloadDefinition } from '../contracts/formal-evaluator.js';
 import type { ValidationCommand } from '../contracts/validation-testpack.js';
-import type { ExperimentExecutionBackend } from './experiment-execution-backend.js';
+import { isRunnerSubmissionRejected, type ExperimentExecutionBackend } from './experiment-execution-backend.js';
 import type { RemoteValidationTransport } from '../workspace/validation-runner.js';
 import { evaluatorContentSha256 } from '../evaluator/formal-evaluator.js';
 import { expandEvaluatorArguments, formalWorkloadParameters } from '../evaluator/formal-arguments.js';
@@ -32,10 +32,9 @@ import { remoteWorkspaceBuild } from '../workspace/remote-build.js';
 import type { ValidationTestPlan } from '../contracts/validation-assets.js';
 import { classifyExperimentFailure } from '../contracts/experiment-failure.js';
 import { RemoteExperimentUnknownError } from './rpc-experiment-transition-adapter.js';
-import { RunnerClientError } from '../client/runner-client.js';
 
 const PERF_EVENTS = ['cycles', 'instructions', 'branches', 'branch-misses', 'cache-references', 'cache-misses'] as const;
-const TERMINAL = new Set<ExperimentStatusResponse['status']>(['SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN']);
+const TERMINAL = new Set<ExperimentStatusResponse['status']>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
 
 export interface PreparedDevelopmentWorkspace {
   buildReady?: boolean;
@@ -60,6 +59,7 @@ export interface RunnerDevelopmentInvestigationOptions {
   inspectionSymbols?: readonly string[];
   prepareWorkspace(input: { requestId: string; tool: string; signal?: AbortSignal }): Promise<PreparedDevelopmentWorkspace>;
   pollIntervalMs?: number;
+  cancelConfirmationMs?: number;
   idFactory?: () => string;
   onPlan?: (plan: ExperimentExecutionPlan) => void | Promise<void>;
   onCompleted?: (experimentId: string) => void | Promise<void>;
@@ -86,14 +86,17 @@ export class DevelopmentExecutionError extends Error {
  */
 export class RunnerDevelopmentInvestigation {
   private readonly pollIntervalMs: number;
+  private readonly cancelConfirmationMs: number;
   private readonly idFactory: () => string;
   private readonly benchmarkCache = new Map<string, DevelopmentBenchmarkSummary>();
   private pendingExperimentId: string | null = null;
 
   constructor(private readonly options: RunnerDevelopmentInvestigationOptions) {
     this.pollIntervalMs = options.pollIntervalMs ?? 250;
+    this.cancelConfirmationMs = options.cancelConfirmationMs ?? 10_000;
     this.idFactory = options.idFactory ?? randomUUID;
     if (!Number.isInteger(this.pollIntervalMs) || this.pollIntervalMs < 1) throw new Error('development poll interval must be positive');
+    if (!Number.isInteger(this.cancelConfirmationMs) || this.cancelConfirmationMs < 1) throw new Error('cancel confirmation timeout must be positive');
     assertRelativePath(options.candidateArtifactRelativePath, 'candidate artifact');
     assertRelativePath(options.buildCwdRelative ?? '.', 'build cwd');
     assertRelativePath(options.evaluatorSetup.script, 'evaluator setup script');
@@ -351,24 +354,39 @@ export class RunnerDevelopmentInvestigation {
     const plan: ExperimentExecutionPlan = { experiment, candidate: prepared.candidate, steps, build_directory: `${prepared.candidate.workspace_path}.build` };
     this.pendingExperimentId = experimentId;
     await this.options.onPlan?.(plan);
+    if (signal?.aborted) {
+      await this.options.onCompleted?.(experimentId);
+      this.pendingExperimentId = null;
+      signal.throwIfAborted();
+    }
     try { await this.options.backend.submitExperiment(plan, signal); }
     catch (error) {
-      if (error instanceof RunnerClientError && error.status !== null && error.status !== 409) {
+      if (!signal?.aborted && isRunnerSubmissionRejected(error)) {
         this.pendingExperimentId = null;
         await this.options.onCompleted?.(experimentId);
+        throw error;
       }
-      throw error;
+      // A lost, failed or cancelled response can still have reached the
+      // Runner. Query the same id; cancellation is sent only when requested.
     }
     let cancelRequested = false;
+    let cancelDeadline = 0;
     let status: ExperimentStatusResponse;
     while (true) {
       if (signal?.aborted && signal.reason === 'backend shutting down') throw new RemoteExperimentUnknownError(experimentId, 'Control stopped observing this development experiment; reconcile it before another measurement.');
       if (signal?.aborted && !cancelRequested) {
         cancelRequested = true;
+        cancelDeadline = Date.now() + this.cancelConfirmationMs;
         await this.options.backend.cancelExperiment(experimentId).catch(() => undefined);
       }
-      status = await this.options.backend.getExperiment(experimentId);
+      try {
+        status = await this.options.backend.getExperiment(experimentId);
+      } catch (error) {
+        throw new RemoteExperimentUnknownError(experimentId, `无法核对开发实验 ${experimentId}；请检查原 Runner 后继续：${(error as Error).message}`);
+      }
+      if (status.status === 'UNKNOWN') throw new RemoteExperimentUnknownError(experimentId, `开发实验 ${experimentId} 的停止状态尚未确认。`);
       if (TERMINAL.has(status.status)) break;
+      if (cancelRequested && Date.now() >= cancelDeadline) throw new RemoteExperimentUnknownError(experimentId, `开发实验 ${experimentId} 尚未确认停止。`);
       await delay(this.pollIntervalMs);
     }
     const [commands, measurements] = await Promise.all([

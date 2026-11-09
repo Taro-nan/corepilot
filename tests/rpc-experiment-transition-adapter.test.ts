@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { RunnerClient } from '../src/client/runner-client.js';
+import { RunnerClient, RunnerClientError } from '../src/client/runner-client.js';
 import type { ValidationTestpack } from '../src/contracts/validation-testpack.js';
-import { RunnerClientExperimentExecutionBackend } from '../src/core/experiment-execution-backend.js';
+import { RunnerClientExperimentExecutionBackend, type ExperimentExecutionBackend } from '../src/core/experiment-execution-backend.js';
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
-import { RpcExperimentTransitionAdapter } from '../src/core/rpc-experiment-transition-adapter.js';
+import { RemoteExperimentCancelledError, RemoteExperimentUnknownError, RpcExperimentTransitionAdapter } from '../src/core/rpc-experiment-transition-adapter.js';
 import { sourceTreeSha256 } from '../src/core/source-identity.js';
 import { evaluatorBundleSha256, loadFormalEvaluatorBundle } from '../src/evaluator/formal-evaluator.js';
 import { assertMeasurementTrace } from '../src/application/workflow-evidence-measurements.js';
@@ -19,7 +20,7 @@ import { createFormalEvaluatorFixture } from './formal-evaluator-fixture.js';
 import { candidateEvaluationFeedback } from '../src/workspace/candidate-evaluation-feedback.js';
 import { proposeFixtureHypothesis } from './hypothesis-fixture.js';
 
-async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
+async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailure?: 'aborted' | 'aborted-400' | '500' | '409' | 'rejected' | 'http-lost') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-rpc-transition-'));
   const runnerRoot = path.join(root, 'runner');
   const localRepository = path.join(root, 'local-source');
@@ -77,7 +78,7 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
     type: 'FORMAL_EVALUATION',
     initialStatus: 'PENDING',
   });
-  const build = { executable: process.execPath, args: ['-e', "require('node:fs').readFileSync('candidate.txt')"], cwd: localRepository, environment: {}, timeout_ms: 5_000 };
+  const build = { executable: process.execPath, args: ['-e', submissionFailure === 'http-lost' ? 'setInterval(()=>{},1000)' : "require('node:fs').readFileSync('candidate.txt')"], cwd: localRepository, environment: {}, timeout_ms: 5_000 };
   const evaluator = { id: 'evaluator:test', version: '1.0.0', owner: 'test-owner', root: evaluatorRoot, sha256: evaluatorDigest };
   const testpack: ValidationTestpack = {
     schema_version: 1,
@@ -115,12 +116,65 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
       independent: { required: false, timeout_ms: 5_000, command: { executable: process.execPath, args: ['-e', 'process.exit(0)'], cwd: evaluatorRoot, environment: {}, timeout_ms: 5_000 } },
     },
   };
-  const runnerClient = new RunnerClient({ baseUrl: server.url, token });
+  const cancellation = new AbortController();
+  let submissions = 0; let cancellations = 0; let runnerMissing = false; let runnerStopped = false;
+  let proxy: http.Server | undefined;
+  let runnerUrl = server.url;
+  if (submissionFailure === 'http-lost') {
+    proxy = http.createServer((request, response) => {
+      void (async () => {
+        const url = request.url ?? '/';
+        if (request.method === 'POST' && url === '/experiments') {
+          submissions++;
+          const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
+          const accepted = await fetch(server.url + url, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: Buffer.concat(chunks) });
+          if (accepted.status !== 202) throw new Error(`Runner did not accept fixture experiment: ${accepted.status} ${await accepted.text()}`);
+          // The real Runner has persisted the experiment. Lose only its response.
+          cancellation.abort('cancelled by user');
+          return;
+        }
+        if (request.method === 'POST' && url.endsWith('/cancel')) {
+          cancellations++; response.writeHead(503, { 'content-type': 'application/json' }); response.end('{"error":{"code":"UNAVAILABLE"}}'); return;
+        }
+        if (runnerMissing && request.method === 'GET' && url.startsWith('/experiments/')) {
+          response.writeHead(404, { 'content-type': 'application/json' }); response.end('{"error":{"code":"EXPERIMENT_NOT_FOUND"}}'); return;
+        }
+        const result = await fetch(server.url + url, { headers: { authorization: `Bearer ${token}` } });
+        response.writeHead(result.status, { 'content-type': 'application/json' }); response.end(await result.text());
+      })().catch(error => { if (!response.destroyed) { response.writeHead(500); response.end(String(error)); } });
+    });
+    await new Promise<void>(resolve => proxy!.listen(0, '127.0.0.1', resolve));
+    const address = proxy.address(); assert.ok(address && typeof address === 'object'); runnerUrl = `http://127.0.0.1:${address.port}`;
+  }
+  const runnerClient = new RunnerClient({ baseUrl: runnerUrl, token });
+  const realBackend = new RunnerClientExperimentExecutionBackend(runnerClient);
+  const backend: ExperimentExecutionBackend = submissionFailure && submissionFailure !== 'http-lost' ? {
+    mode: 'rpc', preflight: signal => realBackend.preflight(signal),
+    submitExperiment: async () => {
+      submissions++;
+      if (submissionFailure === 'aborted' || submissionFailure === 'aborted-400') cancellation.abort('cancelled by user');
+      if (submissionFailure === '500') throw new RunnerClientError(500, 'INTERNAL', 'response after submission failed');
+      if (submissionFailure === '409') throw new RunnerClientError(409, 'EXPERIMENT_ALREADY_EXISTS', 'same id exists');
+      if (submissionFailure === 'rejected' || submissionFailure === 'aborted-400') throw new RunnerClientError(400, 'INVALID_EXPERIMENT_PLAN', 'rejected plan');
+      throw new RunnerClientError(null, 'REQUEST_ABORTED', 'response lost');
+    },
+    cancelExperiment: async id => { cancellations++; return { experiment_id: id, status: 'RUNNING', cancel_requested: true }; },
+    reconcileExperiment: async id => {
+      if (runnerMissing) throw new RunnerClientError(404, 'EXPERIMENT_NOT_FOUND', 'not found');
+      return { ...runtime.getExperiment(id), status: runnerStopped ? 'CANCELLED' : cancellation.signal.aborted ? 'RUNNING' : 'UNKNOWN',
+        validity: runnerStopped ? 'INVALID' : 'UNKNOWN', failure_category: runnerStopped ? 'CANCELLED' : 'UNKNOWN',
+        ended_at: runnerStopped ? new Date().toISOString() : null, current_step: 'BUILD', cancel_requested: cancellation.signal.aborted, failure: null };
+    },
+    getExperiment: id => realBackend.getExperiment(id),
+    getCommandExecutions: id => runnerStopped ? Promise.resolve({ experiment_id: id, command_executions: [] }) : realBackend.getCommandExecutions(id),
+    getMeasurements: id => runnerStopped ? Promise.resolve({ experiment_id: id, measurements: [] }) : realBackend.getMeasurements(id),
+  } : realBackend;
   let baselineStageCalls = 0;
   const adapter = new RpcExperimentTransitionAdapter({
-    backend: new RunnerClientExperimentExecutionBackend(runnerClient),
+    backend,
     runtime,
     pollIntervalMs: 10,
+    cancelConfirmationMs: 30,
     stageCandidate: async () => ({ candidateId: candidate.candidate_id, workspacePath: stagedCandidate, sourceSha256: candidateDigest }),
     stageEvaluator: async () => ({ evaluatorId: evaluator.id, version: evaluator.version, workspacePath: evaluatorRoot, digest: evaluatorDigest }),
     stageBaseline: async ({ baseline }) => {
@@ -130,6 +184,34 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
   });
 
   try {
+    if (submissionFailure) {
+      const input = { experimentId: experiment.experiment_id, workspace, build, testpack, sourceRoot: localRepository, includePerformance: true };
+      await assert.rejects(adapter.executeValidation({ ...input, signal: cancellation.signal }), submissionFailure === 'rejected' ? RunnerClientError : RemoteExperimentUnknownError);
+      assert.equal(submissions, 1);
+      if (submissionFailure === 'rejected') return;
+      assert.equal(cancellations, cancellation.signal.aborted ? 1 : 0, 'cancellation is sent only when requested');
+      if (submissionFailure === 'http-lost') {
+        const original = await new RunnerClient({ baseUrl: server.url, token }).getExperiment(experiment.experiment_id);
+        assert.ok(['PENDING', 'RUNNING'].includes(original.status), 'the real Runner accepted the original experiment and did not confirm cancellation');
+      }
+      const unknown = runtime.getExperiment(experiment.experiment_id);
+      assert.equal(unknown.status, 'UNKNOWN');
+      assert.equal(unknown.validity, 'UNKNOWN');
+      assert.equal(unknown.ended_at, null);
+      assert.ok(unknown.declared_context.runner_execution_plan, 'the original plan must remain available for reconciliation');
+      runnerMissing = true;
+      await assert.rejects(adapter.executeValidation({ ...input, resume: true }), RemoteExperimentUnknownError);
+      assert.equal(submissions, 1, 'a Runner 404 cannot prove that it is safe to resubmit');
+      assert.equal(runtime.getExperiment(experiment.experiment_id).status, 'UNKNOWN');
+      assert.equal(store.listExperiments(task.task_id).length, 1);
+      if (submissionFailure === 'aborted') {
+        runnerMissing = false; runnerStopped = true;
+        await assert.rejects(adapter.executeValidation({ ...input, resume: true }), RemoteExperimentCancelledError);
+        assert.equal(runtime.getExperiment(experiment.experiment_id).status, 'CANCELLED');
+        assert.equal(submissions, 1, 'confirmed cancellation is reconciled without another submission');
+      }
+      return;
+    }
     const result = await adapter.executeValidation({
       experimentId: experiment.experiment_id,
       workspace,
@@ -199,6 +281,7 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
     assert.deepEqual(store.listMeasurements(experiment.experiment_id), measurements);
     assert.equal(store.listExperiments(task.task_id).length, 1, 'reconnecting observes the original execution');
   } finally {
+    if (proxy) { proxy.closeAllConnections(); await new Promise<void>(resolve => proxy!.close(() => resolve())); }
     await server.close();
     store.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -208,3 +291,10 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
 test('SAXPY domain reuses Optimization Runtime, Candidate, RPC Runner, Experiment, and Evidence paths', () => verifyRpcTransition());
 
 test('RPC failure preserves Candidate identity and raw correctness FAIL without reported threads', () => verifyRpcTransition('CORRECTNESS'));
+
+test('cancel during submission preserves an unconfirmed experiment and never replays it after a 404', () => verifyRpcTransition(undefined, 'aborted'));
+test('cancel racing with a rejection still checks the original experiment', () => verifyRpcTransition(undefined, 'aborted-400'));
+test('a server error after submission checks the original experiment', () => verifyRpcTransition(undefined, '500'));
+test('a duplicate experiment response checks the original experiment', () => verifyRpcTransition(undefined, '409'));
+test('an explicitly rejected plan retains its diagnostic', () => verifyRpcTransition(undefined, 'rejected'));
+test('a real Runner keeps the original job when an accepted POST response is lost during cancellation', () => verifyRpcTransition(undefined, 'http-lost'));

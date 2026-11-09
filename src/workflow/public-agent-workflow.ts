@@ -20,7 +20,7 @@ import {
 } from '../workspace/validation-runner.js';
 import type { ValidationCommand } from '../contracts/validation-testpack.js';
 import type { PublicOptimizationPreflight } from './public-optimization.js';
-import { RemoteExperimentUnknownError, type RpcExperimentTransitionAdapter } from '../core/rpc-experiment-transition-adapter.js';
+import { RemoteExperimentCancelledError, RemoteExperimentUnknownError, type RpcExperimentTransitionAdapter } from '../core/rpc-experiment-transition-adapter.js';
 import type { DevelopmentFindings, DevelopmentGateResult } from '../contracts/development-investigation.js';
 import type { CandidateEvaluationDecision, CandidateEvaluationFeedback } from '../contracts/candidate-evaluation-feedback.js';
 import { candidateEvaluationFeedback } from '../workspace/candidate-evaluation-feedback.js';
@@ -632,7 +632,7 @@ export async function runPublicAgentWorkflow(input: {
         await input.lifecycle.experimentFailed({
           experimentId: activeExperimentId,
           error: (error as Error).message,
-          cancelled: input.signal?.aborted === true,
+          cancelled: error instanceof RemoteExperimentCancelledError || input.signal?.aborted === true,
           remoteStateUnknown: error instanceof RemoteExperimentUnknownError,
         });
       } catch {
@@ -641,6 +641,6 @@ export async function runPublicAgentWorkflow(input: {
       }
       activeExperimentId = null;
     }
-    return { status: error instanceof RemoteExperimentUnknownError || error instanceof LocalExperimentUnknownError || input.signal?.reason === 'backend shutting down' ? 'INTERRUPTED' : input.signal?.aborted ? 'CANCELLED' : 'FAILED', rounds: currentRound, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: (error as Error).message };
+    return { status: error instanceof RemoteExperimentUnknownError || error instanceof LocalExperimentUnknownError || input.signal?.reason === 'backend shutting down' ? 'INTERRUPTED' : error instanceof RemoteExperimentCancelledError || input.signal?.aborted ? 'CANCELLED' : 'FAILED', rounds: currentRound, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: (error as Error).message };
   }
 }

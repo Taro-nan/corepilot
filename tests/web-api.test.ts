@@ -57,9 +57,21 @@ test('browser session and CLI Bearer share projects, config, workflow IDs, repor
     assert.equal(JSON.parse(status.stdout).execution_attached, false);
     const watch = await runFixtureCli(f.url, f.token, ['workflow', 'watch', id, '--timeout', '1', '--interval', '0.1']);
     assert.equal(watch.code, 1); assert.match(watch.stdout + watch.stderr, /未接管/);
-    const cancellation = await (await browser(`/v1/workflows/${encodeURIComponent(id)}/cancel`, 'POST', {})).json();
-    assert.equal(cancellation.ok, false, 'a detached/non-executing task cannot claim confirmed cancellation');
+    const cancellation = await browser(`/v1/workflows/${encodeURIComponent(id)}/cancel`, 'POST', {});
+    assert.equal(cancellation.status, 409, 'a detached/non-executing task cannot claim cancellation was accepted');
+    assert.equal((await cancellation.json()).error.code, 'WORKFLOW_NOT_ACTIVE');
     assert.equal((await api.listOptimizationWorkflows()).workflows[0].status, 'CREATED');
+    const controllers = (f.service as unknown as { controllers: Map<string, AbortController> }).controllers;
+    const pendingCancel = new AbortController(); controllers.set(id, pendingCancel);
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const requested = await browser(`/v1/workflows/${encodeURIComponent(id)}/cancel`, 'POST', {});
+        assert.equal(requested.status, 202);
+        assert.equal((await requested.json()).status, 'CANCEL_REQUESTED');
+      }
+      assert.equal(pendingCancel.signal.aborted, true);
+      assert.equal(f.service.get(id)?.status, 'CREATED', 'a request alone does not establish a terminal outcome');
+    } finally { controllers.delete(id); }
     const second = await runFixtureCli(f.url, f.token, ['optimize', '--project', project.project_id, '--performance']);
     assert.equal(second.code, 0, second.stderr); const secondId = second.stdout.match(/workflow:[\w-]+/)![0];
     assert.equal((await (await browser(`/v1/workflows/${encodeURIComponent(secondId)}`)).json()).workflow.config_path, f.configPath);

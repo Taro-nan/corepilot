@@ -76,14 +76,14 @@ async function fixture(readTurns: number, maxCandidates?: number, holdFirst = fa
   const makeService = () => new OptimizationWorkflowService({ store, publicExecution: true, worktreeRoot: path.join(root, 'worktrees'), ...(maxCandidates ? { publicMaxRounds: maxCandidates } : {}),
     transportFactory: () => ({ transport_type: 'mock', runRemote: () => { throw new Error('No SSH in local integration fixture'); } }) });
   service = makeService();
-  let server: http.Server; let api: ApiClient;
+  let server: http.Server; let api: ApiClient; let url: string;
   async function listen() {
     server = createHttpServer(host, { host: '127.0.0.1', port: 0, workflowService: service });
     await new Promise<void>(resolve => server.once('listening', resolve));
-    const address = server.address(); assert.ok(address && typeof address === 'object'); api = new ApiClient(`http://127.0.0.1:${address.port}`);
+    const address = server.address(); assert.ok(address && typeof address === 'object'); url = `http://127.0.0.1:${address.port}`; api = new ApiClient(url);
   }
   await listen();
-  return { root, configPath, contexts, git, original, store, get api() { return api; }, get service() { return service; },
+  return { root, configPath, contexts, git, original, store, get api() { return api; }, get url() { return url; }, get service() { return service; },
     get held() { return held; }, release() { hold = false; },
     async start() { const result = await api.submitOptimizationWorkflow({ config_path: configPath, function_name: 'kernel', entry_file: 'kernel.c', repository_root: repo }) as { workflow_id: string }; workflowId = result.workflow_id; return workflowId; },
     async wait(status: string) {
@@ -354,7 +354,9 @@ test('cancelling a verified task confirms the same terminal state in the workflo
     const id = await f.start();
     for (let i = 0; i < 200 && !f.held; i++) await delay(20);
     assert.equal(f.held, true);
-    await f.api.cancelOptimizationWorkflow(id);
+    const response = await fetch(`${f.url}/v1/workflows/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    assert.equal(response.status, 202);
+    assert.equal((await response.json() as { status: string }).status, 'CANCEL_REQUESTED');
     const record = await f.wait('CANCELLED');
     assert.equal(f.store.getOptimizationTask(record.optimization_task_id!)?.status, 'CANCELLED');
     assert.equal(f.store.listExperiments(record.optimization_task_id!).length, 0);

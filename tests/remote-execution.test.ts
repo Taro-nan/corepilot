@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { remoteWorkspaceBuild } from '../src/workspace/remote-build.js';
 import { commandBuild } from '../src/config/build-command.js';
 import { RunnerDevelopmentInvestigation, DevelopmentExecutionError } from '../src/core/development-investigation.js';
+import { RemoteExperimentUnknownError } from '../src/core/rpc-experiment-transition-adapter.js';
 import type { ExperimentExecutionBackend } from '../src/core/experiment-execution-backend.js';
 import type { ExperimentExecutionPlan, ExperimentStatusResponse } from '../src/contracts/runner-rpc.js';
 import type { ValidationTestPlan } from '../src/contracts/validation-assets.js';
@@ -71,6 +72,32 @@ test('development benchmarks use the staged baseline, relocated candidate and sa
   const repeated = submitted as unknown as ExperimentExecutionPlan;
   assert.notEqual(repeated.experiment.experiment_id, plan.experiment.experiment_id, 'every measurement has a fresh Experiment');
   assert.deepEqual(repeated.steps.map(step => step.step), ['PERFORMANCE'], 'successful build and evaluator are reused without reusing measurement samples');
+});
+
+test('a development experiment with unknown stop keeps its plan and blocks another submission', async () => {
+  let saved: ExperimentExecutionPlan | null = null; let submissions = 0; let cancellations = 0;
+  const abort = new AbortController();
+  const backend = {
+    mode: 'rpc',
+    async submitExperiment() { submissions++; abort.abort('cancelled by user'); return { status: 'PENDING' }; },
+    async cancelExperiment() { cancellations++; return { status: 'RUNNING' }; },
+    async getExperiment(id: string) { return { experiment_id: id, status: 'UNKNOWN' }; },
+    async getCommandExecutions() { throw new Error('unknown state must not clear the pending plan'); },
+    async getMeasurements() { throw new Error('unknown state must not clear the pending plan'); },
+  } as unknown as ExperimentExecutionBackend;
+  const investigation = new RunnerDevelopmentInvestigation({ backend, taskId: 'task', buildCommand: build,
+    candidateArtifactRelativePath: 'build/libkernel.so', baseline: { id: 'reference', details: { path: '/runner/baseline.so' } },
+    resources: { cpuSet: '0', numaNode: 0 }, workloads: [{ workload_id: 'small', parameters: {}, threads: 1, weight: 1, critical: false }],
+    evaluatorSetup: { executable: 'sh', script: 'scripts/build-evaluator.sh' },
+    performanceCommand: { executable: 'sh', script: 'scripts/run-performance.sh', arguments: [], measurement_prefix: 'COREPILOT_MEASUREMENT' },
+    idFactory: () => 'unknown', onPlan: plan => { saved = plan; }, onCompleted: () => { saved = null; },
+    async prepareWorkspace() { return { candidate: { candidate_id: 'candidate', commit: 'commit', tree: 'tree', source_sha256: 'a'.repeat(64),
+      workspace_path: '/runner/development/source' }, assetsRoot: '/runner/development/assets' }; },
+  });
+  await assert.rejects(investigation.runDevBenchmark({ workloadId: 'small', samples: 1 }, abort.signal), RemoteExperimentUnknownError);
+  assert.equal(cancellations, 1); assert.equal(submissions, 1); assert.ok(saved);
+  await assert.rejects(investigation.runDevBenchmark({ workloadId: 'small', samples: 1 }), RemoteExperimentUnknownError);
+  assert.equal(submissions, 1);
 });
 
 test('public Package optimization stages the Control baseline before starting target investigation', async () => {

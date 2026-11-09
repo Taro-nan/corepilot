@@ -17,7 +17,7 @@ import {
   type RevalidationCycleResult,
   type ValidationCycleResult,
 } from '../workspace/validation-runner.js';
-import type { ExperimentExecutionBackend } from './experiment-execution-backend.js';
+import { isRunnerSubmissionRejected, type ExperimentExecutionBackend } from './experiment-execution-backend.js';
 import { OptimizationRuntime } from './optimization-runtime.js';
 import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
 import { createFormalEvaluatorSteps } from '../evaluator/formal-plan.js';
@@ -89,12 +89,11 @@ export class RemoteExperimentUnknownError extends Error {
   }
 }
 
-export class RemoteExperimentNotFoundError extends Error {
-  constructor(readonly experimentId: string, submissionError?: string) {
-    super(submissionError
-      ? `remote experiment '${experimentId}' was not found after submission failed: ${submissionError}`
-      : `remote experiment '${experimentId}' was not found after submission`);
-    this.name = 'RemoteExperimentNotFoundError';
+/** The Runner has confirmed cancellation of this exact experiment. */
+export class RemoteExperimentCancelledError extends Error {
+  constructor(readonly experimentId: string) {
+    super(`Runner confirmed cancellation of experiment ${experimentId}`);
+    this.name = 'RemoteExperimentCancelledError';
   }
 }
 
@@ -151,10 +150,10 @@ export class RpcExperimentTransitionAdapter {
       allowTargetValidatedDigest: this.options.allowTargetValidatedDigest,
     });
     const terminal = await this.submitAndWait(plan, input.signal);
-    const facts = await this.synchronizeFacts(experiment.experiment_id);
     if (terminal.status === 'UNKNOWN') throw new RemoteExperimentUnknownError(experiment.experiment_id, remoteFailureMessage(terminal));
-    if (terminal.status === 'CANCELLED') throw abortError('runner confirmed experiment cancellation');
-    if (facts.commands.length === 0) throw new Error(remoteFailureMessage(terminal));
+    const facts = await this.synchronizeTerminalFacts(experiment.experiment_id);
+    if (terminal.status === 'CANCELLED') throw new RemoteExperimentCancelledError(experiment.experiment_id);
+    if (facts.commands.length === 0) throw new RemoteExperimentUnknownError(experiment.experiment_id, `原实验已结束，但没有可核对的命令记录：${remoteFailureMessage(terminal)}`);
     const validation = validationCycleFromCommandExecutions({
       testpack: input.testpack,
       commands: facts.commands,
@@ -194,10 +193,10 @@ export class RpcExperimentTransitionAdapter {
       includePerformance: true,
     });
     const terminal = await this.submitAndWait(mapped, input.signal);
-    const facts = await this.synchronizeFacts(experiment.experiment_id);
     if (terminal.status === 'UNKNOWN') throw new RemoteExperimentUnknownError(experiment.experiment_id, remoteFailureMessage(terminal));
-    if (terminal.status === 'CANCELLED') throw abortError('runner confirmed experiment cancellation');
-    if (facts.commands.length === 0) throw new Error(remoteFailureMessage(terminal));
+    const facts = await this.synchronizeTerminalFacts(experiment.experiment_id);
+    if (terminal.status === 'CANCELLED') throw new RemoteExperimentCancelledError(experiment.experiment_id);
+    if (facts.commands.length === 0) throw new RemoteExperimentUnknownError(experiment.experiment_id, `原实验已结束，但没有可核对的命令记录：${remoteFailureMessage(terminal)}`);
     const validation = validationCycleFromCommandExecutions({
       testpack: input.testpack,
       commands: facts.commands,
@@ -214,12 +213,10 @@ export class RpcExperimentTransitionAdapter {
     try {
       status = await this.options.backend.reconcileExperiment(experimentId, signal);
     } catch (error) {
-      if (isNotFound(error)) {
-        this.options.runtime.markRemoteExperimentNotFound(experimentId);
-        throw new RemoteExperimentNotFoundError(experimentId);
-      }
       this.options.runtime.markRemoteStateUnknown(experimentId, (error as Error).message);
-      throw error;
+      throw new RemoteExperimentUnknownError(experimentId, isNotFound(error)
+        ? 'Runner 未找到原实验；无法确认作业是否曾执行，请核对原 Runner 和实验 ID。'
+        : `无法核对原实验：${(error as Error).message}`);
     }
     this.options.runtime.synchronizeRemoteExperiment(status);
     if (CONFIRMED_TERMINAL.has(status.status) || status.status === 'UNKNOWN') await this.synchronizeFacts(experimentId, signal);
@@ -235,21 +232,17 @@ export class RpcExperimentTransitionAdapter {
   private async resumeValidation(experimentId: string, testpack: ValidationTestpack, includePerformance: boolean, signal?: AbortSignal): Promise<ValidationCycleResult> {
     const experiment = this.options.runtime.getExperiment(experimentId);
     const saved = experiment.declared_context.runner_execution_plan as Omit<ExperimentExecutionPlan, 'experiment'> | undefined;
-    if (!saved) throw new RemoteExperimentUnknownError(experimentId, 'Saved Runner execution plan is missing; remote work was not restarted.');
-    let terminal: ExperimentStatusResponse;
-    try {
-      await this.options.backend.reconcileExperiment(experimentId, signal);
-      terminal = await this.waitForTerminal(experimentId, signal);
-    } catch (error) {
-      if (!isNotFound(error) || experiment.ended_at) throw error;
-      // The original submission never arrived. Use its original ID and staged
-      // files; an existing or completed remote execution is never resubmitted.
-      const { runner_execution_plan: _saved, ...declared_context } = experiment.declared_context;
-      terminal = await this.submitAndWait({ ...saved, experiment: { ...experiment, status: 'PENDING', declared_context } }, signal);
+    if (!saved) {
+      this.options.runtime.markRemoteStateUnknown(experimentId, 'Saved Runner execution plan is missing; remote work was not restarted.');
+      throw new RemoteExperimentUnknownError(experimentId, 'Saved Runner execution plan is missing; remote work was not restarted.');
     }
-    const facts = await this.synchronizeFacts(experimentId);
+    // A 404 does not prove that an earlier submission never reached a Runner:
+    // the request can still be in flight, or the Runner store can have changed.
+    // Never automatically resubmit a historical experiment from a checkpoint.
+    const terminal = await this.waitForTerminal(experimentId, signal);
     if (terminal.status === 'UNKNOWN') throw new RemoteExperimentUnknownError(experimentId, remoteFailureMessage(terminal));
-    if (signal?.aborted) throw abortError('control observation interrupted');
+    const facts = await this.synchronizeTerminalFacts(experimentId);
+    if (terminal.status === 'CANCELLED') throw new RemoteExperimentCancelledError(experimentId);
     if (!facts.commands.length) throw new RemoteExperimentUnknownError(experimentId, remoteFailureMessage(terminal));
     const validation = validationCycleFromCommandExecutions({ testpack, commands: facts.commands, includePerformance, steps: saved.steps });
     return withRunnerValidationStatus(validation, terminal);
@@ -324,23 +317,17 @@ export class RpcExperimentTransitionAdapter {
       const submitted = await this.options.backend.submitExperiment(plan, signal);
       if (submitted.experiment_id !== plan.experiment.experiment_id) throw new Error('runner acknowledged a different experiment identity');
     } catch (error) {
-      if (signal?.aborted) throw error;
-      // A concrete HTTP response means the Runner deterministically rejected
-      // the request. Reconciliation is only appropriate when acknowledgement
-      // may have been lost (timeout/connection failure); otherwise a follow-up
-      // 404 would hide the original plan/auth/payload error.
-      if (error instanceof RunnerClientError && error.status !== null) throw error;
+      // Only protocol errors emitted before persistence prove rejection. A
+      // 409, 5xx or interrupted request may refer to already accepted work.
+      if (!signal?.aborted && isRunnerSubmissionRejected(error)) throw error;
       // Submission acknowledgement can be lost after the runner durably accepts
       // the plan. Query the supplied Domain id; never submit a replacement.
       try {
         return await this.waitForTerminal(plan.experiment.experiment_id, signal);
       } catch (reconcileError) {
-        if (isNotFound(reconcileError)) {
-          this.options.runtime.markRemoteExperimentNotFound(plan.experiment.experiment_id);
-          throw new RemoteExperimentNotFoundError(plan.experiment.experiment_id, (error as Error).message);
-        }
         this.options.runtime.markRemoteStateUnknown(plan.experiment.experiment_id, (reconcileError as Error).message);
-        throw reconcileError;
+        if (reconcileError instanceof RemoteExperimentUnknownError) throw reconcileError;
+        throw new RemoteExperimentUnknownError(plan.experiment.experiment_id, `提交结果未确认；请核对原实验：${(reconcileError as Error).message}`);
       }
     }
     return this.waitForTerminal(plan.experiment.experiment_id, signal);
@@ -364,20 +351,40 @@ export class RpcExperimentTransitionAdapter {
         }
       }
 
+      let status: ExperimentStatusResponse | undefined;
       try {
-        const status = await this.options.backend.reconcileExperiment(experimentId);
-        this.options.runtime.synchronizeRemoteExperiment(status);
+        status = await this.options.backend.reconcileExperiment(experimentId);
+      } catch (error) {
+        if (isNotFound(error)) {
+          this.options.runtime.markRemoteStateUnknown(experimentId, 'Runner did not find the original experiment; its execution cannot be ruled out.');
+          throw new RemoteExperimentUnknownError(experimentId, 'Runner 未找到原实验；无法确认作业是否曾执行，请核对原 Runner 和实验 ID。');
+        }
+        this.options.runtime.markRemoteStateUnknown(experimentId, (error as Error).message);
+        if (!cancelRequested) throw new RemoteExperimentUnknownError(experimentId, `无法核对原实验，请恢复连接后继续：${(error as Error).message}`);
+      }
+      if (status) {
+        try { this.options.runtime.synchronizeRemoteExperiment(status); }
+        catch (error) {
+          this.options.runtime.markRemoteStateUnknown(experimentId, (error as Error).message);
+          throw new RemoteExperimentUnknownError(experimentId, `Runner 返回的实验身份与原记录不一致：${(error as Error).message}`);
+        }
         this.options.onStatus?.(status);
         if (CONFIRMED_TERMINAL.has(status.status) || status.status === 'UNKNOWN') return status;
-      } catch (error) {
-        if (isNotFound(error)) throw error;
-        this.options.runtime.markRemoteStateUnknown(experimentId, (error as Error).message);
       }
 
       if (cancelRequested && Date.now() >= cancelDeadline) {
+        this.options.runtime.markRemoteStateUnknown(experimentId, 'Runner did not confirm cancellation before the reconciliation deadline.');
         throw new RemoteExperimentUnknownError(experimentId, 'runner did not confirm cancellation before the reconciliation deadline');
       }
       await delay(this.pollIntervalMs);
+    }
+  }
+
+  private async synchronizeTerminalFacts(experimentId: string) {
+    try {
+      return await this.synchronizeFacts(experimentId);
+    } catch (error) {
+      throw new RemoteExperimentUnknownError(experimentId, `实验终态已记录，但无法同步原始结果；请恢复连接并核对原实验：${(error as Error).message}`);
     }
   }
 
@@ -513,12 +520,6 @@ function isNotFound(error: unknown): boolean {
 
 function remoteFailureMessage(status: ExperimentStatusResponse): string {
   return status.failure?.message ?? `remote experiment ended with status ${status.status}`;
-}
-
-function abortError(message: string): Error {
-  const error = new Error(message);
-  error.name = 'AbortError';
-  return error;
 }
 
 function delay(milliseconds: number): Promise<void> {

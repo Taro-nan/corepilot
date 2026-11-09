@@ -30,7 +30,7 @@ import { packageBaselineBinding } from '../library-package/task-definition.js';
 import type { TargetConfig } from '../config/target-config.js';
 import { finishWorkflowExecution, initialOptimizationWorkflowRecord, SqliteOptimizationWorkflowStore } from './optimization-workflow.js';
 import { OptimizationRuntime } from '../core/optimization-runtime.js';
-import { RunnerClient, RunnerClientError } from '../client/runner-client.js';
+import { RunnerClient } from '../client/runner-client.js';
 import type { ExperimentExecutionPlan } from '../contracts/runner-rpc.js';
 import { RunnerClientExperimentExecutionBackend } from '../core/experiment-execution-backend.js';
 import { RpcExperimentTransitionAdapter, RemoteExperimentUnknownError } from '../core/rpc-experiment-transition-adapter.js';
@@ -452,11 +452,6 @@ export class OptimizationWorkflowService {
           const id = pendingDevelopment.experiment.experiment_id;
           update({ progress: { phase: 'RECONCILING_DEVELOPMENT', last_event: `正在核对已有开发实验 ${id}` } });
           try {
-            try { await backend.getExperiment(id, signal); }
-            catch (error) {
-              if (!(error instanceof RunnerClientError) || error.status !== 404) throw error;
-              await backend.submitExperiment(pendingDevelopment, signal);
-            }
             while (true) {
               signal.throwIfAborted();
               const status = await backend.getExperiment(id, signal);
@@ -956,7 +951,7 @@ export class OptimizationWorkflowService {
     if (!record) return { ok: false, status: 'NOT_FOUND', message: `workflow '${workflowId}' not found` };
     if (['DELIVERABLE', 'FAILED', 'CANCELLED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'CANDIDATE_READY', 'NO_CANDIDATE'].includes(record.status)) return { ok: true, status: record.status, message: 'workflow already terminal' };
     const controller = this.controllers.get(workflowId);
-    if (!controller) return { ok: false, status: record.status, message: 'workflow is not active in this backend process' };
+    if (!controller) return { ok: false, status: record.status, message: '当前后台未接管此任务，未提交取消请求；请先核对原任务和 Runner 状态。' };
     controller.abort('cancelled by user');
     // A request is not a confirmed process fact. executePublic records the
     // terminal workflow/task state only after the selected backend responds.

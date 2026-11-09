@@ -1,4 +1,4 @@
-import { RunnerClient } from '../client/runner-client.js';
+import { RunnerClient, RunnerClientError } from '../client/runner-client.js';
 import {
   RUNNER_PROTOCOL_VERSION,
   type CancelExperimentResponse,
@@ -21,6 +21,15 @@ export interface ExperimentExecutionBackend {
   cancelExperiment(experimentId: string, signal?: AbortSignal): Promise<CancelExperimentResponse>;
   getCommandExecutions(experimentId: string, signal?: AbortSignal): Promise<ExperimentCommandsResponse>;
   getMeasurements(experimentId: string, signal?: AbortSignal): Promise<ExperimentMeasurementsResponse>;
+}
+
+/** These responses are emitted by the Runner before an experiment is stored. */
+export function isRunnerSubmissionRejected(error: unknown): boolean {
+  return error instanceof RunnerClientError && (
+    error.status === 400 && ['INVALID_JSON', 'INVALID_EXPERIMENT_PLAN'].includes(error.code)
+    || error.status === 401 && error.code === 'UNAUTHORIZED'
+    || error.status === 413 && error.code === 'PAYLOAD_TOO_LARGE'
+  );
 }
 
 /** RPC implementation. It contains no optimization workflow or fallback. */

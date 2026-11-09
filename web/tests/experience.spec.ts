@@ -3,7 +3,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 import { startWebFixture, repositoryRoot } from '../../tests/web-fixture.js';
-import { initialOptimizationWorkflowRecord } from '../../src/workflow/optimization-workflow.js';
+import { finishWorkflowExecution, initialOptimizationWorkflowRecord } from '../../src/workflow/optimization-workflow.js';
+import { OptimizationRuntime } from '../../src/core/optimization-runtime.js';
 import { seedBlockedValidation } from '../../tests/validation-recovery-fixture.js';
 import { seedApprovalFacts } from '../../tests/workflow-approval-fixture.js';
 
@@ -367,6 +368,31 @@ test('invalid experimental evidence remains distinct from correctness, approval 
   }
   expect(f.modelRequests.inference).toBe(0);
   expect(f.store.listExperiments(seeded.candidate.task_id)).toHaveLength(1);
+});
+
+test('unconfirmed cancellation remains recoverable in the API and task page', async ({ page }) => {
+  const f = fixture; const seeded = await seedBlockedValidation(f);
+  const record = f.service.get(seeded.workflowId)!;
+  const runtime = new OptimizationRuntime(f.store);
+  const experiment = runtime.startExperiment({ taskId: record.optimization_task_id!, candidateId: seeded.candidate.candidate_id, type: 'FORMAL_EVALUATION' });
+  runtime.failExperiment({ experimentId: experiment.experiment_id, error: 'Runner 未确认停止', cancelled: true, remoteStateUnknown: true });
+  const task = runtime.getTask(record.optimization_task_id!);
+  f.store.saveOptimizationTask({ ...task, status: 'RUNNING' });
+  Object.assign(record, { status: 'GENERATING', experiment_id: experiment.experiment_id, candidate_evaluation_feedback: null,
+    candidate_evaluation_decision: null, stop_reason: undefined });
+  f.store.saveOptimizationWorkflowJson(record.workflow_id, JSON.stringify(record));
+  finishWorkflowExecution(f.store, record.workflow_id, task.task_id, { status: 'INTERRUPTED', error: 'Runner 尚未确认停止，请核对原实验。',
+    progress: { phase: 'INTERRUPTED', last_event: 'Runner 尚未确认停止，请核对原实验。' } }, value => value);
+  expect(f.store.getOptimizationTask(task.task_id)?.status).toBe('INTERRUPTED');
+  const result = await fetch(`${f.url}/v1/workflows/${encodeURIComponent(record.workflow_id)}`, { headers: { authorization: `Bearer ${f.token}` } });
+  expect(result.status).toBe(200);
+  expect((await result.json() as { workflow: { status: string } }).workflow.status).toBe('INTERRUPTED');
+  await login(page);
+  await page.goto(f.url + '/#/tasks/' + encodeURIComponent(record.workflow_id));
+  await expect(page.locator('.page-heading .badge')).toContainText('已中断，可继续');
+  await expect(page.getByLabel('验证与交付状态')).toContainText('待核对');
+  await expect(page.locator('.agent-session')).toContainText('继续时会恢复工作区，并核对已有 Runner 实验');
+  await expect(page.locator('main')).not.toContainText('已取消');
 });
 
 test('an interrupted delivery can be checked in the page without merging when verification is no longer valid', async ({ page }) => {

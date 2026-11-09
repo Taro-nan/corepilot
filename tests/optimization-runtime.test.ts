@@ -7,6 +7,7 @@ import test from 'node:test';
 import type { PiAgentRuntimeResult } from '../src/agent/pi-agent-runtime.js';
 import type { ValidationTestpack } from '../src/contracts/validation-testpack.js';
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
+import { RemoteExperimentCancelledError, RemoteExperimentUnknownError, type RpcExperimentTransitionAdapter } from '../src/core/rpc-experiment-transition-adapter.js';
 import { SqliteTaskStore } from '../src/storage/sqlite-task-store.js';
 import type { PublicOptimizationPreflight } from '../src/workflow/public-optimization.js';
 import { runPublicAgentWorkflow } from '../src/workflow/public-agent-workflow.js';
@@ -70,6 +71,28 @@ function performance(): PerformanceGateResult {
     reason: 'performance thresholds satisfied',
   };
 }
+
+test('an unconfirmed remote cancellation remains unknown and cannot become a hypothesis outcome', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-unknown-cancel-'));
+  const store = new SqliteTaskStore(path.join(root, 'state.sqlite')); store.init();
+  try {
+    const runtime = new OptimizationRuntime(store);
+    const task = runtime.createTask({ workflowId: 'workflow:unknown', target: { kind: 'kernel', name: 'fixture', scope: {} },
+      sourceBaseline: { id: 'baseline' }, performanceBaseline: null, evaluator: { id: 'evaluator' }, declaredContext: {} });
+    const hypothesis = proposeFixtureHypothesis(runtime, task.task_id, 'test unknown cancellation');
+    const candidate = runtime.recordCandidate({ taskId: task.task_id, hypothesisId: hypothesis.hypothesis_id,
+      workspace: { repository: root, baseline_commit: 'base', run_id: 'run', editing: root, validation: root,
+        editing_created: true, validation_created: true, candidate_commit: 'commit', candidate_tree: 'tree' },
+      checkpoint: { commit: 'commit', tree: 'tree', source_archive_sha256: 'archive', files: [] },
+      hypothesis: 'fixture', agentIdentity: {} });
+    const experiment = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'FORMAL_EVALUATION' });
+    const saved = runtime.failExperiment({ experimentId: experiment.experiment_id, error: 'stop unconfirmed', cancelled: true, remoteStateUnknown: true });
+    assert.equal(saved.status, 'UNKNOWN'); assert.equal(saved.failure_category, 'UNKNOWN');
+    assert.equal(saved.validity, 'UNKNOWN'); assert.equal(saved.ended_at, null);
+    assert.equal(store.getExperiment(experiment.experiment_id)?.status, 'UNKNOWN');
+    assert.equal(store.listHypothesisOutcomes(task.task_id).length, 0);
+  } finally { store.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 test('persists multiple candidates, experiments, command facts, and raw samples across reopen', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-runtime-'));
@@ -273,6 +296,40 @@ test('the public optimization workflow appends candidate and experiment facts on
   assert.equal(experiments[0].evaluation?.correctness, 'FAILED');
   assert.equal(experiments[0].failure_category, 'CORRECTNESS_FAILURE');
   assert.equal(experiments[1].evaluation?.correctness, 'PASSED');
+
+  const pending = runtime.startExperiment({ taskId: task.task_id, candidateId: candidates[1].candidate_id, type: 'FORMAL_EVALUATION' });
+  const controller = new AbortController();
+  const saved = { version: 1 as const, phase: 'VALIDATION' as const, round: 2, workspace: result.workspace,
+    checkpoint: result.checkpoint, candidateId: candidates[1].candidate_id, activeExperimentId: pending.experiment_id,
+    activeHypothesisId: candidates[1].hypothesis_id, evaluatedHypothesisId: null, evaluationFeedback: null,
+    pendingDecision: null, pendingParentHypothesisId: null, developmentFindings: null, developmentGate: null,
+    agent: result.agent, validation: null, performance: null, revalidation: null, prompt: 'resume original experiment' };
+  let confirmed = false;
+  const adapter = { executeValidation: async () => {
+    if (!confirmed) { controller.abort('cancelled by user'); throw new RemoteExperimentUnknownError(pending.experiment_id, 'stop unconfirmed'); }
+    const prior = runtime.getExperiment(pending.experiment_id);
+    runtime.synchronizeRemoteExperiment({ ...prior, status: 'CANCELLED', validity: 'INVALID', failure_category: 'CANCELLED',
+      ended_at: new Date().toISOString(), current_step: null, cancel_requested: true, failure: null });
+    throw new RemoteExperimentCancelledError(pending.experiment_id);
+  } } as unknown as RpcExperimentTransitionAdapter;
+  const lifecycle = {
+    candidateCheckpointed: () => { throw new Error('must not create a candidate'); },
+    experimentStarted: () => { throw new Error('must not create another experiment'); },
+    experimentCompleted: () => { throw new Error('must not invent a result'); },
+    revalidationStarted: () => { throw new Error('must not start a revalidation'); },
+    revalidationCompleted: () => { throw new Error('must not invent a revalidation'); },
+    experimentFailed: (input: { experimentId: string; error: string; cancelled: boolean; remoteStateUnknown: boolean }) => { runtime.failExperiment(input); },
+  };
+  const resume = { preflight, repository, worktreeRoot: path.join(root, 'worktrees'), runId: 'public-loop',
+    resumeFrom: saved, experimentExecution: adapter, lifecycle, runAgent: async () => { throw new Error('must not invoke the model'); } };
+  const interrupted = await runPublicAgentWorkflow({ ...resume, signal: controller.signal });
+  assert.equal(interrupted.status, 'INTERRUPTED');
+  assert.equal(runtime.getExperiment(pending.experiment_id).status, 'UNKNOWN');
+  confirmed = true;
+  const cancelled = await runPublicAgentWorkflow(resume);
+  assert.equal(cancelled.status, 'CANCELLED');
+  assert.equal(runtime.getExperiment(pending.experiment_id).status, 'CANCELLED');
+  assert.equal(store.listExperiments(task.task_id).length, 4, 'recovery keeps the original experiment identity');
   store.close();
   fs.rmSync(root, { recursive: true, force: true });
 });

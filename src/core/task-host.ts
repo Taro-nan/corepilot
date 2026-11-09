@@ -318,7 +318,9 @@ export class TaskHost {
       const controller = this.activeRuns.get(job?.job_id ?? '');
       controller?.abort();
       result = { task_id: taskId, status: 'cancel_requested' };
-    } else if (task.status === TaskStatus.CANCEL_REQUESTED || task.status === TaskStatus.CANCELLED) {
+    } else if (task.status === TaskStatus.CANCEL_REQUESTED) {
+      result = { task_id: taskId, status: 'cancel_requested' };
+    } else if (task.status === TaskStatus.CANCELLED) {
       result = { task_id: taskId, status: 'already_cancelled' };
     } else {
       throw new ApiError(409, 'INVALID_STATE', `cannot cancel task in status ${task.status}`);

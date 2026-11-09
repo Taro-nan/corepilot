@@ -181,7 +181,8 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   if (method === 'POST' && workflowCancel) {
     const result = options.workflowService.cancel(decodeURIComponent(workflowCancel[1]));
     if (!result.ok && result.status === 'NOT_FOUND') throw new ApiError(404, 'WORKFLOW_NOT_FOUND', result.message);
-    sendJson(res, 200, result);
+    if (!result.ok) throw new ApiError(409, 'WORKFLOW_NOT_ACTIVE', result.message, { status: result.status });
+    sendJson(res, result.status === 'CANCEL_REQUESTED' ? 202 : 200, result);
     return;
   }
   const workflowEvidence = pathname.match(/^\/v1\/workflows\/([^/]+)\/evidence(?:\/(archive))?$/);

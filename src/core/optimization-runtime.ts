@@ -596,38 +596,15 @@ export class OptimizationRuntime {
     return unknown;
   }
 
-  markRemoteExperimentNotFound(experimentId: string): Experiment {
-    const experiment = this.getExperiment(experimentId);
-    if (isConfirmedTerminal(experiment.status)) return experiment;
-    const timestamp = this.timestamp();
-    const failed: Experiment = {
-      ...experiment,
-      status: 'FAILED',
-      validity: 'INVALID',
-      failure_category: 'INFRASTRUCTURE_FAILURE',
-      evaluation: {
-        build: 'NOT_EXECUTED',
-        correctness: 'NOT_EXECUTED',
-        performance: 'NOT_EXECUTED',
-        details: { error_code: 'REMOTE_EXPERIMENT_NOT_FOUND' },
-      },
-      ended_at: timestamp,
-      updated_at: timestamp,
-    };
-    this.store.saveExperiment(failed);
-    this.recordHypothesisOutcome(failed);
-    return failed;
-  }
-
   failExperiment(input: FailExperimentInput): Experiment {
     const experiment = this.requireRunningExperiment(input.experimentId);
     const timestamp = this.timestamp();
-    const status = input.cancelled ? 'CANCELLED' : input.remoteStateUnknown ? 'UNKNOWN' : 'FAILED';
+    const status = input.remoteStateUnknown ? 'UNKNOWN' : input.cancelled ? 'CANCELLED' : 'FAILED';
     const failed: Experiment = {
       ...experiment,
       status,
       validity: input.remoteStateUnknown ? 'UNKNOWN' : 'INVALID',
-      failure_category: input.cancelled ? 'CANCELLED' : input.remoteStateUnknown ? 'UNKNOWN' : 'INFRASTRUCTURE_FAILURE',
+      failure_category: input.remoteStateUnknown ? 'UNKNOWN' : input.cancelled ? 'CANCELLED' : 'INFRASTRUCTURE_FAILURE',
       evaluation: {
         build: 'NOT_EXECUTED',
         correctness: 'NOT_EXECUTED',
