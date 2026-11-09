@@ -5,6 +5,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { startWebFixture, repositoryRoot } from '../../tests/web-fixture.js';
 import { initialOptimizationWorkflowRecord } from '../../src/workflow/optimization-workflow.js';
 import { seedBlockedValidation } from '../../tests/validation-recovery-fixture.js';
+import { seedApprovalFacts } from '../../tests/workflow-approval-fixture.js';
 
 let fixture: Awaited<ReturnType<typeof startWebFixture>>;
 test.beforeEach(async () => { fixture = await startWebFixture(); });
@@ -425,23 +426,13 @@ test('an interrupted delivery can be checked in the page without merging when ve
 
 test('a stale review status does not offer delivery when the latest recorded verification is invalid', async ({ page }) => {
   const f = fixture;
-  const seeded = await seedBlockedValidation(f);
-  const original = f.store.getExperiment(seeded.experiment.experiment_id)!;
-  const timestamp = new Date(Date.now() + 10_000).toISOString();
-  const valid = { ...original, status: 'SUCCEEDED' as const, validity: 'VALID' as const, failure_category: null,
-    created_at: timestamp, updated_at: timestamp, ended_at: timestamp,
-    observed_context: { machine: { machine_identity_sha256: 'a'.repeat(64) }, resource_policy: { validity: 'VALID' } },
-    evaluation: { build: 'PASSED' as const, correctness: 'PASSED' as const, performance: 'NOT_EXECUTED' as const,
-      correctness_coverage: { planned: 1, executed: 1, passed: 1, failed: 0, complete: true } } };
-  f.store.createExperiment({ ...valid, experiment_id: 'experiment:z-ui-formal', type: 'FORMAL_EVALUATION' });
-  f.store.createExperiment({ ...valid, experiment_id: 'experiment:a-ui-revalidation', type: 'REVALIDATION' });
+  const seeded = await seedBlockedValidation(f, true);
+  const facts = seedApprovalFacts(f, seeded.workflowId);
   const workflow = f.service.get(seeded.workflowId)!;
-  workflow.status = 'WAITING_APPROVAL'; workflow.candidate_evaluation_feedback = null; workflow.candidate_evaluation_decision = null;
-  f.store.saveOptimizationWorkflowJson(workflow.workflow_id, JSON.stringify(workflow));
   await login(page);
   await page.goto(f.url + '/#/tasks/' + encodeURIComponent(workflow.workflow_id));
   await expect(page.getByRole('button', { name: '审阅与批准', exact: true })).toBeVisible();
-  const repeated = f.store.getExperiment('experiment:a-ui-revalidation')!;
+  const repeated = f.store.getExperiment(facts.repeated.experiment_id)!;
   f.store.createExperiment({ ...repeated, experiment_id: 'experiment:later-ui-invalid', validity: 'INVALID', failure_category: 'EVALUATOR_FAILURE' });
   await page.reload();
   await expect(page.getByText('需要先核对当前验证记录', { exact: true })).toBeVisible();
@@ -451,6 +442,20 @@ test('a stale review status does not offer delivery when the latest recorded ver
   expect(f.git('rev-parse', 'HEAD')).toBe(seeded.workspace.baseline_commit);
   expect(f.store.getCandidateApproval(seeded.candidate.candidate_id)).toBeNull();
   expect(f.store.getExperiment(repeated.experiment_id)).toEqual(repeated);
+});
+
+test('legacy point estimates remain visible without offering a new approval', async ({ page }) => {
+  const f = fixture;
+  const seeded = await seedBlockedValidation(f, true);
+  seedApprovalFacts(f, seeded.workflowId, { statisticalGate: false });
+  await login(page);
+  await page.goto(f.url + '/#/tasks/' + encodeURIComponent(seeded.workflowId));
+  const report = page.locator('.customer-report-summary');
+  await expect(report).toContainText('原实验通过旧版评价口径');
+  await expect(report).toContainText('确认新版测试方案');
+  await expect(page.getByRole('button', { name: '审阅与批准', exact: true })).toHaveCount(0);
+  expect(f.store.getCandidateApproval(seeded.candidate.candidate_id)).toBeNull();
+  expect(f.modelRequests.inference).toBe(0);
 });
 
 test('task filters survive refresh and detail navigation without surfacing raw identifiers by default', async ({ page }) => {

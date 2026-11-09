@@ -49,6 +49,17 @@ test('a legacy point estimate is preserved but cannot recommend a new approval',
   assert.equal(customerSummary(r).state, 'READY_FOR_DELIVERY', 'an existing approval keeps its historical meaning');
 });
 
+test('correctness-only verification does not imply performance approval', () => {
+  const r = report();
+  r.workflow.enable_performance = false;
+  for (const row of r.experiments) row.experiment.evaluation!.performance = 'NOT_EXECUTED';
+  const summary = customerSummary(r);
+  assert.equal(summary.verification.ready, true);
+  assert.equal(summary.state, 'BLOCKED');
+  assert.match(summary.conclusion, /未测量性能/);
+  assert.match(summary.next_step.message, /只验证了正确性/);
+});
+
 test('missing, invalid, incomplete or mismatched independent evidence cannot recommend delivery', () => {
   for (const mutate of [
     (r: OptimizationReport) => { r.experiments.pop(); },

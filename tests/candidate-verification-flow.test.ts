@@ -27,7 +27,8 @@ test('report, HTTP and CLI agree on current verification without altering histor
     const api = new ApiClient(f.url, { token: f.token });
     const before = f.git('rev-parse', 'HEAD');
     let report = await api.getOptimizationReport(record.workflow_id);
-    assert.equal(report.report.summary?.state, 'READY_FOR_REVIEW');
+    assert.equal(report.report.summary?.state, 'BLOCKED');
+    assert.match(report.report.summary!.next_step.message, /只验证了正确性/);
     assert.equal(report.report.summary?.verification.formal_experiment_id, 'experiment:z-formal');
     assert.equal(report.report.summary?.verification.revalidation_experiment_id, 'experiment:a-revalidation');
 

@@ -21,6 +21,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
   const approvedCurrent = !!approval && verification.ready && approval.candidate_commit === candidate?.source.commit
     && approval.first_formal_experiment_id === verification.formal_experiment_id && approval.revalidation_experiment_id === verification.revalidation_experiment_id;
   const analysis = gate(formal), reanalysis = gate(revalidation);
+  const correctnessOnlyApproval = !workflow.enable_performance && verification.ready && !approvedCurrent;
   const legacyApprovalEvidence = workflow.enable_performance && verification.ready && !approvedCurrent
     && (!hasCurrentApprovalStatistics(formal?.experiment) || !hasCurrentApprovalStatistics(revalidation?.experiment));
   const deliveryMatches = !!workflow.delivery && workflow.delivery.candidate_id === candidateId && workflow.delivery.tree === candidate?.source.tree;
@@ -58,7 +59,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
     : workflow.verification_mode === 'source_only' && workflow.status === 'CANDIDATE_READY' ? 'CANDIDATE_READY'
     : workflow.delivery_operation && workflow.delivery_operation.status !== 'COMPLETED' ? 'DELIVERY_PENDING'
     : verification.ready && workflow.status === 'DELIVERABLE' ? deliveryMatches ? 'DELIVERED' : 'DELIVERY_UNVERIFIED'
-      : verification.ready && workflow.status === 'WAITING_APPROVAL' ? approvedCurrent ? 'READY_FOR_DELIVERY' : legacyApprovalEvidence ? 'BLOCKED' : 'READY_FOR_REVIEW'
+      : verification.ready && workflow.status === 'WAITING_APPROVAL' ? approvedCurrent ? 'READY_FOR_DELIVERY' : legacyApprovalEvidence || correctnessOnlyApproval ? 'BLOCKED' : 'READY_FOR_REVIEW'
         : ['VALIDATION_BLOCKED', 'BUDGET_EXHAUSTED', 'INTERRUPTED'].includes(workflow.status) ? 'BLOCKED' : 'NO_VERIFIED_RESULT';
   const command = (action: string) => `corepilot workflow ${action} ${workflow.workflow_id}`;
   let next: CustomerOptimizationSummary['next_step'] = { kind: 'INSPECT', message: '查看失败阶段、原始输入和命令记录，再决定修复或新建任务。', command: command('report') };
@@ -69,6 +70,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
   else if (state === 'READY_FOR_REVIEW') next = { kind: 'REVIEW', message: approval ? '已有批准绑定其他实验，请核对历史并使用新的候选重新审阅。' : '审阅源码差异、适用范围和独立复验，准备冻结证据并作出人工批准。', command: null };
   else if (state === 'DELIVERED') next = { kind: 'REPRODUCE', message: '源码交付已记录，可从冻结提交在 Runner 的新目录重建复现。', command: command('reproduce') };
   else if (state === 'DELIVERY_UNVERIFIED') next = { kind: 'INSPECT', message: '核对原交付提交与当前候选的源码身份。历史记录已标记交付，不应再次批准或重复合并。', command: command('report') };
+  else if (correctnessOnlyApproval && workflow.status === 'WAITING_APPROVAL') next = { kind: 'INSPECT', message: '本次任务只验证了正确性，当前正式批准还需要性能实验和独立复验；原正确性结果会保留。', command: command('report') };
   else if (legacyApprovalEvidence && workflow.status === 'WAITING_APPROVAL') next = { kind: 'INSPECT', message: '原实验沿用旧版点估计或缺少有效统计区间。请确认新版测试方案，再重新执行正式实验与独立复验；原记录继续保留。', command: command('report') };
   else if (['BUDGET_EXHAUSTED', 'INTERRUPTED'].includes(workflow.status)) next = { kind: 'RESUME', message: '原会话与工作区已保留，可恢复调查；先核对已有 Runner 作业。', command: command('resume') };
   else if (workflow.status === 'VALIDATION_BLOCKED') next = { kind: 'RETRY_VALIDATION', message: (reanalysis ?? analysis)?.statistics?.verdict === 'INCONCLUSIVE'
@@ -81,6 +83,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
     : state === 'READY_FOR_DELIVERY' ? '当前候选已通过验证并记录人工批准，源码尚未交付。'
     : state === 'READY_FOR_REVIEW' ? '当前候选已通过正式实验与独立复验，可进入人工审阅。'
       : state === 'RUNNING' ? '任务仍在执行，当前报告为进度快照。'
+        : correctnessOnlyApproval && workflow.status === 'WAITING_APPROVAL' ? '正确性验证已完成；本次未测量性能，当前不能进行正式批准。'
         : legacyApprovalEvidence && workflow.status === 'WAITING_APPROVAL' ? '原实验通过旧版评价口径，但当前记录不足以支持新的正式批准。'
           : '尚无满足完整验证条件的当前交付建议；已有证据与候选均保留。',
     candidate_id: candidateId, source_commit: candidate?.source.commit ?? null, formal_experiment_id: formal?.experiment.experiment_id ?? null,

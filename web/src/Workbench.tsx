@@ -126,7 +126,8 @@ function VerifiedWorkbench({ workflow, response, page, attached, notify, refresh
     && selected.approval.revalidation_experiment_id === verification.revalidation_experiment_id
     && selected.approval.candidate_commit === selected.candidate.source.commit;
   const canReview = workflow.status === 'WAITING_APPROVAL' && !historicalCandidate && !pendingDelivery
-    && verification?.ready === true && (!selected?.approval || approvalCurrent);
+    && verification?.ready === true && (approvalCurrent ? report?.summary?.state === 'READY_FOR_DELIVERY'
+      : !selected?.approval && report?.summary?.state === 'READY_FOR_REVIEW');
   const elapsed = (() => {
     const end = ['CREATED', 'GENERATING'].includes(workflow.status) ? Date.now() : Date.parse(workflow.updated_at);
     const seconds = Math.max(0, Math.round((end - Date.parse(workflow.created_at)) / 1000));
