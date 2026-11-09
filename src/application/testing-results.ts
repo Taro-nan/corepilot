@@ -24,7 +24,7 @@ export function summarizeTestingTask(task: TestingTaskRecord, measurements: Meas
   for (const id of caseIds) {
     const matches = measurements.filter(row => row.kind === 'CORRECTNESS_CASE' && row.subject_id === id && row.role === 'EVALUATOR' && row.sample_index === null);
     if (!matches.length) missing.push(id);
-    else if (matches.length !== 1 || matches[0].validity !== 'VALID' || matches[0].unit !== null || !['PASS', 'FAIL'].includes(String(matches[0].value))) invalid.push(id);
+    else if (matches.length !== 1 || matches[0].experiment_id !== task.task_id || matches[0].validity !== 'VALID' || matches[0].unit !== null || !['PASS', 'FAIL'].includes(String(matches[0].value))) invalid.push(id);
     else {
       if (!checked(matches[0])) correctnessUnverified = true;
       if (matches[0].value === 'FAIL') failed.push(id); else passed++;
@@ -43,7 +43,7 @@ export function summarizeTestingTask(task: TestingTaskRecord, measurements: Meas
       const rows = measurements.filter(row => row.kind === 'PERFORMANCE_SAMPLE' && row.subject_id === spec.workload_id && row.role === role);
       const seen = new Set<number>(); const valid: Array<{ index: number; value: number }> = [];
       for (const row of rows) {
-        if (row.sample_index === null || row.sample_index < 0 || row.sample_index >= count || seen.has(row.sample_index)
+        if (row.experiment_id !== task.task_id || row.sample_index === null || !Number.isInteger(row.sample_index) || row.sample_index < 0 || row.sample_index >= count || seen.has(row.sample_index)
           || row.validity !== 'VALID' || row.unit !== 'seconds' || typeof row.value !== 'number' || !Number.isFinite(row.value) || row.value <= 0) bad = true;
         else { seen.add(row.sample_index); valid.push({ index: row.sample_index, value: row.value }); if (!checked(row)) unverified = true; }
       }
@@ -51,11 +51,19 @@ export function summarizeTestingTask(task: TestingTaskRecord, measurements: Meas
     };
     const baseline = samples('BASELINE'), candidate = samples('CANDIDATE');
     const complete = !bad && !unverified && baseline.length === count && candidate.length === count;
-    if (bad) { performanceInvalid = true; issues.push(`无效或重复采样：${spec.workload_id}`); }
+    let baselineMedian = complete ? median(baseline) : null;
+    let candidateMedian = complete ? median(candidate) : null;
+    let speedup = baselineMedian !== null && candidateMedian !== null ? baselineMedian / candidateMedian : null;
+    const nonRepresentable = complete && [baselineMedian, candidateMedian, speedup].some(value => value === null || !Number.isFinite(value) || value <= 0);
+    if (nonRepresentable) {
+      bad = true; baselineMedian = candidateMedian = speedup = null;
+      issues.push(`负载 ${spec.workload_id} 的样本数值超出可计算范围；请检查原始计时与单位。`);
+    }
+    if (bad) { performanceInvalid = true; if (!nonRepresentable) issues.push(`采样无效、重复或实验身份不匹配：${spec.workload_id}`); }
     if (unverified) performanceUnverified = true;
     return { workload_id: spec.workload_id, parameters: spec.parameters, threads: spec.threads, critical: spec.critical,
-      baseline_samples: baseline, candidate_samples: candidate, baseline_median: complete ? median(baseline) : null,
-      candidate_median: complete ? median(candidate) : null, speedup: complete ? median(baseline) / median(candidate) : null,
+      baseline_samples: baseline, candidate_samples: candidate, baseline_median: baselineMedian,
+      candidate_median: candidateMedian, speedup,
       interval: null, conclusion: bad ? 'INVALID' : unverified ? 'UNVERIFIED' : baseline.length || candidate.length ? 'INCONCLUSIVE' : 'NOT_MEASURED' };
   });
   if (requestedPerformance && measurements.some(row => row.kind === 'PERFORMANCE_SAMPLE' && (!specs.some(spec => spec.workload_id === row.subject_id) || !['BASELINE', 'CANDIDATE'].includes(row.role ?? '')))) {
@@ -70,26 +78,35 @@ export function summarizeTestingTask(task: TestingTaskRecord, measurements: Meas
     : !measured ? 'NOT_MEASURED' : !complete ? 'INCOMPLETE' : 'INCONCLUSIVE';
   if (complete) {
     const weights = specs.reduce((sum, spec) => sum + spec.weight, 0);
-    speedup = Math.exp(comparisons.reduce((sum, row, i) => sum + Math.log(row.speedup!) * specs[i].weight, 0) / weights);
-    const policy = task.plan.test_plan.statistics;
-    if (!policy) issues.push('测试方案未声明统计规则；仅报告中位数比值，不给出提升或退化结论。');
-    else {
-      const result = evaluateStatisticalPerformance({ performance: { statistics: policy,
-        cases: specs.map(spec => ({ case_id: spec.workload_id, parameters: spec.parameters, threads: spec.threads, critical: spec.critical, weight: spec.weight })),
-        sampling: { warmup: task.plan.test_plan.sampling.warmup_count, samples: count, interleave_seed: task.plan.test_plan.seed, bootstrap_iterations: policy.iterations },
-        thresholds: { weighted_geomean_min: 1, overall_ci_lower_min: 1, key_case_ci_lower_min: 1, confidence_level: policy.confidence_level }, key_cases: specs.filter(spec => spec.critical).map(spec => spec.workload_id) } },
-        comparisons.map(row => ({ case_id: row.workload_id, baseline_samples: row.baseline_samples, candidate_samples: row.candidate_samples,
-          sample_indices: { baseline: Array.from({ length: count }, (_, i) => i), candidate: Array.from({ length: count }, (_, i) => i) } })));
-      interval = result.statistics?.overall_interval ?? null;
-      issues.push(...(result.statistics?.issues ?? []));
-      for (const row of comparisons) {
-        const estimate = result.workloads.find(item => item.case_id === row.workload_id);
-        if (estimate?.ci_lower !== undefined && estimate.ci_upper !== undefined) row.interval = { lower: estimate.ci_lower, upper: estimate.ci_upper };
-        row.conclusion = estimate?.conclusion ?? 'INCONCLUSIVE';
+    const aggregate = Math.exp(comparisons.reduce((sum, row, i) => sum + Math.log(row.speedup!) * specs[i].weight, 0) / weights);
+    if (!Number.isFinite(aggregate) || aggregate <= 0) {
+      status = 'INVALID';
+      issues.push('综合性能数值超出可计算范围；请检查原始样本与权重。');
+      for (const row of comparisons) row.conclusion = 'INVALID';
+    } else {
+      speedup = aggregate;
+      const policy = task.plan.test_plan.statistics;
+      if (!policy) issues.push('测试方案未声明统计规则；仅报告中位数比值，不给出提升或退化结论。');
+      else {
+        const result = evaluateStatisticalPerformance({ performance: { statistics: policy,
+          cases: specs.map(spec => ({ case_id: spec.workload_id, parameters: spec.parameters, threads: spec.threads, critical: spec.critical, weight: spec.weight })),
+          sampling: { warmup: task.plan.test_plan.sampling.warmup_count, samples: count, interleave_seed: task.plan.test_plan.seed, bootstrap_iterations: policy.iterations },
+          thresholds: { weighted_geomean_min: 1, overall_ci_lower_min: 1, key_case_ci_lower_min: 1, confidence_level: policy.confidence_level }, key_cases: specs.filter(spec => spec.critical).map(spec => spec.workload_id) } },
+          comparisons.map(row => ({ case_id: row.workload_id, baseline_samples: row.baseline_samples, candidate_samples: row.candidate_samples,
+            sample_indices: { baseline: Array.from({ length: count }, (_, i) => i), candidate: Array.from({ length: count }, (_, i) => i) } })));
+        interval = result.statistics?.overall_interval ?? null;
+        issues.push(...(result.statistics?.issues ?? []));
+        const invalidStatistics = result.statistics?.verdict === 'INVALID';
+        if (invalidStatistics) speedup = null;
+        for (const row of comparisons) {
+          const estimate = result.workloads.find(item => item.case_id === row.workload_id);
+          if (estimate?.ci_lower !== undefined && estimate.ci_upper !== undefined) row.interval = { lower: estimate.ci_lower, upper: estimate.ci_upper };
+          row.conclusion = invalidStatistics ? 'INVALID' : estimate?.conclusion ?? 'INCONCLUSIVE';
+        }
+        status = invalidStatistics ? 'INVALID'
+          : comparisons.some(row => row.critical && row.conclusion === 'REGRESSED') || (interval && interval.upper < 1) ? 'REGRESSED'
+          : interval && interval.lower > 1 ? 'IMPROVED' : 'INCONCLUSIVE';
       }
-      status = result.statistics?.verdict === 'INVALID' ? 'INVALID'
-        : comparisons.some(row => row.critical && row.conclusion === 'REGRESSED') || (interval && interval.upper < 1) ? 'REGRESSED'
-        : interval && interval.lower > 1 ? 'IMPROVED' : 'INCONCLUSIVE';
     }
   }
   const provenanceIssues = correctnessUnverified || performanceUnverified

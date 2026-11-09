@@ -52,3 +52,44 @@ test('conflicting identity checks suppress conclusions even if the values themse
   (wrongSubject.domain_payload.runner_artifact_path_check as { planned_path: string }).planned_path = '/other/library.so';
   assert.equal(summarizeTestingTask({ ...task, input: { ...task.input, mode: 'correctness' } }, [wrongSubject]).correctness.status, 'UNVERIFIED');
 });
+
+test('independent testing rejects fractional indices and measurements from another experiment', () => {
+  const rows = [observation('CORRECTNESS_CASE', 'EVALUATOR', null),
+    ...Array.from({ length: 9 }, (_, index) => [observation('PERFORMANCE_SAMPLE', 'BASELINE', index), observation('PERFORMANCE_SAMPLE', 'CANDIDATE', index)]).flat()];
+  const fractional = structuredClone(rows);
+  fractional.find(row => row.role === 'CANDIDATE' && row.sample_index === 1)!.sample_index = 0.5;
+  const indexResult = summarizeTestingTask(task, fractional);
+  assert.equal(indexResult.performance.status, 'INVALID');
+  assert.equal(indexResult.performance.speedup, null);
+
+  const foreign = structuredClone(rows);
+  foreign.find(row => row.kind === 'CORRECTNESS_CASE')!.experiment_id = 'testing:another';
+  foreign.find(row => row.role === 'BASELINE')!.experiment_id = 'testing:another';
+  const identityResult = summarizeTestingTask(task, foreign);
+  assert.equal(identityResult.correctness.status, 'INVALID');
+  assert.equal(identityResult.performance.status, 'INVALID');
+  assert.equal(identityResult.performance.speedup, null);
+});
+
+test('independent testing does not present non-representable numeric results with or without a statistical policy', () => {
+  const count = 12;
+  const configured = { ...task, input: { ...task.input, mode: 'performance' as const }, plan: { ...task.plan,
+    test_plan: { ...task.plan.test_plan, sampling: { ...task.plan.test_plan.sampling, sample_count: count } } } };
+  const rows = Array.from({ length: count }, (_, index) => (['BASELINE', 'CANDIDATE'] as const).map(role =>
+    ({ ...observation('PERFORMANCE_SAMPLE', role, index), value: 1e308 }))).flat();
+  for (const statistics of [DEFAULT_STATISTICS, undefined]) {
+    const input = { ...configured, plan: { ...configured.plan, test_plan: { ...configured.plan.test_plan, statistics } } };
+    const result = summarizeTestingTask(input, rows);
+    assert.equal(result.performance.status, 'INVALID');
+    assert.equal(result.performance.speedup, null);
+    assert.ok(result.performance.issues.length);
+    assert.equal(result.comparisons[0].speedup, null);
+    assert.deepEqual(result.comparisons[0].baseline_samples, Array(count).fill(1e308));
+  }
+
+  const extremeTail = rows.map(row => ({ ...row, value: row.sample_index! < 7 ? 1 : row.role === 'BASELINE' ? 1e200 : 1e-200 }));
+  const bootstrap = summarizeTestingTask(configured, extremeTail);
+  assert.equal(bootstrap.performance.status, 'INVALID');
+  assert.equal(bootstrap.performance.speedup, null);
+  assert.equal(bootstrap.comparisons[0].conclusion, 'INVALID');
+});
