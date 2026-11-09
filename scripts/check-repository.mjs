@@ -99,8 +99,16 @@ for (const caller of ['src/core/rpc-experiment-transition-adapter.ts', 'src/appl
 // adapts input/output; it must not acquire Runner or storage responsibilities.
 const testingResults = 'src/application/testing-results.ts';
 if (!graph.get(testingResults)?.includes('src/evaluator/performance-statistics.ts')) problems.push('Independent testing results must use shared performance statistics');
+const testingIdentityCheck = 'src/evaluator/runner-artifact-path-check.ts';
+if (!graph.get(testingResults)?.includes(testingIdentityCheck)) problems.push('Independent testing results must use the shared artifact identity check');
 for (const dependency of graph.get(testingResults) ?? []) {
-  if (!dependency.startsWith('src/contracts/') && dependency !== 'src/evaluator/performance-statistics.ts') problems.push(`Testing results cannot depend on execution, transport or storage: ${dependency}`);
+  if (!dependency.startsWith('src/contracts/') && dependency !== 'src/evaluator/performance-statistics.ts' && dependency !== testingIdentityCheck) problems.push(`Testing results cannot depend on execution, transport or storage: ${dependency}`);
+}
+for (const dependency of graph.get(testingIdentityCheck) ?? []) {
+  if (!dependency.startsWith('src/contracts/')) problems.push(`Artifact identity checks must not depend on execution, transport or storage: ${dependency}`);
+}
+for (const specifier of importSpecifiers.get(testingIdentityCheck) ?? []) {
+  if (specifier !== 'node:path' && !specifier.startsWith('../contracts/')) problems.push(`Artifact identity checks must remain free of I/O: ${specifier}`);
 }
 for (const dependency of graph.get('src/http/testing-routes.ts') ?? []) {
   if (/^src\/(?:runner|storage|evaluator|workflow|workspace)\//.test(dependency)) problems.push(`Testing HTTP must call its application service: ${dependency}`);

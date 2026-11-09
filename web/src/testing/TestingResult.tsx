@@ -34,13 +34,16 @@ export function TestingResult({ details, back, refresh, notify, optimize }: {
     </div>
     <dl className="outcome-strip testing-outcomes" aria-label="测试结果">
       <div><dt>执行</dt><dd>{label(task.execution.status)}<small>{task.execution.cancel_requested ? '已请求取消，终态以 Runner 确认为准' : task.execution.message || '执行状态不代表测试通过'}</small></dd></div>
-      <div><dt>正确性</dt><dd>{label(summary.correctness.status)}<small>{summary.correctness.status === 'NOT_REQUESTED' ? '本次未选择正确性测试' : `${summary.correctness.passed} / ${summary.correctness.planned} 通过 · ${summary.correctness.failed} 失败`}</small></dd></div>
-      <div><dt>性能</dt><dd>{label(summary.performance.status)}<small>{summary.performance.speedup === null ? `${summary.performance.measured} / ${summary.performance.planned} 个有效样本` : `${ratio(summary.performance.speedup)} · 相对比较对象 A`}</small></dd></div>
+      <div><dt>正确性</dt><dd>{label(summary.correctness.status)}<small>{summary.correctness.status === 'NOT_REQUESTED' ? '本次未选择正确性测试' : `${summary.correctness.status === 'UNVERIFIED' ? '原始记录：' : ''}${summary.correctness.passed} / ${summary.correctness.planned} 通过 · ${summary.correctness.failed} 失败`}</small></dd></div>
+      <div><dt>性能</dt><dd>{label(summary.performance.status)}<small>{summary.performance.status === 'UNVERIFIED'
+        ? `${summary.performance.measured} / ${summary.performance.planned} 条原始样本，库身份待核对`
+        : summary.performance.speedup === null ? `${summary.performance.measured} / ${summary.performance.planned} 个有效样本` : `${ratio(summary.performance.speedup)} · 相对比较对象 A`}</small></dd></div>
     </dl>
     {active && <section className="run-progress" aria-label="测试执行进展"><div><h2>{task.execution.status !== 'UNKNOWN' && <span className="pulse" />}{task.execution.status === 'UNKNOWN' ? '核对原作业状态' : testingPhaseLabel(task.execution.phase)}</h2>
       {task.execution.message && <p>{task.execution.message}</p>}
       <p>{task.execution.status === 'UNKNOWN' ? '正在查询原作业；不会重复提交。' : '关闭页面后后台继续运行，刷新可查看真实进展。'}</p></div><small>最近更新 {time(task.updated_at)}</small></section>}
     {task.execution.failure && <div className="notice"><strong>{task.execution.failure.message}</strong><p>请检查本次配置和下方执行记录。修复后创建新的测试，原任务会保留。</p><small>{task.execution.failure.stage} · {task.execution.failure.code}</small></div>}
+    {!!summary.provenance_issues?.length && <div className="notice compact" role="status"><strong>库身份待核对</strong><p>{summary.provenance_issues.join('；')}</p></div>}
     {!!summary.performance.issues.length && <div className="notice compact"><strong>性能结论的限制</strong><p>{summary.performance.issues.join('；')}</p></div>}
     <div className="testing-scope"><strong>独立测试结果</strong><span>{summary.conclusion_scope}</span><small>未产生优化批准或交付记录。</small></div>
     <Panel title="比较对象"><div className="testing-subject-identities">{(['candidate', 'baseline'] as const).map(role => {

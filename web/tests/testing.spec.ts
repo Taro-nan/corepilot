@@ -63,6 +63,25 @@ async function mockTesting(page: Page) {
   return { libraries, submissions, uploads, current: () => current };
 }
 
+test('historical testing results show unchecked library identity without claiming an improvement', async ({ page }) => {
+  const task = record({ machine_id: 'machine-fixture', plan: ref, mode: 'both',
+    candidate: { kind: 'binary', asset_id: 'library-b' }, baseline: { kind: 'binary', asset_id: 'library-a' } });
+  const result = details(task);
+  result.summary.correctness = { ...result.summary.correctness, status: 'UNVERIFIED', passed: 1, failed: 0 };
+  result.summary.performance = { ...result.summary.performance, status: 'UNVERIFIED', speedup: null, interval: null };
+  result.summary.comparisons[0] = { ...result.summary.comparisons[0], conclusion: 'UNVERIFIED', speedup: null, interval: null };
+  result.summary.provenance_issues = ['部分历史测量缺少有效的 Runner 库路径核对，原始记录已保留；请升级 Runner 并创建新测试。'];
+  await page.route('**/v1/testing-tasks/**', route => route.fulfill({ json: result }));
+  await login(page);
+  await page.goto(fixture.url + '/#/testing/' + encodeURIComponent(task.task_id));
+  await expect(page.getByLabel('测试结果')).toContainText('身份待核对');
+  await expect(page.getByLabel('测试结果')).toContainText('条原始样本');
+  await expect(page.getByLabel('测试结果')).not.toContainText('有改善');
+  await expect(page.getByRole('status').filter({ hasText: '库身份待核对' })).toContainText('原始记录已保留');
+  await page.reload();
+  await expect(page.getByLabel('测试结果')).toContainText('身份待核对');
+});
+
 test('standalone library comparison preserves conditions and separates execution from correctness and performance', async ({ page }) => {
   const data = await mockTesting(page); await login(page);
   await page.getByRole('navigation').getByRole('button', { name: '测试任务', exact: true }).click();

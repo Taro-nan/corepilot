@@ -35,6 +35,7 @@ labels.NOT_MEASURED = '未测量';
 labels.NOT_TESTED = '未测试';
 labels.IMPROVED = '有改善';
 labels.REGRESSED = '有退化';
+labels.UNVERIFIED = '身份待核对';
 export function label(value?: string | null) { return value === 'VALIDATION_BLOCKED' ? '验证受阻，可重试' : value === 'NO_CANDIDATE' ? '调查结束，未提交候选' : value === 'BUDGET_EXHAUSTED' ? '预算已用完，可继续' : value === 'INTERRUPTED' ? '已中断，可继续' : value ? labels[value] ?? value : '—'; }
 export function Badge({ value, children }: { value?: string | null; children?: React.ReactNode }) {
   const color = ['PASSED', 'PASS', 'VALID', 'QUALIFIED', 'APPROVED', 'DELIVERABLE'].includes(value ?? '') ? 'green' : ['FAILED', 'INVALID'].includes(value ?? '') ? 'red' : ['GENERATING', 'RUNNING', 'WAITING_APPROVAL', 'CREATED'].includes(value ?? '') ? 'amber' : 'gray';

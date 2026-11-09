@@ -92,14 +92,16 @@ export interface TestingComparison {
   candidate_median: number | null;
   speedup: number | null;
   interval: ConfidenceInterval | null;
-  conclusion: 'IMPROVED' | 'REGRESSED' | 'INCONCLUSIVE' | 'NOT_MEASURED' | 'INVALID';
+  conclusion: 'IMPROVED' | 'REGRESSED' | 'INCONCLUSIVE' | 'NOT_MEASURED' | 'INVALID' | 'UNVERIFIED';
 }
 export interface TestingSummary {
-  correctness: { status: 'NOT_REQUESTED' | 'NOT_MEASURED' | 'PASSED' | 'FAILED' | 'INCOMPLETE' | 'INVALID';
+  correctness: { status: 'NOT_REQUESTED' | 'NOT_MEASURED' | 'PASSED' | 'FAILED' | 'INCOMPLETE' | 'INVALID' | 'UNVERIFIED';
     planned: number; passed: number; failed: number; missing: string[]; invalid: string[] };
-  performance: { status: 'NOT_REQUESTED' | 'NOT_MEASURED' | 'IMPROVED' | 'REGRESSED' | 'INCONCLUSIVE' | 'INCOMPLETE' | 'INVALID';
+  performance: { status: 'NOT_REQUESTED' | 'NOT_MEASURED' | 'IMPROVED' | 'REGRESSED' | 'INCONCLUSIVE' | 'INCOMPLETE' | 'INVALID' | 'UNVERIFIED';
     planned: number; measured: number; speedup: number | null; interval: ConfidenceInterval | null; issues: string[] };
   comparisons: TestingComparison[];
+  /** Raw historical measurements remain available when a newer identity check is absent. */
+  provenance_issues?: string[];
   conclusion_scope: string;
 }
 export interface TestingTaskDetails {
