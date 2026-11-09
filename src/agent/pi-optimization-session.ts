@@ -19,7 +19,7 @@ export function withContinuationInstruction(prompt: string, instruction?: string
 }
 
 function eventMessageText(text: string, role: string): string {
-  const limit = role === 'user' && text.startsWith(continuationPrefix) ? 16_384 + continuationPrefix.length : 8192;
+  const limit = role === 'user' ? 16_384 + continuationPrefix.length : 8192;
   return text.slice(0, limit);
 }
 

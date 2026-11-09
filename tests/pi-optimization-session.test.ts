@@ -86,3 +86,21 @@ test('time-budget exhaustion creates a resumable boundary without claiming an op
     assert.deepEqual(await session.readCheckpoint(), { phase: 'AGENT' });
   } finally { await session.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('a maximum-length user message remains readable in persisted session events', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-pi-message-'));
+  const f = fixture();
+  const session = await PiOptimizationSession.open({ directory, id: 'message', models: f.models, model: f.model, systemPrompt: 'Investigate.' });
+  try {
+    const text = 'x'.repeat(16_384 - 'message-end'.length) + 'message-end';
+    f.responses.push([{ type: 'toolCall', id: 'submit-long', name: 'submit_candidate', arguments: {} }]);
+    await session.run(text, [{ name: 'submit_candidate', label: 'Submit', description: 'Submit', parameters: Type.Object({}),
+      execute: async () => ({ content: [{ type: 'text', text: 'submitted' }], details: {}, terminate: true }) }], new AbortController().signal, 10_000);
+    const events = await session.events();
+    assert.ok(events.events.some(event => event.role === 'user' && event.text === text));
+  } finally {
+    await session.close();
+    if (path.dirname(path.resolve(directory)) !== path.resolve(os.tmpdir()) || !path.basename(directory).startsWith('corepilot-pi-message-')) throw new Error('unexpected fixture path');
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
