@@ -16,7 +16,7 @@ import { hypothesisProposal } from './hypothesis-fixture.js';
 
 /** Protocol model fixture; real Git, child commands, SQLite and public HTTP paths.
  * No fixture sample is a hardware performance claim. */
-async function fixture(readTurns: number, maxCandidates?: number, holdFirst = false) {
+async function fixture(readTurns: number, maxCandidates?: number, holdFirst = false, repeat: 'stop' | 'submit' | null = null) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-session-flow-'));
   const repo = path.join(root, 'repo'); fs.mkdirSync(repo);
   const git = (...args: string[]) => {
@@ -47,7 +47,16 @@ async function fixture(readTurns: number, maxCandidates?: number, holdFirst = fa
         else if (action === 1) { name = 'replace_text'; args = { path: 'kernel.c', old_text: 'return 1 + 1', new_text: 'return 3' }; }
         else if (action === 2 || action === 5) { name = 'submit_candidate'; args = { summary: 'Complete source change for system validation.' }; }
         else if (action === 3) { name = 'record_candidate_decision'; const record = service.get(workflowId)!; args = { candidate_id: record.candidate_id, experiment_id: record.experiment_id, action: 'REPAIR', reason: 'The actual correctness command rejected return 3.' }; }
-        else if (action === 4) { name = 'replace_text'; args = { path: 'kernel.c', old_text: 'return 3', new_text: 'return 2' }; }
+        else if (action === 4) { name = 'replace_text'; args = { path: 'kernel.c', old_text: 'return 3', new_text: repeat ? 'return 4' : 'return 2' }; }
+        else if (repeat && action === 6) { name = 'record_candidate_decision'; const record = service.get(workflowId)!; args = { candidate_id: record.candidate_id, experiment_id: record.experiment_id, action: 'REPAIR', reason: 'Consider a different implementation after the second failure.' }; }
+        else if (repeat && action === 7) { name = 'replace_text'; args = { path: 'kernel.c', old_text: 'return 4', new_text: 'return 3' }; }
+        else if (repeat && action === 8) { name = 'inspect_candidate_history'; args = {}; }
+        else if (repeat && action === 9) {
+          name = repeat === 'stop' ? 'finish_optimization' : 'submit_candidate';
+          args = repeat === 'stop' ? { reason: 'Inspect the prior experiment before spending another measurement.' } : { summary: 'Deliberate new measurement of the same source tree.' };
+        }
+        else if (repeat === 'submit' && action === 10) { name = 'record_candidate_decision'; const record = service.get(workflowId)!; args = { candidate_id: record.candidate_id, experiment_id: record.experiment_id, action: 'ABANDON', reason: 'The repeated candidate failed again.' }; }
+        else if (repeat === 'submit' && action === 11) { name = 'finish_optimization'; args = { reason: 'Stop after the deliberate remeasurement.' }; }
         else throw new Error(`Unexpected fixture turn ${step}`);
       }
       response.setHeader('content-type', 'text/event-stream');
@@ -125,6 +134,34 @@ test('public optimization exceeds 32 model turns and repairs a failed candidate 
     }
   } finally { await f.close(); }
 });
+
+for (const choice of ['stop', 'submit'] as const) {
+  test(`public Agent sees prior same-tree evidence and may ${choice === 'stop' ? 'avoid' : 'choose'} another evaluation`, async () => {
+    const f = await fixture(0, undefined, false, choice);
+    try {
+      const id = await f.start(); const record = await f.wait('PERFORMANCE_THRESHOLD_NOT_MET');
+      const candidates = f.store.listCandidates(record.optimization_task_id!);
+      const experiments = f.store.listExperiments(record.optimization_task_id!);
+      assert.equal(candidates.length, choice === 'stop' ? 2 : 3);
+      assert.equal(experiments.length, choice === 'stop' ? 2 : 3);
+      if (choice === 'submit') {
+        assert.notEqual(candidates[0].source.commit, candidates[2].source.commit);
+        assert.equal(candidates[0].source.tree, candidates[2].source.tree);
+        assert.notEqual(experiments[0].experiment_id, experiments[2].experiment_id);
+      }
+      const events = await f.api.getOptimizationSessionEvents(id, 0, 200);
+      const inspection = events.events.find(event => event.kind === 'tool_result' && event.tool_name === 'inspect_candidate_history');
+      assert.ok(inspection?.text, 'Agent session must receive the inspection result');
+      const evidence = JSON.parse(inspection.text);
+      assert.equal(evidence.status, 'MATCH');
+      assert.equal(evidence.candidates[0].candidate_id, candidates[0].candidate_id);
+      assert.equal(evidence.candidates[0].experiments[0].experiment_id, experiments[0].experiment_id);
+      assert.equal(evidence.candidates[0].experiments[0].evaluation.correctness, 'FAILED');
+      assert.match(evidence.notice, /revalidation remains allowed/);
+      assert.ok(f.contexts.some(context => JSON.stringify(context).includes('inspect_candidate_history')));
+    } finally { await f.close(); }
+  });
+}
 
 test('candidate-budget exhaustion resumes the same workflow after service restart and rejects changed evaluation contracts', async () => {
   const f = await fixture(1, 1);

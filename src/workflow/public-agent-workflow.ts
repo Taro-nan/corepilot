@@ -25,6 +25,7 @@ import type { DevelopmentFindings, DevelopmentGateResult } from '../contracts/de
 import type { CandidateEvaluationDecision, CandidateEvaluationFeedback } from '../contracts/candidate-evaluation-feedback.js';
 import { candidateEvaluationFeedback } from '../workspace/candidate-evaluation-feedback.js';
 import { candidateDecisionTool, hypothesisDecisionTool } from '../agent/candidate-feedback-tool.js';
+import { candidateHistoryTool } from '../agent/candidate-history-tool.js';
 import { hypothesisProposalTool, optimizationHistoryTool } from '../agent/hypothesis-tool.js';
 import { isValidationBlocked } from '../workspace/validation-outcome.js';
 import type { HypothesisProposal, OptimizationHypothesis, OptimizationReasoningHistory } from '../contracts/optimization-hypothesis.js';
@@ -379,6 +380,7 @@ export async function runPublicAgentWorkflow(input: {
         let roundPrompt = prompt;
         if (input.reasoning) {
           roundTools.push(optimizationHistoryTool(() => input.reasoning!.history()));
+          roundTools.push(candidateHistoryTool(workspace, () => input.reasoning!.history()));
           roundTools.push(hypothesisProposalTool(activeHypothesisId, async proposal => {
             if (proposedThisRound) throw new Error('one Hypothesis proposal is allowed per investigation round');
             if (activeHypothesisId && (decisions.at(-1) ?? pendingDecision)?.action !== 'NEW_HYPOTHESIS') throw new Error('REPAIR reuses its Hypothesis; choose NEW_HYPOTHESIS before replacing it');
@@ -389,7 +391,7 @@ export async function runPublicAgentWorkflow(input: {
             return hypothesis;
           }));
           const history = await input.reasoning.history();
-          roundPrompt += `\nRecent Optimization Reasoning History:\n${JSON.stringify({ ...history, hypotheses: history.hypotheses.slice(-6) })}\nActive hypothesis_id: ${activeHypothesisId ?? 'NONE'}. Persist a structured Hypothesis before the first source mutation. REPAIR keeps its Hypothesis; NEW_HYPOTHESIS records a child. Experimental support is not Human Approval.\n${pendingDecision ? JSON.stringify({ pending_decision: pendingDecision }) : ''}`;
+          roundPrompt += `\nRecent Optimization Reasoning History:\n${JSON.stringify({ ...history, hypotheses: history.hypotheses.slice(-6) })}\nActive hypothesis_id: ${activeHypothesisId ?? 'NONE'}. Persist a structured Hypothesis before the first source mutation. REPAIR keeps its Hypothesis; NEW_HYPOTHESIS records a child. Experimental support is not Human Approval. After editing and before submitting, use inspect_candidate_history to check for a previously recorded source tree and consider the referenced evidence. This is a clue only: source, binaries and conditions must still be verified; retesting and independent revalidation remain available.\n${pendingDecision ? JSON.stringify({ pending_decision: pendingDecision }) : ''}`;
         }
         await capture('AGENT');
         agent = await input.runAgent(roundTools.map(tool => ({ ...tool, execute: async (...args) => {
