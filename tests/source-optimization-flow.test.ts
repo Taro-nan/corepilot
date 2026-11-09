@@ -14,6 +14,7 @@ test('source-only Agent receives a submission error for an isolated build artifa
     const id = await f.start();
     const record = await f.wait('NO_CANDIDATE');
     assert.equal(record.workflow_id, id);
+    assert.equal(f.store.getOptimizationTask(record.optimization_task_id!)?.status, 'COMPLETED');
     assert.equal(record.candidate_id ?? null, null);
     assert.equal(f.store.listCandidates(record.optimization_task_id!).length, 0);
     assert.equal(f.store.listExperiments(record.optimization_task_id!).length, 0);
@@ -111,6 +112,7 @@ test('time-budget exhaustion and process restart preserve one source session and
   try {
     const id = await f.start({ time_limit_ms: 1000, max_candidates: 1 });
     const first = await f.wait('BUDGET_EXHAUSTED');
+    assert.equal(f.store.getOptimizationTask(first.optimization_task_id!)!.status, 'BUDGET_EXHAUSTED');
     assert.equal(first.error, null); await f.restart();
     const original = fs.readFileSync(f.configPath, 'utf8');
     const changed = JSON.parse(original); changed.build.args = ['changed-context'];

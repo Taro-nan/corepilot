@@ -59,6 +59,8 @@ Control SQLite 在 [SqliteTaskStore](../../src/storage/sqlite-task-store.ts) 中
 
 启动恢复将中断的 Workflow 和状态仍为 `CREATED`/`RUNNING` 的 OptimizationTask 在同一 SQLite 事务中标记为 `INTERRUPTED`；旧版已写入中断工作流、但领域任务仍在运行的记录也会对账。领域任务已经处于终态或等待审批时保留原状态和候选、审批事实；任务缺失或归属不符时记录错误，不阻止其他记录恢复。会话尚未保存时提示创建新任务，不声称能够恢复。复现的 `PREPARING`/`RUNNING` 只改为 `UNKNOWN` 并保留原实验 ID，继续复现时查询原 Runner；启动本身不会提交、取消或修改远端实验。旧版没有会话且领域任务仍为 `CREATED` 的工作流无法区分尚未启动与启动前崩溃，保持原状态。其余运行期 Workflow、Task 和跨 Runner 的状态写入仍非统一原子状态机。
 
+源码和正式优化的执行结束状态由同一事务写入 Workflow 与 Task；`NO_CANDIDATE` 和 `PERFORMANCE_THRESHOLD_NOT_MET` 对应 Task `COMPLETED`，其余执行终态保持相同语义。事务检查任务、工作流和现有候选的归属，不修改实验、Evidence 或批准。写入结果失败时尝试原子记录 `INTERRUPTED` 和诊断；若持续无法写入则保留此前状态，允许重启恢复，不把持久化错误记成候选错误。此约束不自动修复旧版已留下的其他终态不一致，也不涵盖跨 Runner 或文件系统的原子性。
+
 ### 优化与独立测试的已落地边界
 
 公开优化请求可显式选择 `verification_mode: source_only`。缺省仍为原有 `verified`，保留历史配置与行为。源码模式通过现有 WorkflowService、OptimizationRuntime、Pi 会话与源码工具生成冻结 Candidate，`Task.evaluator` 为 `null`，不伪造测试身份；终态 `CANDIDATE_READY` 表示代码待验证，报告分别标明构建、正确性和性能未执行。缺评价器或源码模式的候选不能通过正式实验、批准及交付门禁。

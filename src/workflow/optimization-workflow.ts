@@ -1,5 +1,5 @@
 import type { TaskStore } from '../storage/task-store.js';
-import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
+import type { OptimizationWorkflowRecord, WorkflowExecutionOutcomePatch } from '../contracts/workflow.js';
 
 export interface OptimizationWorkflowStore {
   save(record: OptimizationWorkflowRecord): void;
@@ -24,6 +24,32 @@ export class SqliteOptimizationWorkflowStore implements OptimizationWorkflowStor
   list(limit = 50): OptimizationWorkflowRecord[] {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('limit must be an integer in 1..200');
     return this.taskStore.listOptimizationWorkflowJson(limit).map(json => JSON.parse(json) as OptimizationWorkflowRecord);
+  }
+}
+
+/** Persist an outcome without treating a storage failure as a Candidate failure. */
+export function finishWorkflowExecution(store: TaskStore, workflowId: string, taskId: string,
+  patch: WorkflowExecutionOutcomePatch, clean: (message: string) => string): void {
+  try {
+    store.finishOptimizationWorkflow(workflowId, taskId, patch);
+  } catch (error) {
+    const message = clean(`保存优化结束状态失败：${(error as Error).message}。已保留已有候选和实验，请核对后继续。`);
+    try {
+      store.finishOptimizationWorkflow(workflowId, taskId, { status: 'INTERRUPTED', error: message,
+        progress: { phase: 'INTERRUPTED', last_event: message } });
+    } catch {
+      // Persistent DB errors may prevent even an interruption record. Keep the
+      // prior state for startup reconciliation and show a diagnostic if possible.
+      try {
+        const current = store.getOptimizationWorkflowJson(workflowId);
+        if (!current) return;
+        const record = JSON.parse(current) as OptimizationWorkflowRecord;
+        if (record.optimization_task_id === taskId && ['CREATED', 'GENERATING'].includes(record.status)) {
+          store.saveOptimizationWorkflowJson(workflowId, JSON.stringify({ ...record, error: message,
+            progress: { phase: 'PERSISTENCE_ERROR', last_event: message }, updated_at: new Date().toISOString() }));
+        }
+      } catch { /* A persistent storage outage also prevents saving diagnostics. */ }
+    }
   }
 }
 

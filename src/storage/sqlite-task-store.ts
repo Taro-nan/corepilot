@@ -15,7 +15,7 @@ import type { HypothesisOutcome, OptimizationHypothesis } from '../contracts/opt
 import type { OptimizationApprovalRecord } from '../contracts/optimization-approval.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
-import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
+import { taskStatusForExecutionOutcome, type OptimizationWorkflowRecord, type WorkflowExecutionOutcomePatch } from '../contracts/workflow.js';
 
 interface TaskRow {
   task_id: string; request_id: string; status: string; target_json: string; schema_version: number; is_mock: number;
@@ -299,6 +299,30 @@ export class SqliteTaskStore implements TaskStore {
       this.saveOptimizationTask(task);
       this.saveOptimizationWorkflowJson(workflow.workflow_id, JSON.stringify(workflow));
       return { workflowId: workflow.workflow_id, created: true };
+    });
+  }
+
+  finishOptimizationWorkflow(workflowId: string, taskId: string, patch: WorkflowExecutionOutcomePatch): void {
+    this.transaction(() => {
+      const json = this.getOptimizationWorkflowJson(workflowId);
+      const workflow = json ? JSON.parse(json) as OptimizationWorkflowRecord : null;
+      const task = this.getOptimizationTask(taskId);
+      if (!workflow || workflow.workflow_id !== workflowId || workflow.optimization_task_id !== taskId ||
+          !task || (task.workflow_id !== null && task.workflow_id !== workflowId)) {
+        throw new Error('optimization execution task or workflow identity mismatch');
+      }
+      if (!['CREATED', 'GENERATING'].includes(workflow.status)) throw new Error('optimization workflow is no longer running');
+      if (workflow.candidate_id) {
+        const candidate = this.getCandidate(workflow.candidate_id);
+        if (!candidate || candidate.task_id !== taskId ||
+            (patch.candidate_commit !== undefined && patch.candidate_commit !== candidate.source.commit) ||
+            (patch.candidate_tree !== undefined && patch.candidate_tree !== candidate.source.tree)) {
+          throw new Error('optimization execution candidate identity mismatch');
+        }
+      }
+      const timestamp = new Date().toISOString();
+      this.saveOptimizationTask({ ...task, status: taskStatusForExecutionOutcome(patch.status), updated_at: timestamp });
+      this.saveOptimizationWorkflowJson(workflowId, JSON.stringify({ ...workflow, ...patch, updated_at: timestamp }));
     });
   }
 

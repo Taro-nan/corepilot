@@ -27,6 +27,7 @@ test('insufficient statistical evidence stops the workflow with its frozen candi
     for (let count = 0; count < 500 && f.service.activeWorkflowIds().length; count++) await delay(20);
     const record = f.service.get(seeded.workflowId)!;
     assert.equal(record.status, 'VALIDATION_BLOCKED', record.error ?? JSON.stringify(record.progress));
+    assert.equal(f.store.getOptimizationTask(record.optimization_task_id!)?.status, 'VALIDATION_BLOCKED');
     assert.match(record.stop_reason!, /证据不足/);
     assert.equal(record.candidate_id, seeded.candidate.candidate_id);
     assert.equal(f.modelRequests.inference, 0);
@@ -87,6 +88,7 @@ test('public CLI/API retries the same frozen candidate with new experiments, no 
     for (let count = 0; count < 500 && f.service.activeWorkflowIds().length; count++) await delay(20);
     const record = f.service.get(seeded.workflowId)!;
     assert.equal(record.status, 'WAITING_APPROVAL', record.error ?? JSON.stringify(record.progress));
+    assert.equal(f.store.getOptimizationTask(record.optimization_task_id!)?.status, 'WAITING_APPROVAL');
     assert.equal(record.validation_retry_count, 1);
     assert.equal(record.candidate_id, seeded.candidate.candidate_id);
     assert.equal(record.candidate_commit, seeded.candidate.source.commit);

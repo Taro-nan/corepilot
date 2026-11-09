@@ -10,7 +10,7 @@ import { buildOptimizationReport, renderOptimizationReport } from '../report/opt
 import { writeOptimizationReport } from '../report/write-report.js';
 import type { TaskStore } from '../storage/task-store.js';
 import { ensureCandidateRepository } from '../workspace/candidate-workspace.js';
-import type { OptimizationWorkflowStore } from './optimization-workflow.js';
+import { finishWorkflowExecution, type OptimizationWorkflowStore } from './optimization-workflow.js';
 import { localWorktreeRoot } from './optimization-workflow-paths.js';
 import { runSourceAgentWorkflow, type SourceAgentCheckpoint } from './source-agent-workflow.js';
 import type { SourceOptimizationPreflight } from './source-optimization.js';
@@ -103,16 +103,14 @@ export async function executeSourceOptimization(input: {
     const message = result.error ?? (status === 'CANDIDATE_READY' ? '候选补丁已准备，可查看差异或创建独立测试任务。尚未验证正确性与性能。'
       : status === 'BUDGET_EXHAUSTED' ? '本次预算已用完，源码和会话已保存，可继续优化。'
         : status === 'NO_CANDIDATE' ? '本次调查未提交新候选，调查记录已保存。' : status === 'CANCELLED' ? '源码优化已取消，工作区已保留。' : '源码与会话已保存。');
-    update({ status, error: result.error ? clean(result.error) : null, progress: { phase: status, last_event: clean(message) },
+    finishWorkflowExecution(input.store, workflowId, taskId, { status, error: result.error ? clean(result.error) : null, progress: { phase: status, last_event: clean(message) },
       workspace_editing: state.workspace.editing, workspace_validation: state.workspace.validation,
       ...(state.agent?.text ? { stop_reason: clean(state.agent.text.slice(0, 8192)) } : {}),
-    });
-    runtime.setTaskStatus(taskId, status === 'NO_CANDIDATE' ? 'COMPLETED' : status);
+    }, clean);
   } catch (error) {
     const status = signal.aborted ? signal.reason === 'backend shutting down' ? 'INTERRUPTED' : 'CANCELLED' : 'FAILED';
     const message = clean((error as Error).message);
-    update({ status, error: message, progress: { phase: status, last_event: message } });
-    runtime.setTaskStatus(taskId, status);
+    finishWorkflowExecution(input.store, workflowId, taskId, { status, error: message, progress: { phase: status, last_event: message } }, clean);
   } finally {
     if (session) {
       try { update({ agent_session: await session.summary() }); await session.close(); }

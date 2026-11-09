@@ -4,6 +4,7 @@ import type { OptimizationSessionBudget, OptimizationSessionSummary } from './op
 import type { WorkflowDeliveryOperation } from './delivery.js';
 import type { WorkflowEvidenceSnapshot } from './optimization-approval.js';
 import type { OptimizationVerificationMode } from './public-workflow.js';
+import type { OptimizationTaskStatus } from './optimization-domain.js';
 
 /** public optimize 工作流的持久化状态；不包含旧候选补丁或授权对象。 */
 export type OptimizationWorkflowStatus =
@@ -91,6 +92,22 @@ export interface OptimizationWorkflowRecord {
   stop_reason?: string;
   created_at: string;
   updated_at: string;
+}
+
+/** A worker outcome does not include the separate human-delivery state. */
+export type WorkflowExecutionOutcome = Exclude<OptimizationWorkflowStatus, 'CREATED' | 'GENERATING' | 'DELIVERABLE'>;
+export type WorkflowExecutionOutcomePatch = { status: WorkflowExecutionOutcome } & Partial<Pick<OptimizationWorkflowRecord,
+  'error' | 'stop_reason' | 'progress' | 'workspace_editing' | 'workspace_validation' | 'baseline_commit' |
+  'candidate_commit' | 'candidate_tree' | 'candidate_files' | 'source_archive_sha256' | 'validation_result' |
+  'performance_result' | 'revalidation_result' | 'development_findings' | 'development_gate'>>;
+
+export function taskStatusForExecutionOutcome(status: WorkflowExecutionOutcome): OptimizationTaskStatus {
+  switch (status) {
+    case 'NO_CANDIDATE': case 'PERFORMANCE_THRESHOLD_NOT_MET': return 'COMPLETED';
+    case 'BUDGET_EXHAUSTED': case 'INTERRUPTED': case 'VALIDATION_BLOCKED': case 'WAITING_APPROVAL':
+    case 'CANDIDATE_READY': case 'FAILED': case 'CANCELLED': return status;
+    default: throw new Error('unsupported workflow execution outcome');
+  }
 }
 
 /** UI eligibility; the service additionally requires a confirmed remote terminal state. */

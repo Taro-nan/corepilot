@@ -106,6 +106,7 @@ test('public optimization exceeds 32 model turns and repairs a failed candidate 
   const f = await fixture(33);
   try {
     const id = await f.start(); const record = await f.wait('WAITING_APPROVAL');
+    assert.equal(f.store.getOptimizationTask(record.optimization_task_id!)?.status, 'WAITING_APPROVAL');
     assert.ok(record.agent_session!.turns > 32);
     const finalContext = JSON.stringify(f.contexts.at(-1));
     assert.match(finalContext, /durable-source-marker/);
@@ -129,6 +130,7 @@ test('candidate-budget exhaustion resumes the same workflow after service restar
   const f = await fixture(1, 1);
   try {
     const id = await f.start(); const first = await f.wait('BUDGET_EXHAUSTED');
+    assert.equal(f.store.getOptimizationTask(first.optimization_task_id!)?.status, 'BUDGET_EXHAUSTED');
     assert.equal(first.error, null);
     const sourceBefore = fs.readFileSync(path.join(first.workspace_editing!, 'kernel.c'), 'utf8'); assert.match(sourceBefore, /return 3/);
     await f.restart();
@@ -154,8 +156,22 @@ test('stopping Control preserves an in-progress Agent session and allows continu
     assert.equal(f.held, true);
     await f.restart();
     assert.equal(f.service.get(id)!.status, 'INTERRUPTED');
+    assert.equal(f.store.getOptimizationTask(f.service.get(id)!.optimization_task_id!)?.status, 'INTERRUPTED');
     f.release(); await f.api.resumeOptimizationWorkflow(id);
     const record = await f.wait('WAITING_APPROVAL');
     assert.equal(record.continuation_count, 1);
+  } finally { await f.close(); }
+});
+
+test('cancelling a verified task confirms the same terminal state in the workflow and Task', async () => {
+  const f = await fixture(0, undefined, true);
+  try {
+    const id = await f.start();
+    for (let i = 0; i < 200 && !f.held; i++) await delay(20);
+    assert.equal(f.held, true);
+    await f.api.cancelOptimizationWorkflow(id);
+    const record = await f.wait('CANCELLED');
+    assert.equal(f.store.getOptimizationTask(record.optimization_task_id!)?.status, 'CANCELLED');
+    assert.equal(f.store.listExperiments(record.optimization_task_id!).length, 0);
   } finally { await f.close(); }
 });

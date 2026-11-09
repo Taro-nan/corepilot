@@ -23,7 +23,7 @@ import { stageRemoteBaseline, stageRemoteEvaluator, type StagedRemoteBaseline, t
 import { stageVerifiedBinaryBaseline } from '../workspace/baseline-bundle-staging.js';
 import { packageBaselineBinding } from '../library-package/task-definition.js';
 import type { TargetConfig } from '../config/target-config.js';
-import { initialOptimizationWorkflowRecord, SqliteOptimizationWorkflowStore } from './optimization-workflow.js';
+import { finishWorkflowExecution, initialOptimizationWorkflowRecord, SqliteOptimizationWorkflowStore } from './optimization-workflow.js';
 import { OptimizationRuntime } from '../core/optimization-runtime.js';
 import { RunnerClient, RunnerClientError } from '../client/runner-client.js';
 import type { ExperimentExecutionPlan } from '../contracts/runner-rpc.js';
@@ -742,7 +742,7 @@ export class OptimizationWorkflowService {
       });
       const terminalStatus = result.status;
       const stopReason = result.status === 'VALIDATION_BLOCKED' || resumeFrom?.validationOnly ? result.error ?? result.performance?.reason : result.agent?.text;
-      update({
+      finishWorkflowExecution(this.options.store, workflowId, taskId, {
         status: terminalStatus,
         ...(['NO_CANDIDATE', 'PERFORMANCE_THRESHOLD_NOT_MET', 'VALIDATION_BLOCKED'].includes(result.status) && stopReason ? { stop_reason: clean(stopReason.slice(0, 8192)) } : {}),
         progress: { phase: result.status, round: result.rounds, last_event: clean(result.error ?? (result.status === 'BUDGET_EXHAUSTED' ? '本次探索预算已用完，工作区和会话已保留，可继续优化。' : result.status === 'WAITING_APPROVAL' ? '测试与独立复验完成，等待人工审阅。' : '本次优化已结束，过程和实验记录已保存。')) },
@@ -756,20 +756,11 @@ export class OptimizationWorkflowService {
         ...(result.agent ? { development_findings: result.agent.development_findings } : {}),
         ...(result.development_gate !== undefined ? { development_gate: result.development_gate } : {}),
         ...(result.error ? { error: clean(result.error) } : {}),
-      });
-      this.runtime.setTaskStatus(taskId, result.status === 'WAITING_APPROVAL'
-        ? 'WAITING_APPROVAL'
-        : result.status === 'PERFORMANCE_THRESHOLD_NOT_MET' || result.status === 'NO_CANDIDATE'
-          ? 'COMPLETED'
-          : result.status === 'BUDGET_EXHAUSTED' || result.status === 'INTERRUPTED' || result.status === 'VALIDATION_BLOCKED' ? result.status
-          : result.status === 'CANCELLED'
-            ? 'CANCELLED'
-            : 'FAILED');
+      }, clean);
     } catch (error) {
       const message = clean((error as Error).message);
       const status = error instanceof RemoteExperimentUnknownError || signal.reason === 'backend shutting down' ? 'INTERRUPTED' : signal.aborted ? 'CANCELLED' : 'FAILED';
-      update({ status, error: message, progress: { phase: status, last_event: message } });
-      this.runtime.setTaskStatus(taskId, status);
+      finishWorkflowExecution(this.options.store, workflowId, taskId, { status, error: message, progress: { phase: status, last_event: message } }, clean);
     } finally {
       if (session) {
         try { update({ agent_session: await session.summary() }); await session.close(); }
