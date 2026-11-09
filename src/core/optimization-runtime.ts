@@ -23,7 +23,7 @@ import { OPTIMIZATION_DOMAIN_SCHEMA_VERSION } from '../contracts/optimization-do
 import type { CandidateSourceScope } from '../contracts/library-package.js';
 import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
 import type { ExperimentStatusResponse } from '../contracts/runner-rpc.js';
-import type { OptimizationStore } from '../storage/optimization-store.js';
+import { ExperimentStateChangedError, type LocalExperimentFacts, type OptimizationStore } from '../storage/optimization-store.js';
 import type { CandidateCheckpoint, CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
 import type {
   CommandRunResult,
@@ -309,11 +309,8 @@ export class OptimizationRuntime {
   recordRemoteExecutionPlan(experimentId: string, plan: Record<string, unknown>): void {
     const experiment = this.getExperiment(experimentId);
     const existing = experiment.declared_context.runner_execution_plan;
-    if (existing) {
-      if (JSON.stringify(existing) !== JSON.stringify(plan)) throw new Error('remote execution plan changed for an existing Experiment');
-      return;
-    }
-    this.store.saveExperiment({ ...experiment, declared_context: { ...experiment.declared_context, runner_execution_plan: structuredClone(plan) } });
+    if (experiment.status !== 'PENDING' || existing) throw new ExperimentStateChangedError(experimentId);
+    this.store.saveExperimentIfCurrent(experiment, { ...experiment, declared_context: { ...experiment.declared_context, runner_execution_plan: structuredClone(plan) } });
   }
 
   updateTask(taskId: string, patch: Partial<Pick<OptimizationTask,
@@ -413,8 +410,8 @@ export class OptimizationRuntime {
       ? this.getExperiment(input.experimentId)
       : this.requireRunningExperiment(input.experimentId);
     if (input.factsAlreadyPersisted && !isConfirmedTerminal(experiment.status)) throw new Error('原实验终态尚未确认，不能保存评价。');
-    if (!input.factsAlreadyPersisted) this.appendValidationFacts(experiment.experiment_id, input.validation, input.performance, '');
-    const commands = this.store.listCommandExecutions(experiment.experiment_id);
+    const localFacts = input.factsAlreadyPersisted ? undefined : this.prepareValidationFacts(experiment, input.validation, input.performance, '', 0);
+    const commands = localFacts?.commands ?? this.store.listCommandExecutions(experiment.experiment_id);
     const cancelled = commands.some((item) => item.cancelled);
     const timedOut = commands.some((item) => item.timed_out);
     const evaluation = validationEvaluation(input.validation, input.performance);
@@ -440,7 +437,7 @@ export class OptimizationRuntime {
       ended_at: input.factsAlreadyPersisted ? experiment.ended_at : experiment.ended_at ?? timestamp,
       updated_at: timestamp,
     };
-    return this.store.commitExperimentResult(experiment, completed, this.prepareHypothesisOutcome(completed, input.validation, input.performance));
+    return this.store.commitExperimentResult(experiment, completed, this.prepareHypothesisOutcome(completed, input.validation, input.performance), localFacts);
   }
 
   completeRevalidationExperiment(input: {
@@ -453,9 +450,16 @@ export class OptimizationRuntime {
       ? this.getExperiment(input.experimentId)
       : this.requireRunningExperiment(input.experimentId);
     if (input.factsAlreadyPersisted && !isConfirmedTerminal(experiment.status)) throw new Error('原实验终态尚未确认，不能保存评价。');
-    if (!input.factsAlreadyPersisted && input.revalidation.formal) this.appendValidationFacts(experiment.experiment_id, input.revalidation.formal, null, 'formal');
-    if (!input.factsAlreadyPersisted && input.revalidation.independent) this.appendValidationFacts(experiment.experiment_id, input.revalidation.independent, null, 'independent');
-    const commands = this.store.listCommandExecutions(experiment.experiment_id);
+    const localFacts: LocalExperimentFacts | undefined = input.factsAlreadyPersisted ? undefined : { commands: [], measurements: [] };
+    if (localFacts) {
+      for (const [prefix, validation] of [['formal', input.revalidation.formal], ['independent', input.revalidation.independent]] as const) {
+        if (!validation) continue;
+        const facts = this.prepareValidationFacts(experiment, validation, null, prefix, localFacts.commands.length);
+        localFacts.commands.push(...facts.commands);
+        localFacts.measurements.push(...facts.measurements);
+      }
+    }
+    const commands = localFacts?.commands ?? this.store.listCommandExecutions(experiment.experiment_id);
     const cancelled = commands.some((item) => item.cancelled);
     const timedOut = commands.some((item) => item.timed_out);
     const cycles = [input.revalidation.formal, input.revalidation.independent].filter((item): item is ValidationCycleResult => item !== null);
@@ -515,7 +519,7 @@ export class OptimizationRuntime {
       updated_at: timestamp,
     };
     const validation = input.revalidation.formal?.passed === false ? input.revalidation.formal : input.revalidation.independent?.passed === false ? input.revalidation.independent : input.revalidation.formal;
-    return this.store.commitExperimentResult(experiment, completed, this.prepareHypothesisOutcome(completed, validation ?? undefined, input.revalidation.performance_gate ?? null));
+    return this.store.commitExperimentResult(experiment, completed, this.prepareHypothesisOutcome(completed, validation ?? undefined, input.revalidation.performance_gate ?? null), localFacts);
   }
 
   /** Mirror runner-owned lifecycle facts without inventing a Control result. */
@@ -539,7 +543,7 @@ export class OptimizationRuntime {
         if (context === 'released') {
           const updated = { ...experiment, runner_terminal_facts: incoming,
             observed_context: withReleasedQueue(experiment.observed_context, incomingContext!), updated_at: this.timestamp() };
-          this.store.saveExperiment(updated);
+          this.store.saveExperimentIfCurrent(experiment, updated);
           return updated;
         }
       } else {
@@ -555,7 +559,7 @@ export class OptimizationRuntime {
           if (context === 'conflict') throw new Error(`conflicting historical Runner observed_context for experiment '${status.experiment_id}'`);
           if (context === 'released') {
             const updated = { ...experiment, observed_context: withReleasedQueue(experiment.observed_context, status.observed_context), updated_at: this.timestamp() };
-            this.store.saveExperiment(updated);
+            this.store.saveExperimentIfCurrent(experiment, updated);
             return updated;
           }
         }
@@ -576,7 +580,7 @@ export class OptimizationRuntime {
       ...(diagnostic?.code === 'REMOTE_STATE_UNKNOWN' && !diagnostic.resolved_at && isConfirmedTerminal(status.status)
         ? { last_control_diagnostic: { ...diagnostic, resolved_at: status.updated_at } } : {}),
     };
-    this.store.saveExperiment(synchronized);
+    this.store.saveExperimentIfCurrent(experiment, synchronized);
     return synchronized;
   }
 
@@ -630,7 +634,8 @@ export class OptimizationRuntime {
       ended_at: null,
       updated_at: timestamp,
     };
-    return this.store.commitExperimentResult(experiment, unknown, null);
+    this.store.saveExperimentIfCurrent(experiment, unknown);
+    return unknown;
   }
 
   failExperiment(input: FailExperimentInput): Experiment {
@@ -680,13 +685,15 @@ export class OptimizationRuntime {
     return { schema_version: 1, outcome_id: `hypothesis-outcome:${experiment.experiment_id}`, hypothesis_id: candidate.hypothesis_id, task_id: experiment.task_id, candidate_id: candidate.candidate_id, experiment_id: experiment.experiment_id, ...assessment, failure_category: experiment.failure_category, feedback, recorded_at: this.timestamp() };
   }
 
-  private appendValidationFacts(
-    experimentId: string,
+  private prepareValidationFacts(
+    experiment: Experiment,
     validation: ValidationCycleResult,
     performance: PerformanceGateResult | null,
     namePrefix: string,
-  ): void {
-    const experiment = this.getExperiment(experimentId);
+    startSequence: number,
+  ): LocalExperimentFacts {
+    const experimentId = experiment.experiment_id;
+    const facts: LocalExperimentFacts = { commands: [], measurements: [] };
     const evaluatorTrace = experiment.type === 'DEVELOPMENT_FEEDBACK' ? null : structuredClone(experiment.evaluator);
     const commandFacts: Array<{ step: CommandExecution['step']; result: CommandRunResult }> = [
       { step: namePrefix ? 'REVALIDATION' : 'BUILD', result: validation.build },
@@ -699,9 +706,9 @@ export class OptimizationRuntime {
     }
     if (validation.performance) commandFacts.push({ step: namePrefix ? 'REVALIDATION' : 'PERFORMANCE', result: validation.performance });
 
-    let sequence = this.store.listCommandExecutions(experimentId).length;
+    let sequence = startSequence;
     for (const item of commandFacts) {
-      this.store.appendCommandExecution({
+      facts.commands.push({
         schema_version: OPTIMIZATION_DOMAIN_SCHEMA_VERSION,
         command_execution_id: this.id('command-execution'),
         experiment_id: experimentId,
@@ -725,7 +732,7 @@ export class OptimizationRuntime {
     }
 
     for (const result of validation.correctness_cases) {
-      this.appendMeasurement({
+      facts.measurements.push(this.prepareMeasurement(experiment, {
         experimentId,
         kind: 'CORRECTNESS_CASE',
         subjectId: prefixed(namePrefix, result.case_id),
@@ -735,10 +742,10 @@ export class OptimizationRuntime {
         unit: null,
         validity: result.status === 'INVALID' || result.status === 'NOT_EXECUTED' ? 'INVALID' : 'VALID',
         domainPayload: { status: result.status, parameters: result.parameters, error: result.error },
-      });
+      }));
     }
     for (const workload of performance?.workloads ?? []) {
-      workload.baseline_samples.forEach((value, index) => this.appendMeasurement({
+      workload.baseline_samples.forEach((value, index) => facts.measurements.push(this.prepareMeasurement(experiment, {
         experimentId,
         kind: 'PERFORMANCE_SAMPLE',
         subjectId: prefixed(namePrefix, workload.case_id),
@@ -748,8 +755,8 @@ export class OptimizationRuntime {
         unit: null,
         validity: 'VALID',
         domainPayload: { critical: workload.critical },
-      }));
-      workload.candidate_samples.forEach((value, index) => this.appendMeasurement({
+      })));
+      workload.candidate_samples.forEach((value, index) => facts.measurements.push(this.prepareMeasurement(experiment, {
         experimentId,
         kind: 'PERFORMANCE_SAMPLE',
         subjectId: prefixed(namePrefix, workload.case_id),
@@ -759,13 +766,13 @@ export class OptimizationRuntime {
         unit: null,
         validity: 'VALID',
         domainPayload: { critical: workload.critical },
-      }));
+      })));
       for (const [metric, value] of [
         ['baseline_median', workload.baseline_median],
         ['candidate_median', workload.candidate_median],
         ['speedup', workload.speedup],
       ] as const) {
-        this.appendMeasurement({
+        facts.measurements.push(this.prepareMeasurement(experiment, {
           experimentId,
           kind: 'OBSERVATION',
           subjectId: prefixed(namePrefix, workload.case_id),
@@ -775,12 +782,13 @@ export class OptimizationRuntime {
           unit: metric === 'speedup' ? 'ratio' : null,
           validity: 'VALID',
           domainPayload: { metric, critical: workload.critical, regression: workload.regression },
-        });
+        }));
       }
     }
+    return facts;
   }
 
-  private appendMeasurement(input: {
+  private prepareMeasurement(experiment: Experiment, input: {
     experimentId: string;
     kind: Measurement['kind'];
     subjectId: string;
@@ -791,7 +799,6 @@ export class OptimizationRuntime {
     validity: Measurement['validity'];
     domainPayload: Record<string, unknown>;
   }): Measurement {
-    const experiment = this.getExperiment(input.experimentId);
     const measurement: Measurement = {
       schema_version: OPTIMIZATION_DOMAIN_SCHEMA_VERSION,
       measurement_id: this.id('measurement'),
@@ -807,7 +814,6 @@ export class OptimizationRuntime {
       domain_payload: input.domainPayload,
       recorded_at: this.timestamp(),
     };
-    this.store.appendMeasurement(measurement);
     return measurement;
   }
 

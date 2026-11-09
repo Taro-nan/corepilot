@@ -338,8 +338,8 @@ test('public recovery preserves a committed local result when its acknowledgemen
   const commit = f.store.commitExperimentResult.bind(f.store);
   let interrupted = false;
   try {
-    f.store.commitExperimentResult = (expected, next, outcome) => {
-      const saved = commit(expected, next, outcome);
+    f.store.commitExperimentResult = (expected, next, outcome, localFacts) => {
+      const saved = commit(expected, next, outcome, localFacts);
       if (!interrupted && next.type === 'FORMAL_EVALUATION' && outcome) {
         interrupted = true;
         throw new Error('injected lost result acknowledgement');
@@ -347,13 +347,8 @@ test('public recovery preserves a committed local result when its acknowledgemen
       return saved;
     };
     const id = await f.start();
-    let first = f.service.get(id)!;
-    for (let count = 0; count < 800; count++) {
-      first = f.service.get(id)!;
-      if (first.status === 'FAILED' && !f.service.activeWorkflowIds().length) break;
-      await delay(25);
-    }
-    assert.equal(first.status, 'FAILED');
+    const first = await f.wait('INTERRUPTED');
+    assert.match(first.error ?? '', /实验结果处理或保存失败/);
     assert.equal(interrupted, true);
     const experiments = f.store.listExperiments(first.optimization_task_id!);
     const outcomes = f.store.listHypothesisOutcomes(first.optimization_task_id!);
@@ -371,6 +366,37 @@ test('public recovery preserves a committed local result when its acknowledgemen
     assert.deepEqual(f.store.listHypothesisOutcomes(first.optimization_task_id!), outcomes);
     assert.deepEqual(f.store.listCommandExecutions(experiments[0].experiment_id), commands);
   } finally { f.store.commitExperimentResult = commit; await f.close(); }
+});
+
+test('public local result storage failure preserves the original experiment without fabricating failure or rerunning', async () => {
+  const f = await fixture(0);
+  const append = f.store.appendCommandExecution.bind(f.store);
+  let interrupted = false;
+  try {
+    f.store.appendCommandExecution = command => {
+      append(command);
+      if (!interrupted) { interrupted = true; throw new Error('injected result storage failure'); }
+    };
+    const id = await f.start();
+    const first = await f.wait('INTERRUPTED');
+    assert.equal(interrupted, true);
+    assert.match(first.error ?? '', /实验结果处理或保存失败/);
+    const experiments = f.store.listExperiments(first.optimization_task_id!);
+    assert.equal(experiments.length, 1);
+    assert.equal(experiments[0].status, 'RUNNING');
+    assert.equal(experiments[0].failure_category, null);
+    assert.deepEqual(f.store.listCommandExecutions(experiments[0].experiment_id), []);
+    assert.deepEqual(f.store.listMeasurements(experiments[0].experiment_id), []);
+    assert.deepEqual(f.store.listHypothesisOutcomes(first.optimization_task_id!), []);
+    f.store.appendCommandExecution = append;
+    await f.restart();
+    await f.api.resumeOptimizationWorkflow(id);
+    const recovered = await f.wait('INTERRUPTED');
+    assert.match(recovered.error ?? '', /本地进程状态未确认/);
+    assert.deepEqual(f.store.listExperiments(first.optimization_task_id!), experiments);
+    assert.deepEqual(f.store.listCommandExecutions(experiments[0].experiment_id), []);
+    assert.deepEqual(f.store.listHypothesisOutcomes(first.optimization_task_id!), []);
+  } finally { f.store.appendCommandExecution = append; await f.close(); }
 });
 
 test('stopping Control preserves an in-progress Agent session and allows continuation after restart', async () => {

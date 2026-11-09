@@ -20,7 +20,7 @@ import { createFormalEvaluatorFixture } from './formal-evaluator-fixture.js';
 import { candidateEvaluationFeedback } from '../src/workspace/candidate-evaluation-feedback.js';
 import { proposeFixtureHypothesis } from './hypothesis-fixture.js';
 
-async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailure?: 'aborted' | 'aborted-400' | '500' | '409' | 'rejected' | 'http-lost' | 'progress-error' | 'sync-and-unknown-error') {
+async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailure?: 'aborted' | 'aborted-400' | '500' | '409' | 'rejected' | 'http-lost' | 'progress-error' | 'sync-and-unknown-error' | 'preexisting-plan') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-rpc-transition-'));
   const runnerRoot = path.join(root, 'runner');
   const localRepository = path.join(root, 'local-source');
@@ -174,15 +174,15 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
     runtime.synchronizeRemoteExperiment = () => { throw new Error('injected status persistence failure'); };
     runtime.markRemoteStateUnknown = () => { throw new Error('injected unknown persistence failure'); };
   }
-  let baselineStageCalls = 0;
+  let candidateStageCalls = 0, evaluatorStageCalls = 0, baselineStageCalls = 0;
   const adapter = new RpcExperimentTransitionAdapter({
     backend,
     runtime,
     pollIntervalMs: 10,
     cancelConfirmationMs: 30,
     ...(submissionFailure === 'progress-error' ? { onStatus: () => { throw new Error('injected progress persistence failure'); } } : {}),
-    stageCandidate: async () => ({ candidateId: candidate.candidate_id, workspacePath: stagedCandidate, sourceSha256: candidateDigest }),
-    stageEvaluator: async () => ({ evaluatorId: evaluator.id, version: evaluator.version, workspacePath: evaluatorRoot, digest: evaluatorDigest }),
+    stageCandidate: async () => { candidateStageCalls++; return { candidateId: candidate.candidate_id, workspacePath: stagedCandidate, sourceSha256: candidateDigest }; },
+    stageEvaluator: async () => { evaluatorStageCalls++; return { evaluatorId: evaluator.id, version: evaluator.version, workspacePath: evaluatorRoot, digest: evaluatorDigest }; },
     stageBaseline: async ({ baseline }) => {
       baselineStageCalls += 1;
       return { baselineId: baseline.id, workspacePath: stagedBaseline, sha256: candidateArtifactDigest };
@@ -190,6 +190,15 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
   });
 
   try {
+    if (submissionFailure === 'preexisting-plan') {
+      runtime.recordRemoteExecutionPlan(experiment.experiment_id, { previously_saved: true });
+      await assert.rejects(adapter.executeValidation({ experimentId: experiment.experiment_id, workspace, build, testpack,
+        sourceRoot: localRepository, includePerformance: true }), RemoteExperimentUnknownError);
+      assert.equal(submissions, 0, 'an existing plan is never submitted again');
+      assert.deepEqual([candidateStageCalls, evaluatorStageCalls, baselineStageCalls], [0, 0, 0], 'an existing plan is detected before any staging');
+      assert.deepEqual(runtime.getExperiment(experiment.experiment_id).declared_context.runner_execution_plan, { previously_saved: true });
+      return;
+    }
     if (submissionFailure) {
       const input = { experimentId: experiment.experiment_id, workspace, build, testpack, sourceRoot: localRepository, includePerformance: true };
       await assert.rejects(adapter.executeValidation({ ...input, signal: cancellation.signal }), submissionFailure === 'rejected' ? RunnerClientError : RemoteExperimentUnknownError);
@@ -286,8 +295,8 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
       rows: measurements, commands, bundle: loadFormalEvaluatorBundle(evaluatorRoot) }));
     const commit = store.commitExperimentResult.bind(store);
     try {
-      store.commitExperimentResult = (expected, next, outcome) => {
-        commit(expected, next, outcome);
+      store.commitExperimentResult = (expected, next, outcome, localFacts) => {
+        commit(expected, next, outcome, localFacts);
         throw new Error('injected lost result acknowledgement');
       };
       assert.throws(() => runtime.completeValidationExperiment({ experimentId: experiment.experiment_id, validation: result,
@@ -327,6 +336,7 @@ test('cancel during submission preserves an unconfirmed experiment and never rep
 test('cancel racing with a rejection still checks the original experiment', () => verifyRpcTransition(undefined, 'aborted-400'));
 test('a server error after submission checks the original experiment', () => verifyRpcTransition(undefined, '500'));
 test('a duplicate experiment response checks the original experiment', () => verifyRpcTransition(undefined, '409'));
+test('an existing Runner plan is never restaged or submitted', () => verifyRpcTransition(undefined, 'preexisting-plan'));
 test('an explicitly rejected plan retains its diagnostic', () => verifyRpcTransition(undefined, 'rejected'));
 test('a real Runner keeps the original job when an accepted POST response is lost during cancellation', () => verifyRpcTransition(undefined, 'http-lost'));
 test('progress persistence failure during cancellation stays unknown', () => verifyRpcTransition(undefined, 'progress-error'));

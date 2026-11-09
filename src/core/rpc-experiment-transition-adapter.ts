@@ -19,6 +19,7 @@ import {
 } from '../workspace/validation-runner.js';
 import { isRunnerSubmissionRejected, type ExperimentExecutionBackend } from './experiment-execution-backend.js';
 import { OptimizationRuntime } from './optimization-runtime.js';
+import { ExperimentStateChangedError } from '../storage/optimization-store.js';
 import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
 import { createFormalEvaluatorSteps } from '../evaluator/formal-plan.js';
 import { validateFormalTestpackCompatibility } from '../evaluator/testpack-compatibility.js';
@@ -232,6 +233,9 @@ export class RpcExperimentTransitionAdapter {
   private pendingExperiment(experimentId: string): Experiment {
     const experiment = this.options.runtime.getExperiment(experimentId);
     if (experiment.status !== 'PENDING') throw new Error(`RPC experiment '${experimentId}' must be PENDING before submission (status: ${experiment.status})`);
+    if (experiment.declared_context.runner_execution_plan) {
+      throw this.unknown(experimentId, '原实验已有 Runner 计划，请先核对原作业，不会重新暂存或提交。');
+    }
     return experiment;
   }
 
@@ -322,7 +326,11 @@ export class RpcExperimentTransitionAdapter {
     if (!this.preflightResult) await this.preflight(signal);
     signal?.throwIfAborted();
     const { experiment: _experiment, ...stagedPlan } = plan;
-    this.options.runtime.recordRemoteExecutionPlan(plan.experiment.experiment_id, stagedPlan);
+    try { this.options.runtime.recordRemoteExecutionPlan(plan.experiment.experiment_id, stagedPlan); }
+    catch (error) {
+      if (error instanceof ExperimentStateChangedError) throw this.unknown(plan.experiment.experiment_id, '提交前实验状态已变化，请先核对原实验。');
+      throw error;
+    }
     try {
       const submitted = await this.options.backend.submitExperiment(plan, signal);
       if (submitted.experiment_id !== plan.experiment.experiment_id) throw new Error('runner acknowledged a different experiment identity');

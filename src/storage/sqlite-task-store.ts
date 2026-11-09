@@ -12,6 +12,7 @@ import type {
   OptimizationTask,
 } from '../contracts/optimization-domain.js';
 import type { LeaseRecord, TaskStore } from './task-store.js';
+import { ExperimentStateChangedError, type LocalExperimentFacts } from './optimization-store.js';
 import type { HypothesisOutcome, OptimizationHypothesis } from '../contracts/optimization-hypothesis.js';
 import type { OptimizationApprovalRecord } from '../contracts/optimization-approval.js';
 import type { ProjectRecord } from '../contracts/project.js';
@@ -745,7 +746,17 @@ export class SqliteTaskStore implements TaskStore {
     if (Number(result.changes) !== 1) throw new Error(`optimization experiment '${experiment.experiment_id}' not found`);
   }
 
-  commitExperimentResult(expected: Experiment, next: Experiment, outcome: HypothesisOutcome | null): Experiment {
+  saveExperimentIfCurrent(expected: Experiment, next: Experiment): void {
+    this.transaction(() => {
+      const current = this.getExperiment(expected.experiment_id);
+      if (!current || !isDeepStrictEqual(current, expected)) throw new ExperimentStateChangedError(expected.experiment_id);
+      if (next.experiment_id !== expected.experiment_id || next.task_id !== expected.task_id ||
+          next.candidate_id !== expected.candidate_id || next.type !== expected.type) throw new Error('实验身份不一致。');
+      this.saveExperiment(next);
+    });
+  }
+
+  commitExperimentResult(expected: Experiment, next: Experiment, outcome: HypothesisOutcome | null, localFacts?: LocalExperimentFacts): Experiment {
     return this.transaction(() => {
       const current = this.getExperiment(expected.experiment_id);
       if (!current || !isDeepStrictEqual(current, expected)) throw new Error('实验状态已改变，请重新核对原实验后恢复。');
@@ -763,6 +774,15 @@ export class SqliteTaskStore implements TaskStore {
       if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(current.status) && current.evaluation &&
           (!isDeepStrictEqual(current.evaluation, next.evaluation) || current.validity !== next.validity || current.failure_category !== next.failure_category)) {
         throw new Error('已记录的实验评价或假设结果不一致，请保留原记录并核对。');
+      }
+      if (localFacts) {
+        if (this.listCommandExecutions(current.experiment_id).length || this.listMeasurements(current.experiment_id).length) {
+          throw new Error('原本地实验已有命令或测量记录，无法确认是否完整；请保留原记录并人工核对。');
+        }
+        if (localFacts.commands.some((command, index) => command.experiment_id !== current.experiment_id || command.sequence !== index) ||
+            localFacts.measurements.some(measurement => measurement.experiment_id !== current.experiment_id)) {
+          throw new Error('本地实验事实与原实验身份不一致。');
+        }
       }
       const unchanged = isDeepStrictEqual({ ...current, updated_at: next.updated_at }, next);
       if (outcome) {
@@ -782,6 +802,10 @@ export class SqliteTaskStore implements TaskStore {
         }
       } else if (unchanged) {
         return current;
+      }
+      if (localFacts) {
+        for (const command of localFacts.commands) this.appendCommandExecution(command);
+        for (const measurement of localFacts.measurements) this.appendMeasurement(measurement);
       }
       this.saveExperiment(next);
       if (outcome) this.appendHypothesisOutcome(outcome);

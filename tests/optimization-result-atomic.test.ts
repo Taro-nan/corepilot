@@ -82,6 +82,79 @@ for (const type of ['FORMAL_EVALUATION', 'REVALIDATION'] as const) {
   });
 }
 
+for (const type of ['FORMAL_EVALUATION', 'REVALIDATION'] as const) {
+  test(`${type} local facts roll back with the result and can be saved once from the captured output`, () => {
+    const f = fixture(type);
+    const append = f.store.appendMeasurement.bind(f.store);
+    try {
+      const { runner_status: _remote, ...validation } = f.validation;
+      const complete = () => type === 'FORMAL_EVALUATION'
+        ? f.runtime.completeValidationExperiment({ experimentId: f.experiment.experiment_id, validation, performance: null })
+        : f.runtime.completeRevalidationExperiment({ experimentId: f.experiment.experiment_id,
+          revalidation: { formal: validation, independent: validation, performance_gate: null, passed: true } });
+      const before = f.store.getExperiment(f.experiment.experiment_id);
+      const hypothesisBefore = f.store.getHypothesis(f.hypothesis.hypothesis_id);
+      f.store.appendMeasurement = measurement => { append(measurement); throw new Error('injected local measurement write failure'); };
+      assert.throws(complete, /injected local measurement write failure/);
+      assert.deepEqual(f.store.getExperiment(f.experiment.experiment_id), before);
+      assert.deepEqual(f.store.listCommandExecutions(f.experiment.experiment_id), []);
+      assert.deepEqual(f.store.listMeasurements(f.experiment.experiment_id), []);
+      assert.deepEqual(f.store.listHypothesisOutcomes(f.task.task_id), []);
+      assert.deepEqual(f.store.getHypothesis(f.hypothesis.hypothesis_id), hypothesisBefore);
+      f.store.appendMeasurement = append;
+      const restoreOutcome = injectOutcomeWriteFailure(f.store);
+      try { assert.throws(complete, /injected failure after outcome/); } finally { restoreOutcome(); }
+      assert.deepEqual(f.store.getExperiment(f.experiment.experiment_id), before);
+      assert.deepEqual(f.store.listCommandExecutions(f.experiment.experiment_id), []);
+      assert.deepEqual(f.store.listMeasurements(f.experiment.experiment_id), []);
+      assert.deepEqual(f.store.listHypothesisOutcomes(f.task.task_id), []);
+      assert.deepEqual(f.store.getHypothesis(f.hypothesis.hypothesis_id), hypothesisBefore);
+      const result = complete();
+      const commands = f.store.listCommandExecutions(result.experiment_id);
+      const measurements = f.store.listMeasurements(result.experiment_id);
+      assert.equal(commands.length, type === 'FORMAL_EVALUATION' ? 2 : 4);
+      assert.equal(measurements.length, type === 'FORMAL_EVALUATION' ? 1 : 2);
+      assert.deepEqual(commands.map(command => command.sequence), commands.map((_, index) => index));
+      assert.equal(f.store.listHypothesisOutcomes(f.task.task_id).length, 1);
+    } finally { f.store.appendMeasurement = append; f.close(); }
+  });
+}
+
+test('pre-existing ambiguous local facts are preserved and block automatic result creation', () => {
+  const f = fixture('FORMAL_EVALUATION');
+  try {
+    const command: import('../src/contracts/optimization-domain.js').CommandExecution = { schema_version: 1,
+      command_execution_id: 'command:historical-partial', experiment_id: f.experiment.experiment_id, evaluator: { id: 'evaluator' },
+      step: 'BUILD', sequence: 0, command: 'fixture', args: [], cwd: f.root, start_time: f.remote.started_at!, end_time: f.remote.ended_at!,
+      duration_ms: 1, exit_code: 0, stdout: 'original', stderr: '', timeout_ms: 1000, timed_out: false, cancelled: false };
+    f.store.appendCommandExecution(command);
+    const before = f.store.getExperiment(f.experiment.experiment_id);
+    const { runner_status: _remote, ...validation } = f.validation;
+    assert.throws(() => f.runtime.completeValidationExperiment({ experimentId: f.experiment.experiment_id, validation, performance: null }), /已有命令或测量记录/);
+    assert.deepEqual(f.store.getExperiment(f.experiment.experiment_id), before);
+    assert.deepEqual(f.store.listCommandExecutions(f.experiment.experiment_id), [command]);
+    assert.deepEqual(f.store.listMeasurements(f.experiment.experiment_id), []);
+    assert.deepEqual(f.store.listHypothesisOutcomes(f.task.task_id), []);
+  } finally { f.close(); }
+});
+
+test('a historical measurement without a command is not overwritten or duplicated', () => {
+  const f = fixture('FORMAL_EVALUATION');
+  try {
+    const measurement: import('../src/contracts/optimization-domain.js').Measurement = { schema_version: 1,
+      measurement_id: 'measurement:historical-partial', experiment_id: f.experiment.experiment_id, evaluator: { id: 'evaluator' },
+      kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', subject_id: 'case', sample_index: null, value: true, unit: null,
+      validity: 'VALID', domain_payload: { parameters: {} }, recorded_at: f.remote.updated_at };
+    f.store.appendMeasurement(measurement);
+    const before = f.store.getExperiment(f.experiment.experiment_id);
+    const { runner_status: _remote, ...validation } = f.validation;
+    assert.throws(() => f.runtime.completeValidationExperiment({ experimentId: f.experiment.experiment_id, validation, performance: null }), /已有命令或测量记录/);
+    assert.deepEqual(f.store.getExperiment(f.experiment.experiment_id), before);
+    assert.deepEqual(f.store.listCommandExecutions(f.experiment.experiment_id), []);
+    assert.deepEqual(f.store.listMeasurements(f.experiment.experiment_id), [measurement]);
+  } finally { f.close(); }
+});
+
 test('confirmed failure commits with its outcome; unknown state never invents one', () => {
   const f = fixture('FORMAL_EVALUATION');
   try {

@@ -205,13 +205,13 @@ test('two connections cannot both claim the same reproduction submission intent'
     assert.equal(second.updateReproduction(r.record.workflow_id, experiment.experiment_id, { phase: 'concurrent progress' }), true);
     assert.equal(f.service.get(r.record.workflow_id)?.reproduction?.cancel_requested, true);
     assert.equal(f.service.get(r.record.workflow_id)?.reproduction?.remote_root, '/fixture/winner');
-    const commit = f.store.commitExperimentResult.bind(f.store);
-    f.store.commitExperimentResult = (expected, result, outcome) => {
+    const saveIfCurrent = f.store.saveExperimentIfCurrent.bind(f.store);
+    f.store.saveExperimentIfCurrent = (expected, result) => {
       second.saveExperiment({ ...expected, status: 'SUCCEEDED', ended_at: new Date().toISOString() });
-      return commit(expected, result, outcome);
+      return saveIfCurrent(expected, result);
     };
-    try { assert.throws(() => runtime.markRemoteStateUnknown(experiment.experiment_id, 'connection lost'), /实验状态已改变/); }
-    finally { f.store.commitExperimentResult = commit; }
+    try { assert.throws(() => runtime.markRemoteStateUnknown(experiment.experiment_id, 'connection lost'), /状态已改变/); }
+    finally { f.store.saveExperimentIfCurrent = saveIfCurrent; }
     assert.equal(f.store.getExperiment(experiment.experiment_id)?.status, 'SUCCEEDED');
   } finally { second.close(); await r.runner.close(); await f.close(); }
 });

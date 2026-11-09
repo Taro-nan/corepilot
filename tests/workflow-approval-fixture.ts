@@ -90,7 +90,7 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
     ...(statisticalGate ? { sample_indices: { baseline: baseline.map((_, index) => index), candidate: baseline.map((_, index) => index) } } : { ci_lower: 1.5 }) })));
   assert.equal(repeatedPerformance.passed, true);
   const observed = { machine: { machine_identity_sha256: 'a'.repeat(64), fixture: true }, resource_policy: { validity: 'VALID', fixture: true } };
-  const first = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'FORMAL_EVALUATION' });
+  const first = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'FORMAL_EVALUATION', initialStatus: 'PENDING' });
   const bundle = loadFormalEvaluatorBundle(root);
   const populate = (experiment: Experiment, values: number[], omit: boolean) => {
     const remoteRoot = `/runner/fixture/${experiment.type.toLowerCase()}`;
@@ -137,7 +137,7 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
   };
   populate(first, candidateSamples, false);
   runtime.completeValidationExperiment({ experimentId: first.experiment_id, validation, performance, observedContext: observed, factsAlreadyPersisted: true });
-  const repeated = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'REVALIDATION' });
+  const repeated = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'REVALIDATION', initialStatus: 'PENDING' });
   populate(repeated, options.revalidationCandidateSamples ?? repeatedCandidate, true);
   runtime.completeRevalidationExperiment({ experimentId: repeated.experiment_id, revalidation: { formal: validation, independent: null, performance_gate: repeatedPerformance, passed: true }, observedContext: observed, factsAlreadyPersisted: true });
   Object.assign(workflow, { status: 'WAITING_APPROVAL', enable_performance: true, testpack_digest: frozen.digest,

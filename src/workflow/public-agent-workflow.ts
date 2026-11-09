@@ -287,6 +287,7 @@ export async function runPublicAgentWorkflow(input: {
   let activeExperimentId = saved?.activeExperimentId ?? null;
   let experimentIntent = saved?.experimentIntent ?? null;
   let executionMayHaveStarted = false;
+  let resultAwaitingPersistence = false;
   let prompt = saved?.prompt ?? buildDomainAgentPrompt(input.preflight);
   let phase = saved?.phase ?? 'AGENT';
   let currentRound = saved?.round ?? 1;
@@ -505,6 +506,7 @@ export async function runPublicAgentWorkflow(input: {
               remote,
               signal: input.signal,
             });
+        resultAwaitingPersistence = true;
         const completeExperiment = async (performanceResult: PerformanceGateResult | null) => {
           if (!input.lifecycle || !candidateId || !activeExperimentId) return;
           await input.lifecycle.experimentCompleted({
@@ -517,6 +519,7 @@ export async function runPublicAgentWorkflow(input: {
           activeExperimentId = null;
           experimentIntent = null;
           executionMayHaveStarted = false;
+          resultAwaitingPersistence = false;
         };
         const feedback = (performanceResult: PerformanceGateResult | null = null) => candidateEvaluationFeedback({ validation: validation as ValidationCycleResult, candidateId, experimentId, performance: performanceResult, developmentGate });
         evaluatedHypothesisId = activeHypothesisId;
@@ -583,6 +586,7 @@ export async function runPublicAgentWorkflow(input: {
             resume: saved?.phase === 'REVALIDATION' && saved.activeExperimentId === activeExperimentId,
           })
         : await runRevalidationCycle({ workspace, testpack: input.preflight.testpack.testpack, build, sourceRoot: workspace.repository, testpackDir: input.preflight.testpack.testpackDir, remote, signal: input.signal });
+      resultAwaitingPersistence = true;
       if (input.experimentExecution && revalidation.formal?.performance?.ok) {
         const revalidationMeasurements = parsePerformanceMeasurements(revalidation.formal.performance.stdout);
         const revalidationGate = evaluatePerformanceGate(input.preflight.testpack.testpack, revalidationMeasurements);
@@ -597,6 +601,7 @@ export async function runPublicAgentWorkflow(input: {
         activeExperimentId = null;
         experimentIntent = null;
         executionMayHaveStarted = false;
+        resultAwaitingPersistence = false;
       }
       await input.onProgress?.({ phase: revalidation.passed ? 'REVALIDATION_PASSED' : 'REVALIDATION_FAILED', round, workspace, checkpoint, validation, performance, revalidation, last_event: revalidation.passed ? 'formal and independent revalidation passed' : 'revalidation failed' });
       if (revalidation.passed) return { status: 'WAITING_APPROVAL', rounds: round, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: null };
@@ -627,7 +632,8 @@ export async function runPublicAgentWorkflow(input: {
       error: null,
     };
   } catch (error) {
-    if (activeExperimentId && input.lifecycle && executionMayHaveStarted) {
+    const resultInterrupted = !!activeExperimentId && !!input.lifecycle && resultAwaitingPersistence;
+    if (activeExperimentId && input.lifecycle && executionMayHaveStarted && !resultInterrupted) {
       try {
         await input.lifecycle.experimentFailed({
           experimentId: activeExperimentId,
@@ -641,6 +647,7 @@ export async function runPublicAgentWorkflow(input: {
       }
       activeExperimentId = null;
     }
-    return { status: error instanceof RemoteExperimentUnknownError || error instanceof LocalExperimentUnknownError || input.signal?.reason === 'backend shutting down' || input.signal?.reason === RUNNER_UNKNOWN_ABORT ? 'INTERRUPTED' : error instanceof RemoteExperimentCancelledError || input.signal?.aborted ? 'CANCELLED' : 'FAILED', rounds: currentRound, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: (error as Error).message };
+    const message = resultInterrupted ? `实验结果处理或保存失败，原实验和检查点已保留，请核对后继续：${(error as Error).message}` : (error as Error).message;
+    return { status: resultInterrupted || error instanceof RemoteExperimentUnknownError || error instanceof LocalExperimentUnknownError || input.signal?.reason === 'backend shutting down' || input.signal?.reason === RUNNER_UNKNOWN_ABORT ? 'INTERRUPTED' : error instanceof RemoteExperimentCancelledError || input.signal?.aborted ? 'CANCELLED' : 'FAILED', rounds: currentRound, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: message };
   }
 }
