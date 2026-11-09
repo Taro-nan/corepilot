@@ -301,6 +301,11 @@ test('Agent process records and continuation reuse the same workflow and evaluat
     cursor = batch.next_cursor;
   }
   expect(instructionRecorded).toBe(true);
+  const instructionEvent = panel.getByRole('button', { name: /保留已完成的调查/ });
+  await expect(instructionEvent).toBeVisible({ timeout: 15_000 });
+  await instructionEvent.click();
+  await expect(page.getByRole('dialog')).toContainText('要求结束标记');
+  await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
   await page.screenshot({ path: test.info().outputPath('agent-session.png'), fullPage: true });
 });
 

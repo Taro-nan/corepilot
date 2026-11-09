@@ -59,7 +59,7 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh, scopeAu
   running.current = active;
   useEffect(() => { if (followLatest.current && list.current) list.current.scrollTop = list.current.scrollHeight; }, [events]);
   useEffect(() => {
-    let cancelled = false; let reading = false; let cursor = 0; let wasRunning = true;
+    let cancelled = false; let reading = false; let cursor = 0; let wasRunning = true; let needsDrain = true;
     setEvents([]); setError(''); setLoadingEvents(true);
     async function read() {
       if (reading || cancelled) return;
@@ -67,18 +67,19 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh, scopeAu
       try {
         const data = await api.getOptimizationSessionEvents(workflow.workflow_id, cursor);
         if (cancelled) return;
+        needsDrain = data.next_cursor > cursor;
         cursor = data.next_cursor;
         setEvents(previous => {
           const known = new Set(previous.map(item => item.id));
           return [...previous, ...data.events.filter(item => !known.has(item.id))].slice(-400);
         });
         setError('');
-      } catch (failure) { if (!cancelled) setError((failure as Error).message); }
+      } catch (failure) { needsDrain = false; if (!cancelled) setError((failure as Error).message); }
       finally { reading = false; if (!cancelled) setLoadingEvents(false); }
     }
     void read();
     const timer = setInterval(() => {
-      if (running.current || wasRunning) void read();
+      if (running.current || wasRunning || needsDrain) void read();
       wasRunning = running.current;
     }, 2000);
     return () => { cancelled = true; clearInterval(timer); };
