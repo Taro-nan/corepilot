@@ -55,6 +55,8 @@ corepilot-runner --host 127.0.0.1 --port 4318 --db /path/to/runner.sqlite --work
 
 观察显示阶段、轮次、当前动作和失败信息。按 Esc 停止当前观察并返回工作台；关闭工作台不取消后台优化。需要取消任务时使用 `/workflow cancel <id>`。
 
+观察期间若连接暂时中断，客户端只重新读取原任务或报告，最多尝试 3 次，并提示当前状态尚未确认；不会重新创建任务或实验。仍无法连接时停止观察并返回失败，修复连接后可对原 ID 再次执行 `workflow watch`。权限错误等服务端拒绝不会自动重试。
+
 无参数 `/workflow` 可从真实优化记录中选择工作流，再查看状态、观察、导出报告或取消任务。首页近期活动也来自这些优化记录。
 
 ## 3. 获得报告
@@ -93,7 +95,7 @@ corepilot workflow report workflow:... --config ./corepilot.yaml --output ./opti
 
 `workflow --config` 会连接或启动对应配置的后台。已连接到后台时可省略它；也可以通过 `COREPILOT_SERVER_URL` 指定后台地址。报告经 HTTP 获取，客户端不直接打开 SQLite。
 
-`watch --json` 输出逐行 JSON 状态和最后的文件路径；普通 `report --json` 输出完整报告 JSON。`report --output ... --json` 返回导出路径及报告对象。命令成功返回 0；watch 观察到 FAILED、CANCELLED 或 PERFORMANCE_THRESHOLD_NOT_MET 返回 1，报告仍会导出。WAITING_APPROVAL 表示停止观察并交给人工审阅，不能据此忽略报告里的无效/不完整实验。
+`watch --json` 输出逐行 JSON 状态、连接中断/恢复事件和最后的文件路径；普通 `report --json` 输出完整报告 JSON。`report --output ... --json` 返回导出路径及报告对象。命令成功返回 0；watch 观察到 FAILED、CANCELLED 或 PERFORMANCE_THRESHOLD_NOT_MET 返回 1，报告仍会导出。WAITING_APPROVAL 表示停止观察并交给人工审阅，不能据此忽略报告里的无效/不完整实验。
 
 Ctrl+C 或观察超时仅结束观察；超时返回 1。重新 watch 可继续查看。同一后台进程内的优化继续运行，当前工作流不承诺后台重启后自动续跑 Agent。
 

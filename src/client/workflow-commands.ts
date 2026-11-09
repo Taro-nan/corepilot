@@ -2,7 +2,7 @@ import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { ApiClient } from './api-client.js';
+import { ApiClientError, type ApiClient } from './api-client.js';
 import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import { writeOptimizationReport } from '../report/write-report.js';
 
@@ -170,10 +170,33 @@ export async function executeWorkflowCommand(api: ApiClient, args: string[], opt
   const timeout = seconds(value.timeout, 0, 0) * 1000;
   const started = Date.now();
   let previous = '';
+  const observe = async <T>(operation: () => Promise<T>): Promise<{ state: 'read'; value: T } | { state: 'unavailable' } | { state: 'stopped' }> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (options.signal?.aborted) return { state: 'stopped' };
+      if (attempt && timeout > 0 && Date.now() - started >= timeout) return { state: 'unavailable' };
+      try {
+        const observed = await operation();
+        if (attempt) options.print?.(value.json ? JSON.stringify({ event: 'connection_restored', workflow_id: id }) : '连接已恢复，继续读取原任务。');
+        return { state: 'read', value: observed };
+      } catch (error) {
+        if (options.signal?.aborted) return { state: 'stopped' };
+        if (!(error instanceof ApiClientError) || error.code !== 'CONNECTION_FAILED' || error.status !== null) throw error;
+        if (attempt === 2 || timeout > 0 && Date.now() - started >= timeout) return { state: 'unavailable' };
+        options.print?.(value.json ? JSON.stringify({ event: 'connection_interrupted', workflow_id: id, retry: attempt + 1 })
+          : '连接暂时中断，正在按原任务 ID 重新读取；当前状态尚未确认。');
+        const pause = timeout > 0 ? Math.min(interval, Math.max(0, timeout - (Date.now() - started))) : interval;
+        try { await delay(pause, undefined, { signal: options.signal }); }
+        catch (waitError) { if (options.signal?.aborted) return { state: 'stopped' }; throw waitError; }
+      }
+    }
+    return { state: 'unavailable' };
+  };
   while (!options.signal?.aborted) {
-    let w: OptimizationWorkflowRecord;
-    try { w = await read(); }
-    catch (error) { if (options.signal?.aborted) break; throw error; }
+    const observed = await observe(read);
+    if (observed.state === 'stopped') break;
+    if (observed.state === 'unavailable') return result({ workflow_id: id, watching: false, observation: 'UNKNOWN' },
+      `无法连接并读取原任务 ${id}；当前状态未知。请检查控制端连接后重新使用 workflow watch，不会重复启动任务。`, false);
+    const w = observed.value;
     const fingerprint = JSON.stringify([w.status, w.progress, w.error]);
     if (fingerprint !== previous) {
       options.print?.(value.json ? JSON.stringify({ workflow: w }) : workflowStatusText(w));
@@ -181,7 +204,11 @@ export async function executeWorkflowCommand(api: ApiClient, args: string[], opt
     }
     if (detached(w)) return result({ workflow: w, execution_attached: false }, w.agent_session ? `原会话已保留。使用 corepilot workflow resume ${id} 继续。` : detachedMessage, false);
     if (isWorkflowFinished(w)) {
-      const response = await api.getOptimizationReport(id);
+      const report = await observe(() => api.getOptimizationReport(id));
+      if (report.state === 'stopped') break;
+      if (report.state === 'unavailable') return result({ workflow: w, watching: false, observation: 'REPORT_UNAVAILABLE' },
+        `无法连接并读取原任务 ${id} 的报告；上次查询到的任务状态已保留。请检查连接后使用 workflow report 重试。`, false);
+      const response = report.value;
       const root = value.output ?? path.join(options.reportRoot ?? path.resolve('.corepilot', 'reports'), id.replace(/^workflow:/, '').replace(/[^a-zA-Z0-9._-]/g, '_'));
       const files = await writeOptimizationReport(root, response);
       return result({ workflow: w, files }, `观察结束：${w.status}\n报告：${files.markdown}\n原始记录：${files.json}\n${w.status === 'WAITING_APPROVAL' ? '测试已完成，等待人工审阅；报告生成不会自动批准或合并源码。' : w.status === 'VALIDATION_BLOCKED' ? `验证受阻。修复环境后使用 corepilot workflow retry-validation ${id} 重新验证当前候选。` : ['BUDGET_EXHAUSTED', 'INTERRUPTED'].includes(w.status) ? `现场已保留。使用 corepilot workflow resume ${id} 继续。` : '报告保留已完成和失败的实验事实。'}`, !['FAILED', 'CANCELLED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'BUDGET_EXHAUSTED', 'INTERRUPTED', 'VALIDATION_BLOCKED'].includes(w.status));
