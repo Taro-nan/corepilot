@@ -89,7 +89,7 @@ export function candidateEvaluationFeedback(input: {
     failure_classification: failureClassification,
     performance_summary: {
       status: !validation.performance ? 'NOT_EXECUTED' : status?.validity === 'INVALID' || performance?.statistics?.verdict === 'INVALID' ? 'INVALID' : !validation.performance.ok ? 'FAILED' : !performance ? 'NOT_EVALUATED' : performance.passed ? 'PASSED' : uncertain ? 'INCONCLUSIVE' : 'FAILED',
-      classification: !status ? 'DEVELOPMENT_ONLY' : status.validity === 'VALID' ? 'FORMAL' : 'DIAGNOSTIC_ONLY',
+      classification: !status ? 'DEVELOPMENT_ONLY' : status.validity === 'VALID' && performance?.statistics?.verdict !== 'INVALID' ? 'FORMAL' : 'DIAGNOSTIC_ONLY',
       weighted_geomean: performance?.weighted_geomean ?? null,
       overall_ci_lower: performance?.overall_ci_lower ?? null,
       key_case_ci_lower: performance?.key_case_ci_lower ?? null,

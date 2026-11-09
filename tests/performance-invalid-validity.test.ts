@@ -71,6 +71,7 @@ test('Runner success remains a separate fact; invalid derived statistics and rep
     const validation = { ...seeded.validation, runner_status: status, performance: seeded.validation.build, passed: true };
     const feedback = candidateEvaluationFeedback({ validation, performance: gate });
     assert.equal(feedback.experiment_validity, 'INVALID');
+    assert.equal(feedback.performance_summary.classification, 'DIAGNOSTIC_ONLY');
     assert.equal(status.validity, 'VALID', 'raw Runner execution fact remains unchanged');
     runtime.synchronizeRemoteExperiment(status);
     const result = runtime.completeValidationExperiment({ experimentId: experiment.experiment_id, validation, performance: gate, factsAlreadyPersisted: true });

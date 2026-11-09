@@ -697,6 +697,7 @@ export class OptimizationRuntime {
     // invalid gate that was recorded with VALID experiment validity.
     if (feedback && performance?.statistics?.verdict === 'INVALID' && experiment.validity === 'VALID') {
       feedback.experiment_validity = experiment.validity;
+      feedback.performance_summary.classification = 'FORMAL';
     }
     const assessment = feedback ? assessHypothesisOutcome(feedback) : { status: 'INCONCLUSIVE' as const, reason: `no complete evaluation feedback: ${experiment.failure_category ?? experiment.status}` };
     return { schema_version: 1, outcome_id: `hypothesis-outcome:${experiment.experiment_id}`, hypothesis_id: candidate.hypothesis_id, task_id: experiment.task_id, candidate_id: candidate.candidate_id, experiment_id: experiment.experiment_id, ...assessment, failure_category: experiment.failure_category, feedback, recorded_at: this.timestamp() };
