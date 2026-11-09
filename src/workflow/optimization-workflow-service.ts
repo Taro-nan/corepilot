@@ -33,7 +33,7 @@ import { OptimizationRuntime } from '../core/optimization-runtime.js';
 import { RunnerClient } from '../client/runner-client.js';
 import type { ExperimentExecutionPlan } from '../contracts/runner-rpc.js';
 import { RunnerClientExperimentExecutionBackend } from '../core/experiment-execution-backend.js';
-import { RpcExperimentTransitionAdapter, RemoteExperimentUnknownError } from '../core/rpc-experiment-transition-adapter.js';
+import { RpcExperimentTransitionAdapter, RemoteExperimentUnknownError, RUNNER_UNKNOWN_ABORT } from '../core/rpc-experiment-transition-adapter.js';
 import { RunnerDevelopmentInvestigation, stageRemoteDevelopmentAssets, type PreparedDevelopmentWorkspace } from '../core/development-investigation.js';
 import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
 import { packageOptimizationTaskInput } from '../library-package/task-definition.js';
@@ -369,7 +369,7 @@ export class OptimizationWorkflowService {
         thinkingLevel: preflight.config.config.model.reasoning_effort ?? 'off', fetch: modelFetch, timeoutMs: preflight.config.config.model.timeout_ms,
         onEvent: async event => {
           if (event.type === 'tool_end' && event.isError && session && await session.readRecord('development-job')) {
-            this.controllers.get(workflowId)?.abort('runner state unknown');
+            this.controllers.get(workflowId)?.abort(RUNNER_UNKNOWN_ABORT);
           }
           const message = event.type === 'turn_start' ? 'Agent 正在分析下一步'
             : event.type === 'tool_start' ? `正在调用 ${event.toolName}`
@@ -463,7 +463,7 @@ export class OptimizationWorkflowService {
             const diagnostic = facts.command_executions.at(-1);
             continuationMessage = `${continuationMessage ?? ''}\n上次开发实验已核对：${id}。${diagnostic ? JSON.stringify({ exit_code: diagnostic.exit_code, stdout: diagnostic.stdout.slice(-8192), stderr: diagnostic.stderr.slice(-8192) }) : '尚无命令输出。'}`;
             await session.record('development-job', null);
-          } catch (error) { throw new RemoteExperimentUnknownError(id, `开发实验现场已保留：${(error as Error).message}`); }
+          } catch (error) { throw new RemoteExperimentUnknownError(id, `开发实验 ${id} 的现场已保留：${(error as Error).message}`); }
         }
         const comparisonBaseline = preflight.testpack.testpack.performance.baselines.comparison;
         const prepareComparisonBaseline = createStagingCache(async (stageSignal?: AbortSignal): Promise<StagedRemoteBaseline> => {
@@ -752,15 +752,25 @@ export class OptimizationWorkflowService {
           ...(progress.hypothesis_id ? { hypothesis_id: progress.hypothesis_id } : {}),
         }); await session!.progress({ phase: progress.phase, ...(progress.last_event ? { last_event: clean(progress.last_event) } : {}) }); },
         runAgent: async (tools: readonly AgentTool[], prompt: string, agentSignal: AbortSignal) => {
-          const result = await session!.run(continuationMessage ? `${prompt}\n用户补充要求：${continuationMessage}` : prompt,
-            tools, agentSignal, budget.time_limit_ms - (Date.now() - continuationStarted), afterSavedEvaluation);
-          afterSavedEvaluation = false;
-          continuationMessage = undefined;
-          update({ agent_session: await session!.summary() });
-          const pending = await session!.readRecord<ExperimentExecutionPlan | null>('development-job');
-          if (pending) return { ...result, ok: false, no_source_mutation: false, interrupted: true,
-            error: `Runner 开发实验 ${pending.experiment.experiment_id} 的状态尚未确认，现场已保留；继续时先核对原实验。` };
-          return result;
+          try {
+            const result = await session!.run(continuationMessage ? `${prompt}\n用户补充要求：${continuationMessage}` : prompt,
+              tools, agentSignal, budget.time_limit_ms - (Date.now() - continuationStarted), afterSavedEvaluation);
+            afterSavedEvaluation = false;
+            continuationMessage = undefined;
+            update({ agent_session: await session!.summary() });
+            const pending = await session!.readRecord<ExperimentExecutionPlan | null>('development-job');
+            if (pending) return { ...result, ok: false, no_source_mutation: false, interrupted: true,
+              error: `Runner 开发实验 ${pending.experiment.experiment_id} 的状态尚未确认，现场已保留；继续时先核对原实验。` };
+            return result;
+          } catch (error) {
+            let pending: ExperimentExecutionPlan | null | undefined;
+            try { pending = await session!.readRecord<ExperimentExecutionPlan | null>('development-job'); }
+            catch { throw new RemoteExperimentUnknownError('unknown', '无法读取开发实验的恢复记录；请核对 Runner 和原会话后继续。'); }
+            if (pending) throw new RemoteExperimentUnknownError(pending.experiment.experiment_id,
+              `Runner 开发实验 ${pending.experiment.experiment_id} 的状态尚未确认，现场已保留；继续时先核对原实验。`);
+            if (agentSignal.reason === RUNNER_UNKNOWN_ABORT) throw new RemoteExperimentUnknownError('unknown', 'Runner 开发实验的状态尚未确认，请核对原会话后继续。');
+            throw error;
+          }
         },
       });
       const terminalStatus = result.status;
@@ -782,7 +792,7 @@ export class OptimizationWorkflowService {
       }, clean);
     } catch (error) {
       const message = clean((error as Error).message);
-      const status = error instanceof RemoteExperimentUnknownError || signal.reason === 'backend shutting down' ? 'INTERRUPTED' : signal.aborted ? 'CANCELLED' : 'FAILED';
+      const status = error instanceof RemoteExperimentUnknownError || signal.reason === 'backend shutting down' || signal.reason === RUNNER_UNKNOWN_ABORT ? 'INTERRUPTED' : signal.aborted ? 'CANCELLED' : 'FAILED';
       finishWorkflowExecution(this.options.store, workflowId, taskId, { status, error: message, progress: { phase: status, last_event: message } }, clean);
     } finally {
       if (session) {

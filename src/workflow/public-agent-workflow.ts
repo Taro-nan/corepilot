@@ -20,7 +20,7 @@ import {
 } from '../workspace/validation-runner.js';
 import type { ValidationCommand } from '../contracts/validation-testpack.js';
 import type { PublicOptimizationPreflight } from './public-optimization.js';
-import { RemoteExperimentCancelledError, RemoteExperimentUnknownError, type RpcExperimentTransitionAdapter } from '../core/rpc-experiment-transition-adapter.js';
+import { RemoteExperimentCancelledError, RemoteExperimentUnknownError, RUNNER_UNKNOWN_ABORT, type RpcExperimentTransitionAdapter } from '../core/rpc-experiment-transition-adapter.js';
 import type { DevelopmentFindings, DevelopmentGateResult } from '../contracts/development-investigation.js';
 import type { CandidateEvaluationDecision, CandidateEvaluationFeedback } from '../contracts/candidate-evaluation-feedback.js';
 import { candidateEvaluationFeedback } from '../workspace/candidate-evaluation-feedback.js';
@@ -423,7 +423,7 @@ export async function runPublicAgentWorkflow(input: {
             await input.onProgress?.({ phase: 'PERFORMANCE_THRESHOLD_NOT_MET', round: round - 1, workspace, checkpoint, validation, performance, revalidation, last_event: 'agent stopped without proposing another source mutation' });
           return { status: checkpoint ? 'PERFORMANCE_THRESHOLD_NOT_MET' : 'NO_CANDIDATE', rounds: round - 1, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: null };
           }
-          return { status: input.signal?.aborted ? input.signal.reason === 'backend shutting down' ? 'INTERRUPTED' : 'CANCELLED' : 'FAILED', rounds: round, workspace, checkpoint, validation, performance, revalidation, agent, error: agent.error };
+          return { status: input.signal?.aborted ? input.signal.reason === 'backend shutting down' || input.signal.reason === RUNNER_UNKNOWN_ABORT ? 'INTERRUPTED' : 'CANCELLED' : 'FAILED', rounds: round, workspace, checkpoint, validation, performance, revalidation, agent, error: agent.error };
         }
         validation = null;
         performance = null;
@@ -641,6 +641,6 @@ export async function runPublicAgentWorkflow(input: {
       }
       activeExperimentId = null;
     }
-    return { status: error instanceof RemoteExperimentUnknownError || error instanceof LocalExperimentUnknownError || input.signal?.reason === 'backend shutting down' ? 'INTERRUPTED' : error instanceof RemoteExperimentCancelledError || input.signal?.aborted ? 'CANCELLED' : 'FAILED', rounds: currentRound, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: (error as Error).message };
+    return { status: error instanceof RemoteExperimentUnknownError || error instanceof LocalExperimentUnknownError || input.signal?.reason === 'backend shutting down' || input.signal?.reason === RUNNER_UNKNOWN_ABORT ? 'INTERRUPTED' : error instanceof RemoteExperimentCancelledError || input.signal?.aborted ? 'CANCELLED' : 'FAILED', rounds: currentRound, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: (error as Error).message };
   }
 }

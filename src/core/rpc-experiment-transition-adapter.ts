@@ -89,6 +89,9 @@ export class RemoteExperimentUnknownError extends Error {
   }
 }
 
+/** A local Agent interruption caused by an unresolved Runner job, not user cancellation. */
+export const RUNNER_UNKNOWN_ABORT = 'runner state unknown';
+
 /** The Runner has confirmed cancellation of this exact experiment. */
 export class RemoteExperimentCancelledError extends Error {
   constructor(readonly experimentId: string) {
