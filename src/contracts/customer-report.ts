@@ -4,7 +4,7 @@ import type { CandidateVerificationSummary } from './candidate-verification.js';
 
 export interface CustomerOptimizationSummary {
   schema_version: 1;
-  state: 'READY_FOR_REVIEW' | 'READY_FOR_DELIVERY' | 'DELIVERY_PENDING' | 'DELIVERED' | 'DELIVERY_UNVERIFIED' | 'BLOCKED' | 'RUNNING' | 'NO_VERIFIED_RESULT';
+  state: 'CANDIDATE_READY' | 'READY_FOR_REVIEW' | 'READY_FOR_DELIVERY' | 'DELIVERY_PENDING' | 'DELIVERED' | 'DELIVERY_UNVERIFIED' | 'BLOCKED' | 'RUNNING' | 'NO_VERIFIED_RESULT';
   conclusion: string;
   /** Current stored-fact assessment; it is not an approval or frozen Evidence. */
   verification: CandidateVerificationSummary;
@@ -21,6 +21,6 @@ export interface CustomerOptimizationSummary {
   regressions: string[];
   groups: Array<{ dimension: string; value: string; workloads: number; weighted_speedup: number; worst_speedup: number }>;
   limits: string[];
-  next_step: { kind: 'WAIT' | 'REVIEW' | 'RESUME' | 'RETRY_VALIDATION' | 'INSPECT' | 'REPRODUCE'; message: string; command: string | null };
+  next_step: { kind: 'TEST' | 'WAIT' | 'REVIEW' | 'RESUME' | 'RETRY_VALIDATION' | 'INSPECT' | 'REPRODUCE'; message: string; command: string | null };
   resource_wait_ms: number;
 }

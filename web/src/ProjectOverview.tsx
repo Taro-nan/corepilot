@@ -40,14 +40,13 @@ export function ProjectOverview({ project, workflows, activeIds, navigate, creat
   const machineReady = !!machine?.enabled && machine.setup_complete;
   const validationReady = !!context && !functionMismatch && context.setup.checks.length > 0 && context.setup.checks.every(item => item.state === 'CONFIGURED')
     && (['QUALIFIED', 'LEGACY'].includes(context.setup.validation?.evaluator_status ?? '') || !!config?.validation.testpack.trim());
-  const next = !modelReady || !machineReady ? { page: 'settings', title: !modelReady ? '配置模型与机器' : '选择执行机器', text: '先选用可调用工具的模型，并为项目选择执行机器。' }
-    : !validationReady ? { page: 'validation', title: '准备构建与验证', text: functionMismatch ? `当前测试方案用于 ${context?.setup.validation?.function_name}，请为 ${functionName} 准备匹配的方案。` : '确认构建、比较基线和测试方案；草稿需先试跑并确认可用。' }
-      : { page: 'tasks', title: '创建优化任务', text: '项目设置已齐备。选择目标函数和分支，检查本次条件后开始。' };
+  const next = !modelReady ? { page: 'settings', title: '配置优化模型', text: '选择可调用工具的模型，即可让 Agent 调查和修改源码。' }
+    : { page: 'tasks', title: '创建优化任务', text: validationReady ? '选择函数和分支，可仅生成代码，也可使用现有方案自动验证。' : '选择函数和分支开始代码优化；测试可以稍后单独进行。' };
   const attention = workflows.find(item => matchesWorkflowStatus(item, 'running', activeIds))
     ?? workflows.find(item => item.status === 'WAITING_APPROVAL');
   const prepareTarget = () => prepare({ projectId: project.project_id, functionName, sourceBranch: project.source_branch ?? '', machineId: machine?.machine_id ?? '', returnTo: 'overview' });
   return <>
-    <div className="page-heading"><div><span className="page-eyebrow">项目工作台</span><h1>{project.name}</h1><p>选择目标，让 Agent 调查、实现，并在执行机器上验证。</p></div>
+    <div className="page-heading"><div><span className="page-eyebrow">项目工作台</span><h1>{project.name}</h1><p>让 Agent 优化源码，或单独创建两库测试。</p></div>
       <button className="primary" disabled={busy} onClick={create}><Icon name="plus" size={17} />创建优化任务</button></div>
     <div className="project-context-bar" aria-label="项目默认任务条件">
       <button type="button" aria-label={`更换优化分支，当前 ${project.source_branch ?? '当前检出版本'}`} onClick={() => setPicker('branch')}><Icon name="folder" size={15} /><span><small>分支</small><strong>{project.source_branch ?? '当前检出版本'}</strong></span><Icon name="edit" size={13} /></button>
@@ -55,11 +54,11 @@ export function ProjectOverview({ project, workflows, activeIds, navigate, creat
       <button type="button" aria-label={`更换目标函数，当前 ${functionName || '尚未选择'}`} disabled={!context} onClick={() => setPicker('function')}><Icon name="code" size={15} /><span><small>目标函数</small><strong>{functionName || (context ? '尚未选择' : '读取中…')}</strong>{functionMismatch && <small className="context-warning">测试方案不匹配</small>}</span><Icon name="edit" size={13} /></button>
     </div>
     <section className="project-journey" aria-label="项目准备与下一步">
-      <div className="journey-heading"><div><h2>{context ? '下一步：' + next.title : error ? '项目准备状态暂时不可用' : '正在读取项目准备状态…'}</h2><p>{context ? next.text : '不会启动构建、模型生成或性能实验。'}</p></div>{context && next.page !== 'tasks' && <button onClick={() => next.page === 'validation' ? prepareTarget() : navigate(next.page)} disabled={busy}>{next.title}<Icon name="arrow" size={15} /></button>}</div>
+      <div className="journey-heading"><div><h2>{context ? '下一步：' + next.title : error ? '项目准备状态暂时不可用' : '正在读取项目准备状态…'}</h2><p>{context ? next.text : '不会启动构建、模型生成或性能实验。'}</p></div>{context && next.page !== 'tasks' && <button onClick={() => navigate(next.page)} disabled={busy}>{next.title}<Icon name="arrow" size={15} /></button>}</div>
       {error && <><Feedback text={error} bad /><button onClick={() => setRetry(value => value + 1)}>重新读取准备状态</button></>}
       <details className="journey-more"><summary>查看准备状态</summary><ol className="journey-steps">
         <li><span className="journey-index">1</span><div><strong>模型与执行机器</strong><p>{context ? modelReady ? config?.model.model_id : '尚未配置模型' : '读取已保存配置…'}{machine && ' · ' + machine.name}</p><button className="text-btn" onClick={() => navigate('settings')}>{modelReady && machineReady ? '查看或更换' : '完成设置'}<Icon name="arrow" size={13} /></button></div><span className="journey-state">{context ? modelReady && machineReady ? '已配置' : '待配置' : '读取中'}</span></li>
-        <li><span className="journey-index">2</span><div><strong>构建与验证</strong><p>{context ? validationReady ? '已选择可用方案；提交时再检查当前条件' : functionMismatch ? '所选函数需要匹配的测试方案' : context.setup.validation ? '测试方案待完善或确认' : '准备构建、基线与测试' : '读取接入状态…'}</p><button className="text-btn" onClick={prepareTarget}>{validationReady ? '查看测试方案' : '准备测试方案'}<Icon name="arrow" size={13} /></button></div><span className="journey-state">{context ? validationReady ? '已准备' : '待准备' : '读取中'}</span></li>
+        <li><span className="journey-index">2</span><div><strong>测试准备（按需）</strong><p>{context ? validationReady ? '已有可复用方案；提交测试时核对当前条件' : functionMismatch ? '自动验证需要匹配的测试方案' : '仅生成代码时可跳过；测试时再准备构建与规则' : '读取接入状态…'}</p><button className="text-btn" onClick={prepareTarget}>{validationReady ? '查看测试方案' : '准备测试方案'}<Icon name="arrow" size={13} /></button></div><span className="journey-state">{context ? validationReady ? '已准备' : '按需准备' : '读取中'}</span></li>
         <li><span className="journey-index">3</span><div><strong>创建并执行任务</strong><p>确认函数、分支、机器与测试条件</p><span className="hint">执行后在任务详情查看阶段和结果</span></div><span className="journey-state">待选择目标</span></li>
       </ol></details>
     </section>

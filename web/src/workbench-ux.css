@@ -149,11 +149,11 @@ summary:focus-visible { outline:3px solid #246bfe55; outline-offset:3px; border-
 .composer-actions .hint { margin:0; font-size:11px; }
 .composer-actions .actions { flex-shrink:0; }
 dialog.task-dialog { width:min(900px,calc(100vw - 32px)); }
-dialog.task-dialog[open] { display:flex; flex-direction:column; max-height:calc(100dvh - 40px); overflow:hidden; }
-.task-dialog .modal-head { position:relative; flex-shrink:0; }
-.task-dialog .modal-body { min-height:0; overflow:auto; overscroll-behavior:contain; padding:20px 24px; }
-.task-dialog .modal-footer { flex-shrink:0; padding:14px 24px; border-top:1px solid var(--border); background:#fff; }
-.task-dialog .composer-actions { padding:0; margin:0; border:0; }
+dialog.form-dialog[open] { display:flex; flex-direction:column; max-height:calc(100dvh - 40px); overflow:hidden; }
+.form-dialog .modal-head { position:relative; flex-shrink:0; }
+.form-dialog .modal-body { min-height:0; overflow:auto; overscroll-behavior:contain; padding:20px 24px; }
+.form-dialog .modal-footer { flex-shrink:0; padding:14px 24px; border-top:1px solid var(--border); background:#fff; }
+.form-dialog .composer-actions { padding:0; margin:0; border:0; }
 .correctness-rule summary { color:#426daa; font-size:11px; margin-top:3px; }
 .correctness-rule p { margin:7px 0; line-height:1.7; }
 .result-conditions { padding:0 20px 16px; font-size:12px; }

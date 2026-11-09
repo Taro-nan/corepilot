@@ -1,6 +1,8 @@
 # CorePilot
 
-网页版已接入现有后端：`npm ci && npm run build` 后运行 `node dist/entry.js web --data-dir ./corepilot-data`，浏览器打开 `http://127.0.0.1:4317`。支持项目与模型/机器配置、优化任务、实验分析和报告下载。网页与 CLI 共用 API、SQLite 和任务记录；Linux 常驻部署见 [网页工作台指南](docs/guides/web-workbench.md)。
+网页版已接入现有后端：`npm ci && npm run build` 后运行 `node dist/entry.js web --data-dir ./corepilot-data`，浏览器打开 `http://127.0.0.1:4317`。支持项目与模型/机器配置、源码优化、独立测试、实验分析和报告下载。网页与 CLI 共用应用服务和任务记录；Linux 常驻部署见 [网页工作台指南](docs/guides/web-workbench.md)。
+
+优化与测试可以分别使用：优化任务可选择“仅生成优化代码”，先得到待验证候选；测试任务独立比较源码分支或上传的库包。已有正式验证流程仍保留。操作及当前支持范围见[优化与独立测试](docs/guides/optimization-and-testing.md)。
 
 从交互配置到优化测试报告，先看 [使用指南](docs/guides/quickstart-report.md)。已有配置可以直接运行 `corepilot optimize --config corepilot.yaml --function <api> --performance --watch --output ./report`；交互工作台支持 `/validation`、`/check`、引导式 `/optimize` 和 `/workflow` 报告导出。
 

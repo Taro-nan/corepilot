@@ -7,6 +7,11 @@ export function CustomerReportPanel({ report, notify, refresh }: { report: Optim
   const [busy, setBusy] = useState(false), [dimension, setDimension] = useState('');
   const summary = report.summary, workflow = report.workflow, job = workflow.reproduction;
   if (!summary) return null;
+  if (workflow.verification_mode === 'source_only') return <Panel title="源码优化结果" className="customer-report-summary">
+    <p className="customer-conclusion">{summary.conclusion}</p><p>正确性未验证 · 性能未测量。</p>
+    <div className="customer-next-step"><strong>下一步</strong><p>在任务详情查看或下载补丁，再创建独立测试任务。</p></div>
+    {summary.source_commit && <Disclosure title="固定源码身份"><CopyValue value={summary.source_commit} label="源码提交" /></Disclosure>}
+  </Panel>;
   const dimensions = [...new Set(summary.groups.map(row => row.dimension))];
   const rows = summary.groups.filter(row => row.dimension === (dimension || dimensions[0]));
   const active = !!job && ['PREPARING', 'RUNNING'].includes(job.status);

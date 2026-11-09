@@ -15,6 +15,7 @@ export interface FormalEvaluatorStepInput {
   candidateArtifact: FormalArtifactInput;
   baselineArtifact: FormalArtifactInput;
   baselineLibraryPaths?: string[];
+  candidateLibraryPaths?: string[];
   candidateSourceRoot?: string;
   correctnessTimeoutMs: number;
   performanceTimeoutMs: number;
@@ -44,7 +45,7 @@ export function createFormalEvaluatorSteps(input: FormalEvaluatorStepInput): Exp
     steps.push({
       step: 'CORRECTNESS',
       execution_domain: 'EVALUATOR',
-      command: command(input.bundle.manifest.correctness.command.executable, [
+      command: { ...command(input.bundle.manifest.correctness.command.executable, [
         correctnessScript,
         ...expandEvaluatorArguments(input.bundle.manifest.correctness.command.arguments, {
           ...formalCaseParameters(testCase),
@@ -53,6 +54,7 @@ export function createFormalEvaluatorSteps(input: FormalEvaluatorStepInput): Exp
           runtime_root: input.runtimeRoot,
         }, `correctness case '${testCase.case_id}'`),
       ], input.stagedEvaluatorRoot, input.correctnessTimeoutMs),
+        ...(input.candidateLibraryPaths?.length ? { environment: { LD_LIBRARY_PATH: input.candidateLibraryPaths.join(':') } } : {}) },
       measurements_from_stdout: true,
       formal_context: { ...context('CORRECTNESS_CASE', testCase.case_id, 'EVALUATOR', null, formalCaseParameters(testCase), testCase.threads, input.candidateArtifact, input.bundle),
         resources: entryResources(testCase, testPlan, input.bundle.manifest) },
@@ -118,8 +120,8 @@ function performanceStep(
         runtime_root: input.runtimeRoot,
       }, `performance workload '${workload.workload_id}'`),
     ], input.stagedEvaluatorRoot, input.performanceTimeoutMs),
-    ...(role === 'BASELINE' && input.baselineLibraryPaths?.length
-      ? { environment: { LD_LIBRARY_PATH: input.baselineLibraryPaths.join(':') } } : {}) },
+    ...((role === 'BASELINE' ? input.baselineLibraryPaths : input.candidateLibraryPaths)?.length
+      ? { environment: { LD_LIBRARY_PATH: (role === 'BASELINE' ? input.baselineLibraryPaths! : input.candidateLibraryPaths!).join(':') } } : {}) },
     ...(phase === 'PERFORMANCE_SAMPLE' ? { measurements_from_stdout: true } : {}),
     formal_context: { ...context(phase, workload.workload_id, role, index, formalWorkloadParameters(workload), workload.threads, artifact, input.bundle),
       resources: entryResources(workload, testPlan, input.bundle.manifest) },

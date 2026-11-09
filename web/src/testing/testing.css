@@ -1,0 +1,53 @@
+.verification-choice { display:grid; grid-template-columns:1fr 1fr; gap:10px; border:0; padding:0; margin:0 0 18px; min-width:0; }
+.verification-choice legend { font-size:12px; font-weight:600; margin-bottom:8px; }
+.verification-choice label { display:flex; align-items:flex-start; gap:9px; border:1px solid var(--border); border-radius:7px; padding:12px; cursor:pointer; }
+.verification-choice label.selected { border-color:#87aafa; background:#f7faff; }
+.verification-choice input { width:auto; margin:4px 0 0; flex:none; }
+.verification-choice strong,.verification-choice small { display:block; }
+.verification-choice strong { font-size:13px; color:var(--ink); }
+.verification-choice small { font-size:11px; color:var(--muted); line-height:1.6; margin-top:3px; }
+.source-outcomes,.testing-outcomes { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.source-candidate { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:18px 20px 6px; }
+.source-changed-files { list-style:none; padding:0 20px 14px; margin:0; font-size:12px; overflow-wrap:anywhere; }
+.source-candidate + .source-changed-files + .disclosure { margin:0 20px 18px; }
+.testing-dialog { width:min(1060px, calc(100vw - 40px)); }
+.testing-dialog .field-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.testing-pinned { background:#f5f8ff; border-color:#d4e1fa; color:#334b72; }
+.testing-subjects { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin:4px 0 20px; }
+.testing-subject { border:1px solid var(--border); border-radius:8px; padding:12px 15px 6px; min-width:0; }
+.testing-subject legend { color:var(--ink); font-size:13px; font-weight:600; padding:0 6px; }
+.testing-subject .segmented { display:flex; margin-bottom:14px; border-bottom:1px solid var(--border); gap:12px; }
+.testing-subject .segmented button { background:transparent; border:0; border-radius:0; padding:7px 2px 9px; color:var(--muted); min-height:32px; }
+.testing-subject .segmented button[aria-pressed=true] { color:var(--accent); box-shadow:inset 0 -2px var(--accent); font-weight:600; }
+.testing-subject .field { margin-bottom:12px; }
+.testing-subject .source-branches { margin:0; padding:0; border:0; background:transparent; }
+.testing-subject .source-branches>p { margin-bottom:8px; }
+.testing-subject .disclosure-summary { max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.testing-asset-note { font-size:12px; margin:10px 0; overflow-wrap:anywhere; }
+.testing-asset-note strong,.testing-asset-note span { display:block; }
+.testing-asset-note span { font-size:11px; color:var(--muted); }
+.testing-upload-options { margin:10px 0; }
+.testing-upload-options input { font-size:12px; padding:9px; }
+.testing-subject-identities { display:grid; grid-template-columns:1fr 1fr; padding:18px 20px 0; gap:20px; }
+.testing-subject-identities>section { min-width:0; }
+.testing-subject-identities h3 { color:var(--muted); font-size:11px; font-weight:500; margin:0 0 6px; }
+.testing-subject-identities p { font-size:12px; margin:5px 0; color:var(--muted); }
+.testing-subject-identities .disclosure { margin-bottom:16px; }
+.testing-scope { display:flex; flex-wrap:wrap; gap:6px 12px; margin:0 0 18px; font-size:12px; color:var(--muted); }
+.testing-scope strong { color:var(--ink); }
+.testing-conditions { margin-bottom:18px; }
+.testing-conditions .detail-code { max-height:360px; }
+.testing-outcomes small { overflow-wrap:anywhere; }
+@media(max-width:800px) {
+  .testing-subjects,.testing-subject-identities { grid-template-columns:1fr; gap:12px; }
+  .testing-dialog { width:calc(100vw - 24px); }
+  .testing-subject .disclosure-summary { max-width:170px; }
+}
+@media(max-width:520px) {
+  .testing-dialog .field-grid { grid-template-columns:1fr; }
+  .verification-choice { grid-template-columns:1fr; }
+  .source-outcomes,.testing-outcomes { grid-template-columns:1fr; }
+  .source-candidate { align-items:flex-start; flex-direction:column; }
+  .testing-dialog .composer-actions { align-items:flex-start; flex-direction:column; gap:10px; }
+  .testing-dialog .composer-actions button { width:100%; }
+}

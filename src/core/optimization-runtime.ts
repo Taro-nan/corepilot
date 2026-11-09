@@ -41,7 +41,7 @@ export interface CreateOptimizationTaskInput {
   target: OptimizationTask['target'];
   sourceBaseline: DomainIdentity;
   performanceBaseline: DomainIdentity | null;
-  evaluator: DomainIdentity;
+  evaluator: DomainIdentity | null;
   declaredContext: Record<string, unknown>;
 }
 
@@ -160,6 +160,7 @@ export class OptimizationRuntime {
       return existing;
     }
     const { task, candidate, first, repeated, firstMachine, machineDigest } = this.inspectCandidateApproval(input);
+    if (!task.evaluator) throw new Error('未验证的源码候选不能批准，请先创建独立测试任务完成验证。');
     const evidence = verifyFrozenEvidenceArtifact(input.evidence);
     const baseline = evidence.baseline as DomainIdentity | undefined;
     const evaluator = evidence.evaluator as DomainIdentity | undefined;
@@ -190,6 +191,7 @@ export class OptimizationRuntime {
   /** Validate the same domain facts before a user is asked to review Evidence. */
   inspectCandidateApproval(input: InspectCandidateApprovalInput) {
     const task = this.getTask(input.taskId);
+    if (!task.evaluator) throw new Error('未验证的源码候选不能批准，请先创建独立测试任务完成验证。');
     const candidate = this.getCandidate(input.candidateId);
     if (candidate.task_id !== task.task_id || candidate.status === 'REJECTED' || candidate.status === 'APPROVED') throw new Error('Candidate is not eligible for approval');
     if (!task.performance_baseline || input.firstFormalExperimentId === input.revalidationExperimentId) throw new Error('approval requires an independent revalidation and frozen performance baseline');
@@ -338,6 +340,8 @@ export class OptimizationRuntime {
 
   startExperiment(input: StartExperimentInput): Experiment {
     const task = this.getTask(input.taskId);
+    const evaluator = input.evaluator ?? task.evaluator;
+    if (!task.evaluator || !evaluator) throw new Error('当前任务未绑定测试方案，请创建独立测试任务验证此源码候选。');
     const candidate = this.store.getCandidate(input.candidateId);
     if (!candidate || candidate.task_id !== input.taskId) {
       throw new Error(`candidate '${input.candidateId}' does not belong to task '${input.taskId}'`);
@@ -353,7 +357,7 @@ export class OptimizationRuntime {
       status,
       validity: 'UNKNOWN',
       failure_category: null,
-      evaluator: input.evaluator ?? task.evaluator,
+      evaluator,
       baseline: input.baseline ?? task.performance_baseline ?? task.source_baseline,
       declared_context: input.declaredContext ?? task.declared_context,
       observed_context: null,

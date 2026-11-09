@@ -99,6 +99,7 @@ export class WorkflowApprovalService {
     if (workflow.delivery_operation && workflow.delivery_operation.status !== 'COMPLETED') throw new Error('请先核对或撤回未完成的交付请求。');
     if (!workflow.enable_performance) throw new Error('正式性能优化批准需要已执行的性能测试；当前任务只验证了正确性。');
     const task = workflow.optimization_task_id ? this.store.getOptimizationTask(workflow.optimization_task_id) : null;
+    if (!task?.evaluator) throw new Error('当前任务未绑定正式测试方案，不能准备批准或交付证据。');
     const candidate = workflow.candidate_id ? this.store.getCandidate(workflow.candidate_id) : null;
     const experiments = task ? this.store.listExperiments(task.task_id) : [];
     const verification = assessCandidateVerification({ workflow, task, candidate, experiments });
@@ -112,7 +113,7 @@ export class WorkflowApprovalService {
     if (!evaluator || evaluator.id !== task.evaluator.id || evaluator.version !== task.evaluator.version || evaluator.sha256 !== task.evaluator.digest) {
       throw new Error('测试方案缺少与任务匹配的正式 evaluator。');
     }
-    return { workflow, task, candidate, verification, frozen, evaluatorRoot: evaluator.root };
+    return { workflow, task: { ...task, evaluator: task.evaluator }, candidate, verification, frozen, evaluatorRoot: evaluator.root };
   }
 
   prepare(id: string): WorkflowEvidenceSnapshot {

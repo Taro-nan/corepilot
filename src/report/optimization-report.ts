@@ -34,6 +34,7 @@ export function buildOptimizationReport(workflow: OptimizationWorkflowRecord, st
       experiment, commands: store.listCommandExecutions(experiment.experiment_id), measurements: store.listMeasurements(experiment.experiment_id),
     })),
     notices: [
+      ...(workflow.verification_mode === 'source_only' ? ['仅优化源码：构建、正确性与性能均为 NOT_EXECUTED。候选补丁不是已验证优化结果，不能批准或交付。'] : []),
       ...(workflow.status === 'NO_CANDIDATE' ? ['本次调查没有提交候选，尚未形成正式优化性能结论。'] : []),
       ...(workflow.status === 'VALIDATION_BLOCKED' ? [workflow.candidate_evaluation_feedback?.performance_summary.status === 'INCONCLUSIVE'
         ? '测量证据不足，候选已保留。先检查噪声与固定采样条件；改变测试口径需新版本，不重复试到通过。'
@@ -86,6 +87,8 @@ export function renderOptimizationReport(report: OptimizationReport): string {
     ...table(['维度', '值', '负载数', '组内固定权重加速比', '最慢负载加速比'], summary.groups.map(row => [row.dimension, row.value, row.workloads, row.weighted_speedup, row.worst_speedup])),
     ...table(['项目', '记录'], [
       ['函数', w.function_name], ['工作流', w.workflow_id], ['任务', report.task?.task_id], ['状态', w.status],
+      ['验证模式', w.verification_mode === 'source_only' ? '仅生成源码候选' : '优化并验证'],
+      ...(w.verification_mode === 'source_only' ? [['构建 / 正确性 / 性能', 'NOT_EXECUTED / NOT_EXECUTED / NOT_EXECUTED']] : []),
       ['当前阶段', w.progress?.phase], ['进度', w.progress?.last_event], ['错误', w.error],
       ['创建 / 更新', `${w.created_at} / ${w.updated_at}`], ['性能优化', w.enable_performance ? '启用' : '未启用'],
         ['源码仓库', w.repository_root], ['源码分支', w.source_branch], ['源码基线 commit', w.baseline_commit], ['配置 SHA-256', w.config_file_sha256], ['测试配置摘要', w.testpack_digest],

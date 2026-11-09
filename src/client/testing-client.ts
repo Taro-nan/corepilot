@@ -1,7 +1,7 @@
 import type { CreateTestingTask, TestingAsset, TestingAssetFile, TestingPlanPreview, TestingPlanRef, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
 
 type JsonRequest = (method: string, path: string, body?: Record<string, unknown>, headers?: Record<string, string>) => Promise<unknown>;
-type BinaryUpload = (path: string, body: Uint8Array) => Promise<unknown>;
+type BinaryUpload = (path: string, body: Uint8Array | Blob) => Promise<unknown>;
 
 /** Web and CLI consume the same persisted testing use case. */
 export class TestingClient {
@@ -17,7 +17,7 @@ export class TestingClient {
   createAsset(input: { name: string; version?: string }): Promise<{ asset: TestingAsset }> {
     return this.request('POST', '/v1/testing-assets', input) as Promise<{ asset: TestingAsset }>;
   }
-  uploadAssetFile(id: string, relativePath: string, bytes: Uint8Array): Promise<{ file: TestingAssetFile }> {
+  uploadAssetFile(id: string, relativePath: string, bytes: Uint8Array | Blob): Promise<{ file: TestingAssetFile }> {
     return this.upload(`/v1/testing-assets/${encodeURIComponent(id)}/files?path=${encodeURIComponent(relativePath)}`, bytes) as Promise<{ file: TestingAssetFile }>;
   }
   finalizeAsset(id: string, entryPath: string): Promise<{ asset: TestingAsset }> {

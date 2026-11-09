@@ -30,6 +30,10 @@ export function assessCandidateVerification(input: {
   experiments: readonly Experiment[];
 }): CandidateVerificationSummary {
   const { workflow, task, candidate } = input;
+  if (workflow.verification_mode === 'source_only') return {
+    ready: false, formal_experiment_id: null, revalidation_experiment_id: null,
+    issues: [{ code: 'VERIFICATION_NOT_REQUESTED', message: '本任务仅生成源码候选，未执行构建、正确性和性能测试，不能批准或交付。' }],
+  };
   const issues: CandidateVerificationIssue[] = [];
   const add = (code: CandidateVerificationIssue['code'], message: string) => issues.push({ code, message });
   if (!task || task.task_id !== workflow.optimization_task_id || task.workflow_id !== workflow.workflow_id) {

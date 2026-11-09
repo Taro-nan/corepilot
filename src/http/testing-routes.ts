@@ -19,7 +19,7 @@ export async function testingRoutes(req: http.IncomingMessage, res: http.ServerR
     sendJson(res, 200, { plan: service.plan(await readJson(req) as unknown as TestingPlanRef) }); return true;
   }
   if (url.pathname === '/v1/testing-tasks') {
-    if (method === 'GET') { sendJson(res, 200, { tasks: service.list() }); return true; }
+    if (method === 'GET') { service.refreshActive(); sendJson(res, 200, { tasks: service.list() }); return true; }
     if (method === 'POST') {
       const task = await service.start(await readJson(req) as unknown as CreateTestingTask, { requestId: requestKey(req) });
       sendJson(res, 202, { task }); return true;

@@ -5,8 +5,21 @@ import { loadPublicOptimizationPreflight } from './public-optimization.js';
 import { RunnerClient } from '../client/runner-client.js';
 import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
-import type { ResolvedExecutionMachine } from '../contracts/execution-machine.js';
+import type { ExecutionMachineRecord, ResolvedExecutionMachine } from '../contracts/execution-machine.js';
 import type { LibraryPackageLoader } from '../library-package/loader.js';
+import type { OptimizationVerificationMode } from '../contracts/public-workflow.js';
+import { loadSourceOptimizationPreflight } from './source-optimization.js';
+
+export interface CheckOptimizationOptions {
+  resolveMachine?: (id: string) => ResolvedExecutionMachine;
+  packageLoader?: LibraryPackageLoader;
+  machineId?: string;
+  verificationMode?: OptimizationVerificationMode;
+  repositoryRoot?: string;
+  sourceBranch?: string;
+  entryFile?: string | null;
+  readMachine?: (id: string) => ExecutionMachineRecord | null;
+}
 
 export function configuredOptimizationFunction(configPath: string, packageLoader?: LibraryPackageLoader): string {
   const loaded = loadOptimizationConfig(configPath);
@@ -16,7 +29,17 @@ export function configuredOptimizationFunction(configPath: string, packageLoader
 }
 
 /** Validate the same inputs as submission without creating a task or calling a model. */
-export async function checkOptimization(configPath: string, functionName?: string, options: { resolveMachine?: (id: string) => ResolvedExecutionMachine; packageLoader?: LibraryPackageLoader; machineId?: string } = {}): Promise<{ message: string; function_name: string }> {
+export async function checkOptimization(configPath: string, functionName?: string, options: CheckOptimizationOptions = {}): Promise<{ message: string; function_name: string }> {
+  if (options.verificationMode === 'source_only') {
+    if (!functionName?.trim()) throw new Error('请选择要优化的函数；源码优化无需测试方案。');
+    const preflight = loadSourceOptimizationPreflight({ verification_mode: 'source_only', config_path: configPath,
+      function_name: functionName, entry_file: options.entryFile ?? null, repository_root: options.repositoryRoot,
+      source_branch: options.sourceBranch, machine_id: options.machineId }, { readMachine: options.readMachine });
+    const machine = preflight.targetContext;
+    const target = machine.kind === 'registered' ? `目标机器：${machine.identity.name}（只读注册信息${machine.cached_hardware ? `；硬件缓存时间 ${machine.cached_hardware.observed_at}` : '；尚无硬件缓存'}，本次未探测）`
+      : machine.kind === 'unresolved' ? `目标机器：${machine.machine_id}（未解析注册信息，硬件能力未知）` : '目标机器：未指定（不推断硬件能力）';
+    return { function_name: functionName, message: `函数：${functionName}\n源码：${preflight.repository}\n模型：${preflight.config.config.model.model_id}（凭据已解析；未调用模型）\n${target}\n模式：仅优化源码，不要求测试方案或机器连接。构建、正确性和性能将在独立测试任务中验证。\n源码优化输入检查通过。` };
+  }
   const targetFunction = functionName ?? configuredOptimizationFunction(configPath, options.packageLoader);
   const preflight = loadPublicOptimizationPreflight({ config_path: configPath, function_name: targetFunction, entry_file: null,
     ...(options.machineId ? { machine_id: options.machineId } : {}) }, options);

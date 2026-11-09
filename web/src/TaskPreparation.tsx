@@ -35,7 +35,7 @@ export function TaskPreparation({ project, context, catalog, drafts, validationD
   const machineDiffers = !!data && !!context.machineId && context.machineId !== projectMachineId;
   const branchDiffers = !!data && !!context.sourceBranch && context.sourceBranch !== (project.source_branch ?? '');
   return <>
-    <div className="page-heading task-preparation-heading"><div><span className="page-eyebrow">优化任务 / 准备条件</span><h1>构建与验证</h1><p>选择方案，确认基线与测试条件。</p></div><button type="button" onClick={returnToTask}><Icon name="back" size={15} />{context.returnTo === 'task' ? '返回任务配置' : '返回项目概览'}</button></div>
+    <div className="page-heading task-preparation-heading"><div><span className="page-eyebrow">{context.returnTo === 'testing' ? '测试任务' : '优化任务'} / 准备条件</span><h1>构建与验证</h1><p>选择方案，确认基线与测试条件。</p></div><button type="button" onClick={returnToTask}><Icon name="back" size={15} />{context.returnTo === 'testing' ? '返回测试配置' : context.returnTo === 'task' ? '返回任务配置' : '返回项目概览'}</button></div>
     <section className="task-preparation-context" aria-label="当前任务准备上下文"><div><span>项目</span><strong>{project.name}</strong></div><div><span>目标函数</span><strong>{context.functionName || '尚未指定'}</strong></div><div><span>任务分支</span><strong>{context.sourceBranch || project.source_branch || '当前检出版本'}</strong></div><div><span>任务机器</span><strong>{taskMachine}</strong></div></section>
     <p className="task-preparation-note">方案与基线可供后续任务复用。</p>
     {(machineDiffers || branchDiffers) && <div className="notice compact" role="status"><strong>试跑环境与本次任务不同</strong>：测试生成和试运行使用项目分支 {project.source_branch ?? '当前检出版本'}、项目机器 {projectMachine}。如需更换，请先调整项目默认设置；分支基线构建使用单独选择的分支。</div>}

@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { Type } from 'typebox';
 import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
 import type { AgentTool, PiAgentRuntimeResult } from '../agent/pi-agent-runtime.js';
 import { WorkspaceToolset, type WorkspaceToolOptions } from '../agent/workspace-tools.js';
@@ -25,7 +24,7 @@ import type { DevelopmentFindings, DevelopmentGateResult } from '../contracts/de
 import type { CandidateEvaluationDecision, CandidateEvaluationFeedback } from '../contracts/candidate-evaluation-feedback.js';
 import { candidateEvaluationFeedback } from '../workspace/candidate-evaluation-feedback.js';
 import { candidateDecisionTool, hypothesisDecisionTool } from '../agent/candidate-feedback-tool.js';
-import { hypothesisProposalTool } from '../agent/hypothesis-tool.js';
+import { hypothesisProposalTool, optimizationHistoryTool } from '../agent/hypothesis-tool.js';
 import { isValidationBlocked } from '../workspace/validation-outcome.js';
 import type { HypothesisProposal, OptimizationHypothesis, OptimizationReasoningHistory } from '../contracts/optimization-hypothesis.js';
 
@@ -342,15 +341,7 @@ export async function runPublicAgentWorkflow(input: {
         if (!evaluationFeedback && input.reasoning && activeHypothesisId) roundTools.push(hypothesisDecisionTool(activeHypothesisId, recordDecision));
         let roundPrompt = prompt;
         if (input.reasoning) {
-          roundTools.push({ name: 'read_optimization_history', label: 'Read optimization history',
-            description: 'Retrieve earlier hypotheses, candidate lineage, experiments and outcomes without putting the complete history into every prompt.',
-            parameters: Type.Object({ hypothesis_id: Type.Optional(Type.String()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }, { additionalProperties: false }),
-            execute: async (_id, args) => {
-              const query = args as { hypothesis_id?: string; limit?: number };
-              const history = await input.reasoning!.history();
-              const hypotheses = query.hypothesis_id ? history.hypotheses.filter(item => item.hypothesis.hypothesis_id === query.hypothesis_id) : history.hypotheses.slice(-(query.limit ?? 6));
-              return { content: [{ type: 'text', text: JSON.stringify({ ...history, hypotheses }) }], details: {} };
-            } });
+          roundTools.push(optimizationHistoryTool(() => input.reasoning!.history()));
           roundTools.push(hypothesisProposalTool(activeHypothesisId, async proposal => {
             if (proposedThisRound) throw new Error('one Hypothesis proposal is allowed per investigation round');
             if (activeHypothesisId && (decisions.at(-1) ?? pendingDecision)?.action !== 'NEW_HYPOTHESIS') throw new Error('REPAIR reuses its Hypothesis; choose NEW_HYPOTHESIS before replacing it');

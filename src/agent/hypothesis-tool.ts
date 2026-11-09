@@ -1,6 +1,18 @@
 import { Type } from 'typebox';
 import type { AgentTool } from './pi-agent-runtime.js';
-import type { HypothesisProposal, OptimizationHypothesis } from '../contracts/optimization-hypothesis.js';
+import type { HypothesisProposal, OptimizationHypothesis, OptimizationReasoningHistory } from '../contracts/optimization-hypothesis.js';
+
+export function optimizationHistoryTool(history: () => OptimizationReasoningHistory | Promise<OptimizationReasoningHistory>): AgentTool {
+  return { name: 'read_optimization_history', label: 'Read optimization history',
+    description: 'Retrieve earlier hypotheses, candidate lineage, experiments and outcomes.',
+    parameters: Type.Object({ hypothesis_id: Type.Optional(Type.String()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }, { additionalProperties: false }),
+    execute: async (_id, args) => {
+      const query = args as { hypothesis_id?: string; limit?: number };
+      const stored = await history();
+      const hypotheses = query.hypothesis_id ? stored.hypotheses.filter(item => item.hypothesis.hypothesis_id === query.hypothesis_id) : stored.hypotheses.slice(-(query.limit ?? 6));
+      return { content: [{ type: 'text', text: JSON.stringify({ ...stored, hypotheses }) }], details: {} };
+    } };
+}
 
 export function hypothesisProposalTool(parentHypothesisId: string | null, propose: (proposal: HypothesisProposal) => Promise<OptimizationHypothesis>): AgentTool {
   const text = () => Type.String({ minLength: 1, maxLength: 8192 });

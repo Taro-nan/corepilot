@@ -40,6 +40,9 @@ import { readValidationTestPlan } from '../evaluator/validation-test-plan.js';
 import { ReproductionService } from '../application/reproduction-service.js';
 import { WorkflowDeliveryService, type DeliveryResult } from '../application/workflow-delivery-service.js';
 import { WorkflowApprovalService } from '../application/workflow-approval-service.js';
+import { localWorktreeRoot } from './optimization-workflow-paths.js';
+import { loadSourceOptimizationPreflight, sourceOptimizationContractDigest, sourceOptimizationIntake, type SourceOptimizationPreflight } from './source-optimization.js';
+import { executeSourceOptimization } from './source-optimization-execution.js';
 
 export interface OptimizationWorkflowServiceOptions {
   /** 保留 host 参数仅用于已有服务装配；public workflow 不依赖旧 task runner。 */
@@ -77,11 +80,6 @@ function developmentToolText(value: unknown) {
 
 function redact(value: string, apiKey: string | null): string {
   return apiKey ? value.split(apiKey).join('[redacted]').replace(/Bearer\s+\S+/gi, 'Bearer [redacted]') : value;
-}
-
-function localWorktreeRoot(repository: string, root?: string): string {
-  const identity = createHash('sha256').update(path.resolve(repository)).digest('hex').slice(0, 16);
-  return path.join(root ?? path.join(os.tmpdir(), 'corepilot-worktrees'), identity);
 }
 
 /** 新 public optimize 工作流的唯一后端入口。 */
@@ -135,6 +133,7 @@ export class OptimizationWorkflowService {
 
   submitPublic(request: PublicWorkflowRequest, options: { cliApiKey?: string; requestId?: string; packageLoader?: LibraryPackageLoader } = {}): { workflowId: string } {
     if (this.stopping) throw new Error('后台正在停止，请稍后重试。');
+    if (request.verification_mode === 'source_only' && request.enable_performance === true) throw new Error('仅优化源码不执行性能测试，请选择优化并验证。');
     const requestDigest = createHash('sha256').update(JSON.stringify({
       config_path: path.resolve(request.config_path),
       function_name: request.function_name,
@@ -142,7 +141,8 @@ export class OptimizationWorkflowService {
       repository_root: path.resolve(request.repository_root ?? path.dirname(request.config_path)),
       ...(request.source_branch === undefined ? {} : { source_branch: request.source_branch }),
       ...(request.machine_id === undefined ? {} : { machine_id: request.machine_id }),
-      enable_performance: request.enable_performance ?? this.options.publicEnablePerformance ?? false,
+      enable_performance: request.verification_mode === 'source_only' ? false : request.enable_performance ?? this.options.publicEnablePerformance ?? false,
+      ...(request.verification_mode === 'source_only' ? { verification_mode: 'source_only' } : {}),
       ...(request.budget ? { budget: request.budget } : {}),
     })).digest('hex');
     if (options.requestId) {
@@ -152,6 +152,15 @@ export class OptimizationWorkflowService {
         if (record.request_digest !== requestDigest) throw new Error('Idempotency-Key already used with different optimization inputs');
         return { workflowId: record.workflow_id };
       }
+    }
+    if (request.verification_mode === 'source_only') {
+      const preflight = loadSourceOptimizationPreflight(request, { ...options, readMachine: id => this.options.store.getExecutionMachine(id) });
+      const { record, task } = sourceOptimizationIntake(`workflow:${randomUUID()}`, preflight);
+      record.optimization_task_id = this.runtime.createTask(task).task_id;
+      if (options.requestId) { record.request_id = options.requestId; record.request_digest = requestDigest; }
+      this.records.save(record);
+      if (this.options.publicExecution === true) this.launchSourceWorkflow(record.workflow_id, preflight);
+      return { workflowId: record.workflow_id };
     }
     const preflight = loadPublicOptimizationPreflight(request, { cliApiKey: options.cliApiKey, resolveMachine: id => new ExecutionMachineService(this.options.store).resolve(id), packageLoader: options.packageLoader });
     const workflowId = `workflow:${randomUUID()}`;
@@ -767,15 +776,44 @@ export class OptimizationWorkflowService {
     await session.steer(message.trim());
   }
 
+  private launchSourceWorkflow(workflowId: string, preflight: SourceOptimizationPreflight, resume = false, message?: string): void {
+    const controller = new AbortController();
+    this.controllers.set(workflowId, controller);
+    const running = executeSourceOptimization({ workflowId, preflight, runtime: this.runtime, store: this.options.store,
+      records: this.records, worktreeRoot: this.options.worktreeRoot, signal: controller.signal, resume, message,
+      attachSession: session => { if (session) this.sessions.set(workflowId, session); else this.sessions.delete(workflowId); },
+    }).finally(() => { this.controllers.delete(workflowId); this.running.delete(workflowId); });
+    this.running.set(workflowId, running);
+  }
+
+  private resumeSourceWorkflow(record: OptimizationWorkflowRecord, input: { message?: string; budget?: Partial<OptimizationSessionBudget>; cliApiKey?: string }): { workflow_id: string; status: string } {
+    if (!record.agent_session || !['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'NO_CANDIDATE', 'CANDIDATE_READY'].includes(record.status)) throw new Error('此任务没有可继续的源码会话。');
+    const selectedMachine = this.runtime.getTask(record.optimization_task_id!).declared_context.requested_machine_id;
+    const preflight = loadSourceOptimizationPreflight({ verification_mode: 'source_only', function_name: record.function_name,
+      entry_file: record.entry_file, config_path: record.config_path, repository_root: record.repository_root,
+      ...(typeof selectedMachine === 'string' ? { machine_id: selectedMachine } : {}),
+    }, { cliApiKey: input.cliApiKey, readMachine: id => this.options.store.getExecutionMachine(id) });
+    if (record.execution_contract_digest !== sourceOptimizationContractDigest(preflight)) throw new Error('源码范围、声明目标或构建上下文已改变，请创建新任务；原任务保持源码优化模式。');
+    if (record.baseline_commit) preflight.source = { branch: record.source_branch ?? 'detached', commit: record.baseline_commit };
+    record.session_budget = resolveOptimizationBudget(input.budget ?? record.session_budget);
+    record.continuation_count = (record.continuation_count ?? 0) + 1;
+    record.status = 'GENERATING'; record.error = null; delete record.stop_reason;
+    record.progress = { phase: 'RESUMING', last_event: '正在恢复源码工作区与原 Agent 会话' };
+    record.updated_at = new Date().toISOString(); this.records.save(record);
+    this.launchSourceWorkflow(record.workflow_id, preflight, true, input.message);
+    return { workflow_id: record.workflow_id, status: record.status };
+  }
+
   resumePublic(workflowId: string, input: { message?: string; budget?: Partial<OptimizationSessionBudget>; cliApiKey?: string; packageLoader?: LibraryPackageLoader } = {}): { workflow_id: string; status: string } {
     if (this.stopping) throw new Error('后台正在停止，请稍后重试。');
     const record = this.records.get(workflowId);
     if (!record) throw new Error('workflow not found');
     if (record.delivery_operation && record.delivery_operation.status !== 'COMPLETED') throw new Error('当前交付尚未结束，请先核对或撤回交付请求。');
     if (this.controllers.has(workflowId)) return { workflow_id: workflowId, status: record.status };
+    if (input.message !== undefined && (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 16_384)) throw new Error('补充要求需为 1–16384 字符');
+    if (record.verification_mode === 'source_only') return this.resumeSourceWorkflow(record, input);
     if (isWorkflowValidationBlocked(record)) throw new Error('验证环境异常不会通过修改候选修复；请使用「重新验证当前候选」或 workflow retry-validation。');
     if (!record.agent_session || !['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'GENERATING', 'CREATED'].includes(record.status)) throw new Error('此任务没有可继续的 Agent 会话；旧记录仍可查看报告。');
-    if (input.message !== undefined && (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 16_384)) throw new Error('补充要求需为 1–16384 字符');
     const budget = resolveOptimizationBudget(input.budget ?? record.session_budget);
     const preflight = this.continuationPreflight(record, input);
     record.session_budget = budget;
@@ -797,6 +835,7 @@ export class OptimizationWorkflowService {
     if (this.stopping) throw new Error('后台正在停止，请稍后重试。');
     const record = this.records.get(workflowId);
     if (!record) throw new Error('workflow not found');
+    if (record.verification_mode === 'source_only') throw new Error('此任务仅生成未验证源码，请创建独立测试任务验证候选；不能切换为原任务内验证。');
     if (record.delivery_operation && record.delivery_operation.status !== 'COMPLETED') throw new Error('当前交付尚未结束，请先核对或撤回交付请求。');
     if (input.expectedCandidateId && record.candidate_id !== input.expectedCandidateId) throw new Error('当前候选已改变，请刷新后再操作。');
     if (this.controllers.has(workflowId)) return { workflow_id: workflowId, status: record.status };
@@ -842,7 +881,7 @@ export class OptimizationWorkflowService {
   cancel(workflowId: string): { ok: boolean; status: string; message: string } {
     const record = this.records.get(workflowId);
     if (!record) return { ok: false, status: 'NOT_FOUND', message: `workflow '${workflowId}' not found` };
-    if (['DELIVERABLE', 'FAILED', 'CANCELLED', 'PERFORMANCE_THRESHOLD_NOT_MET'].includes(record.status)) return { ok: true, status: record.status, message: 'workflow already terminal' };
+    if (['DELIVERABLE', 'FAILED', 'CANCELLED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'CANDIDATE_READY', 'NO_CANDIDATE'].includes(record.status)) return { ok: true, status: record.status, message: 'workflow already terminal' };
     const controller = this.controllers.get(workflowId);
     if (!controller) return { ok: false, status: record.status, message: 'workflow is not active in this backend process' };
     controller.abort('cancelled by user');

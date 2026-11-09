@@ -3,6 +3,7 @@ import type { CandidateEvaluationDecision, CandidateEvaluationFeedback } from '.
 import type { OptimizationSessionBudget, OptimizationSessionSummary } from './optimization-session.js';
 import type { WorkflowDeliveryOperation } from './delivery.js';
 import type { WorkflowEvidenceSnapshot } from './optimization-approval.js';
+import type { OptimizationVerificationMode } from './public-workflow.js';
 
 /** public optimize 工作流的持久化状态；不包含旧候选补丁或授权对象。 */
 export type OptimizationWorkflowStatus =
@@ -12,6 +13,7 @@ export type OptimizationWorkflowStatus =
   | 'INTERRUPTED'
   | 'VALIDATION_BLOCKED'
   | 'WAITING_APPROVAL'
+  | 'CANDIDATE_READY'
   | 'PERFORMANCE_THRESHOLD_NOT_MET'
   | 'NO_CANDIDATE'
   | 'DELIVERABLE'
@@ -29,6 +31,8 @@ export interface OptimizationWorkflowProgress {
 }
 
 export interface OptimizationWorkflowRecord {
+  /** Missing on historical workflows means verified. */
+  verification_mode?: OptimizationVerificationMode;
   review_evidence?: WorkflowEvidenceSnapshot;
   review_evidence_history?: WorkflowEvidenceSnapshot[];
   /** Persisted before Git changes; absent for historical deliveries. */

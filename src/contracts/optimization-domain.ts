@@ -15,6 +15,7 @@ export type OptimizationTaskStatus =
   | 'INTERRUPTED'
   | 'VALIDATION_BLOCKED'
   | 'WAITING_APPROVAL'
+  | 'CANDIDATE_READY'
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED';
@@ -69,7 +70,8 @@ export interface OptimizationTask {
   };
   source_baseline: DomainIdentity;
   performance_baseline: DomainIdentity | null;
-  evaluator: DomainIdentity;
+  /** No evaluator is bound while preparing an unverified source-only candidate. */
+  evaluator: DomainIdentity | null;
   declared_context: Record<string, unknown>;
   created_at: string;
   updated_at: string;

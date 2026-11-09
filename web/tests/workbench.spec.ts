@@ -34,7 +34,8 @@ async function openLegacyValidation(page: Page) {
 async function openTaskPreparation(page: Page) {
   await page.getByRole('button', { name: '创建优化任务', exact: true }).click();
   const task = page.getByRole('dialog', { name: '创建优化任务' });
-  await task.getByRole('button', { name: /准备构建与验证|查看或调整构建与验证/ }).click();
+  await task.getByRole('radio', { name: /优化并自动验证/ }).check();
+  await task.getByRole('button', { name: /准备构建与验证|查看或调整测试方案/ }).click();
   await expect(page.getByRole('region', { name: '当前任务准备上下文' })).toBeVisible();
 }
 
@@ -631,7 +632,8 @@ test('preflight lets a project resume its own draft and explains remaining work 
   const discovery = await f.projects.discover(project.project_id, 'kernel');
   await login(page);
   await page.getByRole('button', { name: '模型与机器', exact: true }).click();
-  await page.getByRole('button', { name: '配置构建与验证', exact: true }).click();
+  await page.getByRole('button', { name: '项目信息', exact: true }).click();
+  await page.getByRole('button', { name: '前往构建与验证', exact: true }).click();
   await expect(page.getByRole('heading', { name: '本项目已有接入草稿', exact: true })).toBeVisible();
   expect(f.projects.config(project.project_id).validation.library_package).toBeUndefined();
   await page.getByRole('button', { name: '保存并运行前检查', exact: true }).click();
@@ -691,9 +693,10 @@ test('a new library discovers its own assets and confirms commands and targets w
   try {
   await login(page);
   await page.getByRole('button', { name: '模型与机器', exact: true }).click();
-  await page.getByRole('button', { name: '配置构建与验证', exact: true }).click();
+  await page.getByRole('button', { name: '项目信息', exact: true }).click();
+  await page.getByRole('button', { name: '前往构建与验证', exact: true }).click();
   await expect(page.getByLabel('验证模式', { exact: true })).toHaveValue('new');
-  await expect(page.locator('.setup-explanation')).toContainText('检查正确性');
+  await expect(page.locator('.setup-explanation')).toContainText('使用独立参考检查计算结果');
   await expect(page.getByLabel('测试方案文件（testpack）')).toHaveCount(0);
   await page.getByRole('button', { name: '识别源码与测试资产', exact: true }).click();
   await expect(page.locator('.setup-build').first()).toContainText('还没有实际构建执行记录');

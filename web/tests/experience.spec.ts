@@ -26,7 +26,8 @@ test('first-use guidance and advanced settings keep context, expose changes whil
   await page.route('**/v1/projects/*/models', route => route.fulfill({ json: { models: [{ id: 'fixture-model', label: 'Fixture model' }] } }));
   await login(page);
   const guide = page.getByRole('region', { name: '项目准备与下一步' });
-  await expect(guide).toContainText('下一步：选择执行机器');
+  await expect(guide).toContainText('下一步：创建优化任务');
+  await expect(guide).toContainText('测试可以稍后单独进行');
   await expect(guide.locator('li')).toHaveCount(3);
   await expect(page.getByRole('button', { name: '创建优化任务', exact: true })).toHaveCount(1);
   await expect(page.getByText(project.config_path, { exact: true })).not.toBeVisible();
@@ -256,7 +257,9 @@ test('task preparation preserves unapplied inputs across navigation and detects 
     library_package: { package_id: pkg, package_version: version, target_id: target }, baseline_artifact: '' } });
   await login(page);
   await page.getByRole('button', { name: '创建优化任务', exact: true }).click();
-  await page.getByRole('dialog', { name: '创建优化任务' }).getByRole('button', { name: '准备构建与验证' }).click();
+  const initialTask = page.getByRole('dialog', { name: '创建优化任务' });
+  await initialTask.getByRole('radio', { name: /优化并自动验证/ }).check();
+  await initialTask.getByRole('button', { name: '准备构建与验证' }).click();
   const editor = page.locator('.validation-editor');
   await expect(editor.getByText('准备当前函数的测试方案', { exact: true })).toBeVisible();
   const inventory = editor.locator('.test-inventory').filter({ has: page.getByText('性能负载', { exact: true }) });

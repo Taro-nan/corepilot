@@ -18,6 +18,7 @@
 | 接入新库、源码识别、构建命令与验证方案配置 | [新库接入配置](guides/library-setup.md) |
 | 自主控制测试条件、接入/生成代码、两库对比与测试包下载 | [测试方案指南](guides/test-plans.md) |
 | 分别使用源码优化与独立测试、比较源码和库包 | [优化与独立测试](guides/optimization-and-testing.md) |
+| 优化与测试分离的入口、恢复、UI 及离线验证范围 | [分离流程验证记录](development/optimization-testing-validation.md) |
 | 网页首次使用、配置保存、错误反馈与前后端联调 | [网页联调与改进记录](development/frontend-integration-review.md) |
 | 网页架构、已实现范围和后续边界 | [网页工作台 V1](architecture/web-workbench-v1.md) |
 | 尽快使用：交互配置、启动优化、观察测试并导出报告 | [CLI 到报告快速指南](guides/quickstart-report.md) |

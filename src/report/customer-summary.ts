@@ -39,7 +39,10 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
       group.sum += Math.log(row.speedup) * weight; group.weight += weight; group.worst = Math.min(group.worst, row.speedup); group.count++; groups.set(key, group);
     }
   }
-  const limits = [
+  const limits = workflow.verification_mode === 'source_only' ? [
+    '本任务仅生成源码补丁，构建、正确性和性能均为 NOT_EXECUTED；尚无可声明的性能收益或退化结论。',
+    '候选源码身份和调查依据已保存，可通过独立测试任务验证；当前结果不能用于正式批准或交付。',
+  ] : [
     '结论仅覆盖本次函数、冻结源码、比较基线、输入与资源条件；当前候选不代表全库收益或已找到最优实现。',
     analysis?.statistics ? `统计方法 ${analysis.statistics.policy.method}，置信水平 ${analysis.statistics.policy.confidence_level}；区间依赖固定采样与分块假设。`
       : '本轮沿用历史点估计口径，未计算真实置信区间。',
@@ -49,6 +52,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
     '分组指标是已有负载的描述性点估计，分组之间可能重叠，不构成额外统计验收。',
   ];
   const state: CustomerOptimizationSummary['state'] = ['CREATED', 'GENERATING'].includes(workflow.status) ? 'RUNNING'
+    : workflow.verification_mode === 'source_only' && workflow.status === 'CANDIDATE_READY' ? 'CANDIDATE_READY'
     : workflow.delivery_operation && workflow.delivery_operation.status !== 'COMPLETED' ? 'DELIVERY_PENDING'
     : verification.ready && workflow.status === 'DELIVERABLE' ? deliveryMatches ? 'DELIVERED' : 'DELIVERY_UNVERIFIED'
       : verification.ready && workflow.status === 'WAITING_APPROVAL' ? approvedCurrent ? 'READY_FOR_DELIVERY' : 'READY_FOR_REVIEW'
@@ -56,6 +60,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
   const command = (action: string) => `corepilot workflow ${action} ${workflow.workflow_id}`;
   let next: CustomerOptimizationSummary['next_step'] = { kind: 'INSPECT', message: '查看失败阶段、原始输入和命令记录，再决定修复或新建任务。', command: command('report') };
   if (state === 'RUNNING') next = { kind: 'WAIT', message: '任务在后台执行，可关闭观察页面后继续查看。', command: command('status') };
+  else if (state === 'CANDIDATE_READY') next = { kind: 'TEST', message: '查看候选补丁，创建独立测试任务验证正确性与性能；当前补丁尚未验证。', command: null };
   else if (state === 'DELIVERY_PENDING') next = { kind: 'INSPECT', message: workflow.delivery_operation?.message ?? '核对原交付状态，避免重复提交。', command: command('delivery-check') };
   else if (state === 'READY_FOR_DELIVERY') next = { kind: 'REVIEW', message: '当前候选已获人工批准，可单独确认源码交付。', command: null };
   else if (state === 'READY_FOR_REVIEW') next = { kind: 'REVIEW', message: approval ? '已有批准绑定其他实验，请核对历史并使用新的候选重新审阅。' : '审阅源码差异、适用范围和独立复验，准备冻结证据并作出人工批准。', command: null };
@@ -65,7 +70,8 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
   else if (workflow.status === 'VALIDATION_BLOCKED') next = { kind: 'RETRY_VALIDATION', message: (reanalysis ?? analysis)?.statistics?.verdict === 'INCONCLUSIVE'
     ? '当前测量证据不足，候选已保留。先检查噪声；采样条件需要改变时建立新版本，不反复试到通过。'
     : '候选已保留。按具体故障修正测试或执行环境，再重新验证原候选；不需要模型修改算法解决系统故障。', command: command('retry-validation') };
-  return { schema_version: 1, state, verification, conclusion: state === 'DELIVERED' ? '当前候选已通过正式实验与独立复验，并记录源码交付。'
+  return { schema_version: 1, state, verification, conclusion: state === 'CANDIDATE_READY' ? '候选补丁已准备；构建、正确性与性能尚未测试。'
+    : state === 'DELIVERED' ? '当前候选已通过正式实验与独立复验，并记录源码交付。'
     : state === 'DELIVERY_PENDING' ? '交付请求已记录，结果以 Git 身份核对为准。'
     : state === 'DELIVERY_UNVERIFIED' ? '历史记录标记为已交付，但缺少与当前候选匹配的交付身份，需要核对原记录。'
     : state === 'READY_FOR_DELIVERY' ? '当前候选已通过验证并记录人工批准，源码尚未交付。'

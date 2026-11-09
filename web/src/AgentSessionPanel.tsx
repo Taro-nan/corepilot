@@ -13,6 +13,20 @@ const toolLabels: Record<string, string> = {
   finish_optimization: '结束本次调查',
 };
 
+function eventSummary(event: OptimizationSessionEvent): string {
+  let text = event.text;
+  if (event.kind === 'tool_result' || event.kind === 'tool_call') {
+    try {
+      const value = JSON.parse(text);
+      const summary = value?.summary ?? value?.message ?? value?.error;
+      text = typeof summary === 'string' ? summary : event.kind === 'tool_result'
+        ? event.is_error ? '工具返回错误，查看详情定位原因。' : '输出已记录，点击查看详情。'
+        : typeof value?.path === 'string' ? value.path : typeof value?.query === 'string' ? value.query : '调用参数已记录，点击查看详情。';
+    } catch { /* Plain text diagnostics remain readable; the raw event is kept in the detail dialog. */ }
+  }
+  return text.replace(/\s+/g, ' ').slice(0, 180);
+}
+
 export function AgentSessionPanel({ workflow, attached, notify, refresh }: {
   workflow: OptimizationWorkflowRecord; attached?: boolean; notify: (text: string, bad?: boolean) => void; refresh: () => void;
 }) {
@@ -28,11 +42,13 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh }: {
   const list = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
   const active = attached !== false && ['CREATED', 'GENERATING'].includes(workflow.status);
+  const sourceOnly = workflow.verification_mode === 'source_only';
+  const toolLabel = (name: string) => sourceOnly && name === 'submit_candidate' ? '完成源码候选' : toolLabels[name] ?? name;
   const deliveryPending = !!workflow.delivery_operation && workflow.delivery_operation.status !== 'COMPLETED';
   const canRetry = !active && canRetryWorkflowValidation(workflow);
   const validationBlocked = isWorkflowValidationBlocked(workflow);
   const measurementInconclusive = workflow.candidate_evaluation_feedback?.performance_summary.status === 'INCONCLUSIVE';
-  const canResume = !deliveryPending && !validationBlocked && !!workflow.agent_session && !active && ['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'CREATED', 'GENERATING'].includes(workflow.status);
+  const canResume = !deliveryPending && !validationBlocked && !!workflow.agent_session && !active && ['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'CANDIDATE_READY', 'CREATED', 'GENERATING'].includes(workflow.status);
   const running = useRef(active);
   running.current = active;
   useEffect(() => { if (followLatest.current && list.current) list.current.scrollTop = list.current.scrollHeight; }, [events]);
@@ -66,7 +82,7 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh }: {
     event.preventDefault(); setBusy(true);
     try {
       if (active) { await api.sendOptimizationMessage(workflow.workflow_id, message); notify('补充要求已发送，Agent 会在工具执行边界读取。'); }
-      else { await api.resumeOptimizationWorkflow(workflow.workflow_id, { ...(message.trim() ? { message } : {}), budget: { time_limit_ms: minutes * 60_000, max_candidates: candidates } }); notify('已继续原优化会话。'); }
+      else { await api.resumeOptimizationWorkflow(workflow.workflow_id, { ...(message.trim() ? { message } : {}), budget: { time_limit_ms: minutes * 60_000, max_candidates: sourceOnly ? 1 : candidates } }); notify('已继续原优化会话。'); }
       setMessage(''); refresh();
     } catch (failure) { notify((failure as Error).message, true); }
     finally { setBusy(false); }
@@ -85,18 +101,18 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh }: {
     {workflow.status === 'INTERRUPTED' && <div className="notice"><strong>会话已中断，现场已保留</strong><p>继续时会恢复工作区，并核对已有 Runner 实验。</p></div>}
     {error && <div><p role="alert" className="hint">过程记录暂时不可用：{error}。任务记录仍保留。</p><button className="text-btn" onClick={() => setEventRetry(value => value + 1)}>重新读取过程记录</button></div>}
     {!events.length && !error && <p className="hint" role={loadingEvents ? 'status' : undefined}>{loadingEvents ? '正在读取调查和工具记录…' : workflow.agent_session ? '当前尚无过程记录。后台产生新记录后会自动同步。' : '此任务尚无持久会话记录。新创建的优化任务会显示完整工作过程。'}</p>}
-    {!!events.length && <><div className="agent-event-preview" aria-label="最近进展">{events.slice(-2).map(event => <button key={event.id} className={`agent-event ${event.is_error ? 'has-error' : ''}`} onClick={() => setDetail(event)}><span className="agent-event-icon"><Icon name={event.is_error ? 'report' : 'code'} size={15} /></span><span className="agent-event-body"><strong>{event.tool_name ? toolLabels[event.tool_name] ?? event.tool_name : event.kind === 'progress' ? '执行进展' : 'Agent 记录'}</strong><span>{event.text.replace(/\s+/g, ' ').slice(0, 140)}</span></span><time>{new Date(event.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</time></button>)}</div>
+    {!!events.length && <><div className="agent-event-preview" aria-label="最近进展">{events.slice(-2).map(event => <button key={event.id} className={`agent-event ${event.is_error ? 'has-error' : ''}`} onClick={() => setDetail(event)}><span className="agent-event-icon"><Icon name={event.is_error ? 'report' : 'code'} size={15} /></span><span className="agent-event-body"><strong>{event.tool_name ? toolLabel(event.tool_name) : event.kind === 'progress' ? '执行进展' : 'Agent 记录'}</strong><span>{eventSummary(event)}</span></span><time>{new Date(event.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</time></button>)}</div>
     <Disclosure title="完整过程记录" summary={'最近 ' + events.length + ' 条 · 工具调用、输出与诊断'}><div className="agent-event-list" aria-label="Agent 过程记录" ref={list} onScroll={event => { const target = event.currentTarget; followLatest.current = target.scrollHeight - target.scrollTop - target.clientHeight < 48; }}>{events.map(event => <button key={event.id} className={`agent-event ${event.is_error ? 'has-error' : ''}`} onClick={() => setDetail(event)}>
       <span className="agent-event-icon"><Icon name={event.kind === 'tool_call' ? 'code' : event.is_error ? 'report' : event.kind === 'tool_result' ? 'check' : 'tasks'} size={15} /></span>
-      <span className="agent-event-body"><strong>{event.tool_name ? toolLabels[event.tool_name] ?? event.tool_name : event.kind === 'compaction' ? '整理上下文' : event.role === 'user' ? '任务与补充要求' : event.kind === 'progress' ? '执行进展' : 'Agent'}{event.kind === 'tool_result' ? event.is_error ? ' · 返回错误' : ' · 完成' : ''}</strong><span>{event.text.replace(/\s+/g, ' ').slice(0, 180)}</span></span>
+      <span className="agent-event-body"><strong>{event.tool_name ? toolLabel(event.tool_name) : event.kind === 'compaction' ? '整理上下文' : event.role === 'user' ? '任务与补充要求' : event.kind === 'progress' ? '执行进展' : 'Agent'}{event.kind === 'tool_result' ? event.is_error ? ' · 返回错误' : ' · 完成' : ''}</strong><span>{eventSummary(event)}</span></span>
       <time>{new Date(event.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</time>
     </button>)}</div></Disclosure></>}
     {(active || canResume) && <form className="agent-instructions" onSubmit={event => void continueOrSend(event)}>
       <label className="field"><span>{active ? '补充优化要求' : '继续时的补充要求（可选）'}</span><textarea rows={2} maxLength={16384} value={message} onChange={event => setMessage(event.target.value)} placeholder="例如：先分析大尺寸输入的缓存行为，保留小尺寸性能。" disabled={busy} /></label>
-      {canResume && <Disclosure title="本次继续的探索预算" summary={minutes + ' 分钟 · ' + candidates + ' 个候选'} modified={minutes !== Math.round((workflow.session_budget?.time_limit_ms ?? 3_600_000) / 60_000) || candidates !== (workflow.session_budget?.max_candidates ?? 8)}><div className="field-grid"><label className="field"><span>探索时间（分钟）</span><input type="number" min={1} max={1440} required value={minutes} onChange={event => setMinutes(Number(event.target.value))} /></label><label className="field"><span>最多评估候选数</span><input type="number" min={1} max={1000} required value={candidates} onChange={event => setCandidates(Number(event.target.value))} /></label></div></Disclosure>}
-      <div className="form-actions"><button className="primary" disabled={busy || active && !message.trim()}>{busy ? '正在提交…' : active ? '发送给 Agent' : '继续优化'}</button><span className="hint">{active ? '关闭页面后，后台会继续运行。' : '沿用原源码和测试口径，保留已有实验。'}</span></div>
+      {canResume && <Disclosure title="本次继续的探索预算" summary={minutes + ' 分钟 · ' + (sourceOnly ? '生成一个候选' : candidates + ' 个候选')} modified={minutes !== Math.round((workflow.session_budget?.time_limit_ms ?? 3_600_000) / 60_000) || !sourceOnly && candidates !== (workflow.session_budget?.max_candidates ?? 8)}><div className="field-grid"><label className="field"><span>探索时间（分钟）</span><input type="number" min={1} max={1440} required value={minutes} onChange={event => setMinutes(Number(event.target.value))} /></label>{!sourceOnly && <label className="field"><span>最多评估候选数</span><input type="number" min={1} max={1000} required value={candidates} onChange={event => setCandidates(Number(event.target.value))} /></label>}</div></Disclosure>}
+      <div className="form-actions"><button className="primary" disabled={busy || active && !message.trim()}>{busy ? '正在提交…' : active ? '发送给 Agent' : '继续优化'}</button><span className="hint">{active ? '关闭页面后，后台会继续运行。' : sourceOnly ? '沿用原源码工作区，生成新的未验证候选。' : '沿用原源码和测试口径，保留已有实验。'}</span></div>
     </form>}
-    {detail && <Modal title={detail.tool_name ? toolLabels[detail.tool_name] ?? detail.tool_name : 'Agent 过程详情'} onClose={() => setDetail(null)} wide><pre className="detail-code">{detail.text}</pre></Modal>}
+    {detail && <Modal title={detail.tool_name ? toolLabel(detail.tool_name) : 'Agent 过程详情'} onClose={() => setDetail(null)} wide><pre className="detail-code">{detail.text}</pre></Modal>}
     </div>
   </Panel>;
 }

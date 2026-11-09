@@ -20,6 +20,7 @@ export interface WorkspaceToolResult {
 export interface WorkspaceToolOptions {
   baselineCommit?: string;
   candidateSubmission?: boolean;
+  candidateValidation?: 'automatic' | 'deferred';
   candidateSourceScope?: CandidateSourceScope;
   beforeSourceMutation?: () => void;
   buildContext?: () => Promise<unknown> | unknown;
@@ -448,7 +449,9 @@ export class WorkspaceToolset {
           const summary = asString(args, 'summary');
           const status = runGit(this.root, ['status', '--porcelain']);
           if (!status) throw new WorkspaceToolError('No source changes to submit. Stop without a Candidate if no justified transformation remains.');
-          return result(JSON.stringify({ submitted: true, summary, git_status: status, next: 'System will checkpoint the complete changes and run build/correctness/performance checks.' }));
+          return result(JSON.stringify({ submitted: true, summary, git_status: status, next: this.options.candidateValidation === 'deferred'
+            ? 'System will freeze the proposed patch. Build, correctness and performance remain NOT_EXECUTED; start a separate test task to validate it.'
+            : 'System will checkpoint the complete changes and run build/correctness/performance checks.' }));
         }
         case 'show_diff':
           return result(runGit(this.root, ['diff', '--', ...(args.path ? [asString(args, 'path')] : [])]));
@@ -536,7 +539,9 @@ export class WorkspaceToolset {
     return available.map(({ name, label, description, parameters }) => ({
       name,
       label,
-      description,
+      description: name === 'submit_candidate' && this.options.candidateValidation === 'deferred'
+        ? 'Freeze one complete proposed source patch without running tests. Finish every related edit first. The result remains unverified and cannot be approved or delivered.'
+        : description,
       parameters,
       executionMode: 'sequential',
       execute: async (_toolCallId, args, signal) => {

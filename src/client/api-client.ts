@@ -149,10 +149,10 @@ export class ApiClient {
     return this.request('POST', `/v1/tasks/${encodeURIComponent(taskId)}/resume`, { command_id: commandId });
   }
 
-  private async upload(path: string, body: Uint8Array): Promise<unknown> {
+  private async upload(path: string, body: Uint8Array | Blob): Promise<unknown> {
     const token = this.options.token ?? (typeof process !== 'undefined' ? process.env.COREPILOT_SERVER_TOKEN : undefined);
     const res = await fetch(this.baseUrl + path, { method: 'PUT', headers: { 'content-type': 'application/octet-stream', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: body as BodyInit, signal: AbortSignal.timeout(600_000) });
+      body: body as unknown as RequestInit['body'], signal: AbortSignal.timeout(600_000) });
     const result = await res.json() as ApiErrorBody;
     if (!res.ok) throw new ApiClientError(res.status, result.error?.code ?? 'ERROR', result.error?.message ?? `HTTP ${res.status}`, result.error?.details);
     return result;

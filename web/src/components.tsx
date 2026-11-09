@@ -27,6 +27,14 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
 export function Brand() { return <div className="brand"><svg width="31" height="35" viewBox="0 0 32 36" fill="none" aria-hidden="true"><path d="m16 2 13 7v6l-13-7-7 4 7 4 13 7v6l-13 7-13-7v-6l13 7 7-4-7-4-13-7V9Z" fill="#246bfe" /></svg><span>CorePilot</span></div>; }
 const labels: Record<string, string> = { CREATED: '已创建', GENERATING: '优化中', WAITING_APPROVAL: '待人工审阅', DELIVERABLE: '已交付', PERFORMANCE_THRESHOLD_NOT_MET: '未达性能目标', FAILED: '失败', CANCELLED: '已取消', NO_CANDIDATE: '尚无候选', VALIDATION_BLOCKED: '验证受阻', BUDGET_EXHAUSTED: '预算已用完', INTERRUPTED: '已中断', PROPOSED: '已提出', REJECTED: '未采纳', INCONCLUSIVE: '无结论', ABANDONED: '已放弃', SUCCEEDED: '执行完成', RUNNING: '运行中', PENDING: '等待执行', UNKNOWN: '待核对', VALID: '有效', INVALID: '无效', PASSED: '通过', PASS: '通过', INCOMPLETE: '不完整', NOT_EXECUTED: '未执行', FROZEN: '已冻结', APPROVED: '已批准', QUALIFIED: '已验证可用', DRAFT: '待完善' };
 labels.TARGET_VALIDATED = '目标机验证完成，待确认';
+labels.CANDIDATE_READY = '代码待验证';
+labels.PREPARING = '准备中';
+labels.CANCELLING = '正在停止';
+labels.CANCEL_REQUESTED = '等待停止确认';
+labels.NOT_MEASURED = '未测量';
+labels.NOT_TESTED = '未测试';
+labels.IMPROVED = '有改善';
+labels.REGRESSED = '有退化';
 export function label(value?: string | null) { return value === 'VALIDATION_BLOCKED' ? '验证受阻，可重试' : value === 'NO_CANDIDATE' ? '调查结束，未提交候选' : value === 'BUDGET_EXHAUSTED' ? '预算已用完，可继续' : value === 'INTERRUPTED' ? '已中断，可继续' : value ? labels[value] ?? value : '—'; }
 export function Badge({ value, children }: { value?: string | null; children?: React.ReactNode }) {
   const color = ['PASSED', 'PASS', 'VALID', 'QUALIFIED', 'APPROVED', 'DELIVERABLE'].includes(value ?? '') ? 'green' : ['FAILED', 'INVALID'].includes(value ?? '') ? 'red' : ['GENERATING', 'RUNNING', 'WAITING_APPROVAL', 'CREATED'].includes(value ?? '') ? 'amber' : 'gray';
@@ -39,7 +47,7 @@ export function Modal({ title, children, onClose, wide = false, className = '', 
   const trigger = React.useRef(returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null));
   const titleId = React.useId();
   React.useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => { if (dialog?.open) dialog.close(); queueMicrotask(() => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }); }); }; }, []);
-  return <dialog ref={ref} aria-labelledby={titleId} className={(wide ? 'wide ' : '') + className} onCancel={e => { e.preventDefault(); onClose(); }}><div className="modal-head"><h2 id={titleId}>{title}</h2><button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></div><div className="modal-body">{children}</div>{footer && <div className="modal-footer">{footer}</div>}</dialog>;
+  return <dialog ref={ref} aria-labelledby={titleId} className={(wide ? 'wide ' : '') + (footer ? 'form-dialog ' : '') + className} onCancel={e => { e.preventDefault(); onClose(); }}><div className="modal-head"><h2 id={titleId}>{title}</h2><button type="button" className="icon-btn" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></div><div className="modal-body">{children}</div>{footer && <div className="modal-footer">{footer}</div>}</dialog>;
 }
 export function Feedback({ text, bad = false }: { text: string; bad?: boolean }) {
   const long = bad && (text.length > 320 || text.split('\n').length > 4);

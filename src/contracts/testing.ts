@@ -18,6 +18,8 @@ export interface CreateTestingTask {
   candidate: TestingSubject;
   baseline?: TestingSubject;
   mode: TestingMode;
+  expected_evaluator_digest?: string;
+  expected_package_digest?: string;
 }
 export interface TestingAssetFile { path: string; sha256: string; bytes: number }
 export interface TestingAsset {
@@ -40,6 +42,9 @@ export interface TestingPlanPreview {
   evaluator: { id: string; version: string; digest: string; qualification: string };
   build: { command: string; cwd: string; artifact: string };
   code: { setup: boolean; correctness: boolean; performance: boolean; issues: string[] };
+  /** Absent only in older persisted previews. */
+  correctness?: { definition: string; reference: { implementation: string; accumulation: string };
+    tolerance: { rule: string; absolute: number; relative: number } };
   test_plan: ValidationTestPlan;
   cases: FormalCaseDefinition[];
   workloads: FormalWorkloadDefinition[];

@@ -49,12 +49,17 @@ test('project submission preserves source-only mode and produces an explicitly u
     }
     assert.equal(workflow.status, 'CANDIDATE_READY', JSON.stringify(workflow.error));
     assert.equal(workflow.verification_mode, 'source_only');
-    assert.equal(workflow.experiment_id, null);
+    assert.equal(workflow.experiment_id, undefined);
     const report = await api.getOptimizationReport(workflow.workflow_id);
     assert.ok(report.report.candidates.length);
     assert.match(report.markdown, /未验证|未测量|NOT_EXECUTED|not.*verif/i);
+    const patch = await fetch(`${fixture.url}/v1/workflows/${encodeURIComponent(workflow.workflow_id)}/candidates/${encodeURIComponent(workflow.candidate_id!)}/diff`,
+      { headers: { authorization: `Bearer ${fixture.token}` } });
+    assert.equal(patch.status, 200);
+    assert.match((await patch.json() as { diff: string }).diff, /\+.*return 2/);
     assert.equal(fixture.git('show', 'main:kernel.c'), 'int kernel(void) { return 1 + 1; }');
-    assert.equal(fixture.store.listExperiments(workflow.task_id!).length, 0);
+    assert.ok(workflow.optimization_task_id);
+    assert.equal(fixture.store.listExperiments(workflow.optimization_task_id).length, 0);
     const repeated = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', source_branch: 'main', verification_mode: 'source_only' }, { requestId: 'source-only-api' }) as { workflow_id: string };
     assert.equal(repeated.workflow_id, workflow.workflow_id);
     const cli = await runFixtureCli(fixture.url, fixture.token, ['workflow', 'watch', workflow.workflow_id, '--output', path.join(fixture.root, 'export'), '--timeout', '2']);
@@ -89,6 +94,10 @@ test('HTTP and CLI share an independent file comparison, its persisted identity,
     assert.equal(JSON.parse(cli.stdout).task.task_id, task.task_id);
     assert.equal(JSON.parse(cli.stdout).task.execution.status, 'RUNNING');
     testing.complete(task);
+    await api.testing.list();
+    const projectedDeadline = Date.now() + 2000;
+    while (testing.service.list()[0].execution.status !== 'SUCCEEDED' && Date.now() < projectedDeadline) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(testing.service.list()[0].execution.status, 'SUCCEEDED', 'opening only the list must refresh Runner progress');
     const details = await api.testing.get(task.task_id);
     assert.equal(details.task.execution.status, 'SUCCEEDED');
     assert.equal(details.summary.correctness.status, 'PASSED');
@@ -98,6 +107,7 @@ test('HTTP and CLI share an independent file comparison, its persisted identity,
     const second = (await api.testing.start({ ...input, mode: 'performance' })).task;
     await waitTestingPreparation(testing.service, second.task_id);
     testing.setStatus('RUNNING');
+    testing.setMeasurements([]);
     const cancel = await runFixtureCli(fixture.url, fixture.token, ['test', 'cancel', second.task_id]);
     assert.equal(cancel.code, 0, cancel.stderr);
     assert.equal(JSON.parse(cancel.stdout).task.execution.cancel_requested, true);

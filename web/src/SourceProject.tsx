@@ -4,15 +4,15 @@ import { api } from './api';
 import { DirectoryPicker } from './DirectoryPicker';
 import { CopyValue, Feedback, Field, Icon, Modal } from './components';
 
-export function SourceBranchSelect({ repository, value, onChange, disabled = false, compact = false }: {
-  repository: RepositoryInspection; value: string; onChange: (value: string) => void; disabled?: boolean; compact?: boolean;
+export function SourceBranchSelect({ repository, value, onChange, disabled = false, compact = false, label = '优化分支' }: {
+  repository: RepositoryInspection; value: string; onChange: (value: string) => void; disabled?: boolean; compact?: boolean; label?: string;
 }) {
   if (!repository.is_git) return <p className="hint">该目录尚未建立 Git 仓库，首次优化时会为源码建立可追溯的版本基线。</p>;
   if (!repository.branches.length) return <p className="hint">Git 仓库尚无已提交的本地分支，首次优化时会创建源码基线。</p>;
   const selected = repository.branches.find(branch => branch.name === value);
   return <div className="source-branches">
     <p className="hint">当前检出：<strong>{repository.current_branch ?? '游离 HEAD'}</strong>{repository.head_commit && <code> · {repository.head_commit.slice(0, 12)}</code>}</p>
-    <Field label="优化分支" help={compact ? '使用该分支已提交的源码。' : '任务从所选分支的已提交版本开始，在独立工作区优化；人工交付后合并回该分支。'}>
+    <Field label={label} help={compact ? '使用该分支已提交的源码。' : '任务从所选分支的已提交版本开始，在独立工作区优化；人工交付后合并回该分支。'}>
       <select value={value} disabled={disabled} onChange={e => onChange(e.target.value)}>
         {!selected && <option value={value} disabled>{value ? `${value}（分支已不存在，请重新选择）` : '请选择分支'}</option>}
         {repository.branches.map(branch => <option key={branch.name} value={branch.name}>{branch.name}{branch.name === repository.current_branch ? ' · 当前分支' : ''} · {branch.commit.slice(0, 8)}</option>)}

@@ -7,8 +7,9 @@ import type { WorkflowEvidenceSnapshot } from '../../src/contracts/optimization-
 import { isWorkflowValidationBlocked } from '../../src/contracts/workflow';
 import { api, request, downloadProjectTestPackage } from './api';
 import { Badge, Empty, Icon, Modal, Panel, Feedback, Field, Disclosure, CopyValue, download, label, time } from './components';
+import { SourceOptimizationWorkbench, type CandidateTestingContext } from './SourceOptimizationWorkbench';
 
-export type WorkflowStatusFilter = 'all' | 'running' | 'review' | 'success' | 'delivered' | 'failed' | 'blocked' | 'cancelled';
+export type WorkflowStatusFilter = 'all' | 'running' | 'review' | 'success' | 'delivered' | 'failed' | 'blocked' | 'cancelled' | 'unverified';
 export type WorkflowListMode = 'tasks' | 'analysis' | 'reports';
 
 export function matchesWorkflowStatus(workflow: OptimizationWorkflowRecord, filter: WorkflowStatusFilter, activeIds?: string[] | null) {
@@ -20,6 +21,7 @@ export function matchesWorkflowStatus(workflow: OptimizationWorkflowRecord, filt
   if (filter === 'failed') return !isWorkflowValidationBlocked(workflow) && ['FAILED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE'].includes(status);
   if (filter === 'blocked') return isWorkflowValidationBlocked(workflow) || ['VALIDATION_BLOCKED', 'BUDGET_EXHAUSTED', 'INTERRUPTED'].includes(status);
   if (filter === 'cancelled') return status === 'CANCELLED';
+  if (filter === 'unverified') return ['CANDIDATE_READY'].includes(status);
   return true;
 }
 
@@ -48,7 +50,7 @@ export function WorkflowList({ workflows, open, mode = 'tasks', status = 'all', 
   return <Panel title={title} className="workflow-list" aside={compact ? undefined : <div className="workflow-filters">
     <label className="search"><Icon name="search" size={16} /><input aria-label="搜索任务" placeholder="搜索函数或任务 ID" value={search} onChange={e => { setSearch(e.target.value); filterUrl('search', e.target.value); }} /></label>
     <select aria-label="筛选分支" value={branch} onChange={e => { setBranch(e.target.value); filterUrl('branch', e.target.value); }}><option value="">所有分支</option>{workflows.some(w => !w.source_branch) && <option value="__current__">未指定分支</option>}{branches.map(name => <option key={name} value={name}>{name}</option>)}</select>
-    {mode === 'tasks' && <select aria-label="筛选状态" value={status} onChange={e => onStatusChange?.(e.target.value as WorkflowStatusFilter)}><option value="all">全部状态</option><option value="running">正在运行</option><option value="review">待人工审阅</option><option value="success">可审阅或已交付</option><option value="delivered">已交付</option><option value="failed">失败或未达标</option><option value="blocked">待处理</option><option value="cancelled">已取消</option></select>}
+    {mode === 'tasks' && <select aria-label="筛选状态" value={status} onChange={e => onStatusChange?.(e.target.value as WorkflowStatusFilter)}><option value="all">全部状态</option><option value="running">正在运行</option><option value="unverified">代码待验证</option><option value="review">待人工审阅</option><option value="success">可审阅或已交付</option><option value="delivered">已交付</option><option value="failed">失败或未达标</option><option value="blocked">待处理</option><option value="cancelled">已取消</option></select>}
   </div>}>
     {!compact && workflows.length > 0 && <div className="list-summary"><span>{filtered.length} / {workflows.length} 个近期任务</span>{(search || branch || status !== 'all') && <button type="button" className="text-btn" onClick={() => { setSearch(''); setBranch(''); filterUrl('search', ''); filterUrl('branch', ''); onStatusChange?.('all'); }}>清除筛选</button>}</div>}
     {!workflows.length ? <Empty title={mode === 'tasks' ? '还没有优化任务' : mode === 'analysis' ? '还没有实验可分析' : '还没有优化报告'} description={mode === 'tasks' ? '配置项目后，创建第一个优化任务。实验与报告会自动出现在这里。' : '创建优化任务后，可在这里选择任务查看真实实验和报告。'} /> : <div className="table-scroll"><table><thead><tr><th>优化目标</th><th>状态</th><th>当前阶段</th><th>{mode === 'analysis' ? '实验' : mode === 'reports' ? '报告' : '分支'}</th><th>更新时间</th><th /></tr></thead><tbody>{filtered.map(w => <tr key={w.workflow_id} onClick={() => open(w.workflow_id)} className="clickable"><td><strong>{w.function_name}</strong><details className="row-identity" onClick={event => event.stopPropagation()}><summary>任务标识</summary><CopyValue value={w.workflow_id} label="任务标识" /></details></td><td><Badge value={isWorkflowValidationBlocked(w) ? 'VALIDATION_BLOCKED' : w.status} /></td><td>{phaseLabel(w.progress?.phase)}</td><td>{mode === 'analysis' ? w.revalidation_experiment_id ? '首轮与复验' : w.experiment_id ? '首轮已记录' : '等待实验' : mode === 'reports' ? w.report_files ? '文件已生成' : w.report_error ? '生成失败，可查看记录' : '实时记录可查看' : w.source_branch ?? '当前检出版本'}</td><td>{time(w.updated_at)}</td><td><button className="text-btn" onClick={e => { e.stopPropagation(); open(w.workflow_id); }}>{mode === 'reports' ? '查看报告' : mode === 'analysis' ? '查看分析' : '查看任务'} <Icon name="arrow" size={15} /></button></td></tr>)}</tbody></table>{filtered.length === 0 && <p className="center muted">没有匹配的任务，请调整筛选条件。</p>}</div>}
@@ -56,6 +58,7 @@ export function WorkflowList({ workflows, open, mode = 'tasks', status = 'all', 
 }
 
 export function phaseLabel(phase?: string) {
+  if (phase === 'CANDIDATE_READY') return '代码已生成，等待测试';
   if (phase === 'VALIDATION_BLOCKED') return '验证环境异常，候选已保留';
   if (phase === 'RETRYING_VALIDATION') return '重新验证当前候选';
   const labels: Record<string, string> = { PUBLIC_INTAKE_VALIDATED: '输入已检查', EDITING_WORKSPACE_READY: '工作区已准备', AGENT_EDITING: 'Agent 调查与实现', AGENT_WORKSPACE_STARTING: '准备工作区', HYPOTHESIS_PROPOSED: '优化假设已记录', CHECKPOINT_READY: '候选已冻结', CORRECTNESS_PASSED: '正确性验证完成', PERFORMANCE_PASSED: '首轮性能测试完成', REVALIDATION_PASSED: '独立复验完成', WAITING_APPROVAL: '等待人工审阅', DELIVERABLE: '已交付', FAILED: '执行失败', CANCEL_REQUESTED: '取消请求已提交', CANCELLED: '已取消', PERFORMANCE_THRESHOLD_NOT_MET: '未达到性能目标', DEVELOPMENT_FINDINGS_RECORDED: '开发调查完成', DEVELOPMENT_GATE_PASSED: '开发验证通过', DEVELOPMENT_GATE_REJECTED: '开发验证发现退化', VALIDATION_FAILED: '测试未通过', REVALIDATION_FAILED: '复验未通过' };
@@ -63,13 +66,21 @@ export function phaseLabel(phase?: string) {
   return phase ? labels[phase] ?? (/^[A-Z_]+$/.test(phase) ? '查看任务进展' : phase) : '等待执行';
 }
 
-export function Workbench({ workflow, response, page, attached, notify, refresh, projectId, navigatePage, backToList }: {
+interface WorkbenchProps {
   workflow: OptimizationWorkflowRecord; response: OptimizationReportResponse | null; page: string;
   attached?: boolean;
   notify: (text: string, bad?: boolean) => void; refresh: () => void;
   projectId?: string;
   navigatePage: (page: string) => void; backToList: () => void;
-}) {
+  testCandidate?: (context: CandidateTestingContext) => void;
+}
+
+export function Workbench(props: WorkbenchProps) {
+  return props.workflow.verification_mode === 'source_only'
+    ? <SourceOptimizationWorkbench {...props} /> : <VerifiedWorkbench {...props} />;
+}
+
+function VerifiedWorkbench({ workflow, response, page, attached, notify, refresh, projectId, navigatePage, backToList }: WorkbenchProps) {
   const [candidateId, setCandidateId] = useState('');
   const [detail, setDetail] = useState<{ title: string; content: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,7 +95,7 @@ export function Workbench({ workflow, response, page, attached, notify, refresh,
   const [expandedStage, setExpandedStage] = useState(-1);
   const report = response?.report;
   const packageReference = report?.task?.library_package;
-  const evaluatorDigest = report?.task?.evaluator.digest;
+  const evaluatorDigest = report?.task?.evaluator?.digest;
   const testPackageAction = projectId && packageReference?.package_id === `project-${projectId.slice(0, 8)}` && evaluatorDigest
     ? `validation-assets/${encodeURIComponent(packageReference.package_id)}/${encodeURIComponent(packageReference.package_version)}/${encodeURIComponent(packageReference.target_id)}` : null;
   async function testPackage(view: boolean) {
@@ -270,7 +281,7 @@ export function Workbench({ workflow, response, page, attached, notify, refresh,
     </Disclosure>
     {page === 'reports' && <Disclosure title="完整文字报告" summary="适用范围、完整说明与 JSON 下载" className="evidence-disclosure"><div className="actions"><button disabled={!report} onClick={() => report && download('report.json', JSON.stringify(report, null, 2))}><Icon name="download" size={16} />下载 JSON 报告</button></div><ul className="report-notices">{report?.notices.map(notice => <li key={notice}>{notice}</li>)}</ul><pre className="report-preview">{response?.markdown ?? '正在读取报告…'}</pre></Disclosure>}
     {(page === 'analysis' || page === 'reports') && <Disclosure title="逐用例与原始数据" summary={experiments.reduce((count, item) => count + item.measurements.length, 0) + ' 条测量记录'} className="evidence-disclosure"><Field label="筛选 case / workload"><input className="compact-input" placeholder="筛选 case / workload" value={filter} onChange={event => setFilter(event.target.value)} /></Field><div className="table-scroll"><table><thead><tr><th>实验</th><th>类型</th><th>用例 / 负载</th><th>角色</th><th>样本</th><th>值</th><th>单位</th><th>有效性</th></tr></thead><tbody>{experiments.flatMap(item => item.measurements.filter(measurement => measurement.subject_id.includes(filter)).map(measurement => <tr key={measurement.measurement_id}><td>{item.experiment.type === 'REVALIDATION' ? '复验' : item.experiment.type === 'DEVELOPMENT_FEEDBACK' ? '开发' : '首轮'}</td><td>{measurement.kind}</td><td className="mono">{measurement.subject_id}</td><td>{measurement.role}</td><td>{measurement.sample_index ?? '—'}</td><td>{String(measurement.value)}</td><td>{measurement.unit ?? '未声明'}</td><td><Badge value={measurement.validity} /></td></tr>)).slice(0, 500)}</tbody></table></div><p className="hint">页面最多展示 500 条；完整原始记录可下载 JSON 报告查看。</p></Disclosure>}
-    <Disclosure title="任务标识与测试资产" summary="可复制身份、查看冻结测试代码与下载测试包" className="evidence-disclosure identity-details"><dl className="definition"><dt>任务标识</dt><dd><CopyValue value={workflow.workflow_id} label="任务标识" /></dd><dt>候选标识</dt><dd>{selectedId ? <CopyValue value={selectedId} label="候选标识" /> : '尚未产生'}</dd><dt>源码提交</dt><dd>{selected ? <CopyValue value={selected.candidate.source.commit} label="源码提交" /> : '尚未冻结'}</dd><dt>验证方案</dt><dd>{report?.task?.evaluator.id ?? '未记录'}</dd><dt>比较基线</dt><dd>{report?.task?.performance_baseline?.id ?? '未记录'}</dd><dt>测试摘要</dt><dd>{evaluatorDigest ? <CopyValue value={evaluatorDigest} label="测试摘要" /> : '未记录'}</dd></dl>
+    <Disclosure title="任务标识与测试资产" summary="可复制身份、查看冻结测试代码与下载测试包" className="evidence-disclosure identity-details"><dl className="definition"><dt>任务标识</dt><dd><CopyValue value={workflow.workflow_id} label="任务标识" /></dd><dt>候选标识</dt><dd>{selectedId ? <CopyValue value={selectedId} label="候选标识" /> : '尚未产生'}</dd><dt>源码提交</dt><dd>{selected ? <CopyValue value={selected.candidate.source.commit} label="源码提交" /> : '尚未冻结'}</dd><dt>验证方案</dt><dd>{report?.task?.evaluator?.id ?? '未记录'}</dd><dt>比较基线</dt><dd>{report?.task?.performance_baseline?.id ?? '未记录'}</dd><dt>测试摘要</dt><dd>{evaluatorDigest ? <CopyValue value={evaluatorDigest} label="测试摘要" /> : '未记录'}</dd></dl>
       {testPackageAction && <div className="actions"><button disabled={busy} onClick={() => void testPackage(true)}>查看本次测试代码</button><button disabled={busy} onClick={() => void testPackage(false)}>下载本次测试包</button></div>}
     </Disclosure>
     {detail && <Modal title={detail.title} onClose={() => setDetail(null)} wide><pre className="detail-code">{detail.content}</pre></Modal>}

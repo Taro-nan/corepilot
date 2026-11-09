@@ -1,8 +1,12 @@
 import path from 'node:path';
 import { resolveOptimizationBudget, type OptimizationSessionBudget } from './optimization-session.js';
 
+export type OptimizationVerificationMode = 'verified' | 'source_only';
+
 /** HTTP 层公开 optimize 请求；配置正文由 config_path 指向的 YAML 解析。 */
 export interface PublicWorkflowRequest {
+  /** Source-only freezes a proposed patch without claiming test or performance results. */
+  verification_mode?: OptimizationVerificationMode;
   budget?: OptimizationSessionBudget;
   function_name: string;
   entry_file: string | null;
@@ -46,6 +50,12 @@ export function parsePublicWorkflowRequest(value: unknown): PublicWorkflowReques
   if (body.enable_performance !== undefined && typeof body.enable_performance !== 'boolean') {
     throw new PublicWorkflowRequestError('enable_performance must be boolean when present');
   }
+  if (body.verification_mode !== undefined && body.verification_mode !== 'verified' && body.verification_mode !== 'source_only') {
+    throw new PublicWorkflowRequestError('verification_mode must be verified or source_only');
+  }
+  if (body.verification_mode === 'source_only' && body.enable_performance === true) {
+    throw new PublicWorkflowRequestError('仅优化源码不执行性能测试，请关闭性能测量或选择优化并验证。');
+  }
   let budget: OptimizationSessionBudget | undefined;
   if (body.budget !== undefined) {
     if (!body.budget || typeof body.budget !== 'object' || Array.isArray(body.budget)) throw new PublicWorkflowRequestError('budget must be an object');
@@ -58,6 +68,7 @@ export function parsePublicWorkflowRequest(value: unknown): PublicWorkflowReques
     function_name: functionName,
     entry_file: entryFile,
     config_path: configPath,
+    ...(body.verification_mode === undefined ? {} : { verification_mode: body.verification_mode }),
     ...(budget ? { budget } : {}),
     ...(repositoryRoot === undefined ? {} : { repository_root: path.resolve(repositoryRoot) }),
     ...(body.source_branch === undefined ? {} : { source_branch: requiredString(body.source_branch, 'source_branch') }),
