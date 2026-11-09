@@ -29,6 +29,12 @@ test('failed experiment export is a private whitelist and does not invent a miss
     f.store.appendMeasurement(raw);
     f.store.appendMeasurement({ ...raw, measurement_id: `measurement:${randomUUID()}`, sample_index: 0, value: 99 });
     const before = f.store.getExperiment(seeded.experiment.experiment_id), beforeRows = f.store.listMeasurements(seeded.experiment.experiment_id);
+    const help = await runFixtureCli(f.url, f.token, ['evidence', '--help']);
+    assert.equal(help.code, 0, help.stderr);
+    assert.match(help.stdout, /verify-experiment-review/);
+    const actionHelp = await runFixtureCli(f.url, f.token, ['evidence', 'verify-experiment-review', '--help']);
+    assert.equal(actionHelp.code, 0, actionHelp.stderr);
+    assert.match(actionHelp.stdout, /verify-experiment-review/);
     const api = new ApiClient(f.url, { token: f.token });
     const missing = await fetch(`${f.url}/v1/workflows/${encodeURIComponent(seeded.workflowId)}/experiments/missing/review`,
       { headers: { authorization: `Bearer ${f.token}` } });

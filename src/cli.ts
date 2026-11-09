@@ -493,6 +493,7 @@ export async function runCli(argv: string[]): Promise<number> {
   if (command === 'optimize' && (args.includes('--help') || args.includes('-h'))) { console.log(renderOptimizeCliHelp()); return 0; }
   if (command === 'check' && (args.includes('--help') || args.includes('-h'))) { console.log(renderCliHelp()); return 0; }
   if (command === 'workflow' && (args.includes('--help') || args.includes('-h'))) { console.log(renderCliHelp()); return 0; }
+  if (command === 'evidence' && (args.includes('--help') || args.includes('-h'))) { console.log(renderCliHelp()); return 0; }
   if (!command) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) return fail('交互式工作台需要终端；使用 corepilot --help 查看命令');
     const { startInteractive } = await import('./cli-interactive/start.js');
