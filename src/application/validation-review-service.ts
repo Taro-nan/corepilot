@@ -11,7 +11,7 @@ import { isolatedWorkspaceBuild } from '../config/build-command.js';
 import { LibraryPackageLoader } from '../library-package/loader.js';
 import { packageBaselineBinding } from '../library-package/task-definition.js';
 import { inspectFormalEvaluatorBundle, loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
-import { assertGeneratedHarnessResolution } from '../evaluator/generated-harness-compatibility.js';
+import { generatedHarnessResolutionIssue } from '../evaluator/generated-harness-compatibility.js';
 import { runnerArtifactPathCheckMatches } from '../evaluator/runner-artifact-path-check.js';
 import type { ValidationTrialService } from './validation-trial-service.js';
 
@@ -34,10 +34,12 @@ export class ValidationReviewService {
   private async assess(project: ProjectRecord, packageId: string, version: string, targetId: string) {
     const resolved = this.selection(project, packageId, version, targetId);
     const qualification = resolved.bundle.qualification;
+    const formalExecutionBlocker = generatedHarnessResolutionIssue(resolved.bundle);
     const preview: ValidationReview = {
       state: qualification.status === 'QUALIFIED' ? 'QUALIFIED' : 'NEEDS_TRIAL',
       evaluator_digest: resolved.bundle.content_digest, package_digest: resolved.loaded.content_digest,
-      function_name: resolved.functionDefinition.api, blockers: [], build: resolved.build,
+      function_name: resolved.functionDefinition.api, blockers: formalExecutionBlocker ? [formalExecutionBlocker] : [],
+      ...(formalExecutionBlocker ? { formal_execution_blocker: formalExecutionBlocker } : {}), build: resolved.build,
       scope: resolved.target.candidate_scope, acceptance: resolved.target.performance_acceptance,
       baseline: resolved.target.artifacts.baseline, trial: null,
       approval: qualification.reviewer && qualification.approved_at ? { reviewer: qualification.reviewer,
@@ -51,8 +53,6 @@ export class ValidationReviewService {
       }
       return { preview, resolved, result: null };
     }
-    try { assertGeneratedHarnessResolution(resolved.bundle); }
-    catch (error) { preview.blockers.push((error as Error).message); }
     const records = this.trials.list(project).filter(item => item.package_id === packageId && item.package_version === version &&
       item.target_id === targetId && item.purpose === 'VALIDATION_DRAFT' && item.mode === 'comparison');
     const record = records[0];

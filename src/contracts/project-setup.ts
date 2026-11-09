@@ -27,7 +27,8 @@ export interface SetupCheck {
 export interface ProjectSetup {
   discovery: ProjectSourceDiscovery | null;
   checks: SetupCheck[];
-  validation: { function_name: string; correctness_cases: number; performance_workloads: number; evaluator_status: string; review?: ValidationReview; review_error?: string } | null;
+  validation: { function_name: string; correctness_cases: number; performance_workloads: number; evaluator_status: string;
+    formal_execution_blocker?: string; review?: ValidationReview; review_error?: string } | null;
   next_steps: string[];
 }
 

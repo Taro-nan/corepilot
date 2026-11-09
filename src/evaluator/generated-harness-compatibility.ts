@@ -18,15 +18,25 @@ export function generatedHarnessUsage(bundle: LoadedFormalEvaluatorBundle): { co
   return { correctness: uses('correctness'), performance: uses('performance') };
 }
 
-/** Detect the previously generated adapter that reported its input path as an observed symbol path. */
-export function assertGeneratedHarnessResolution(bundle: LoadedFormalEvaluatorBundle): void {
+/** Identify the known old adapter without changing its qualification or archived content. */
+export function generatedHarnessResolutionIssue(bundle: LoadedFormalEvaluatorBundle): string | null {
   const harness = read(bundle, 'support/corepilot_test.py');
   if (!harness.includes('class TestContext:') ||
-      !/["']input_path["']\s*:\s*self\.artifact_path\s*,\s*["']resolved_symbol_path["']\s*:\s*self\.artifact_path/.test(harness)) return;
+      !/["']input_path["']\s*:\s*self\.artifact_path\s*,\s*["']resolved_symbol_path["']\s*:\s*self\.artifact_path/.test(harness)) return null;
   const uses = generatedHarnessUsage(bundle);
   if (uses.correctness || uses.performance) {
-    throw new Error('测试方案使用旧版生成适配器，它把输入库路径误记为符号解析结果。请重新生成测试脚本、审阅并重新取得测试方案资格，再执行新的实验；历史记录保持不变。');
+    const problem = '测试方案使用旧版生成适配器，它把输入库路径误记为符号解析结果。';
+    return bundle.qualification.status === 'DRAFT'
+      ? `${problem}请在当前草稿重新生成测试脚本，完成试跑与审阅后再执行正式实验。`
+      : `${problem}该版本只读，请新建测试方案并重新生成测试脚本，重新确认条件和基线后完成试跑与审阅；旧条件不会自动复制，历史资格与记录保持不变。`;
   }
+  return null;
+}
+
+/** Prevent new formal use while retaining historical qualification and evidence. */
+export function assertGeneratedHarnessResolution(bundle: LoadedFormalEvaluatorBundle): void {
+  const issue = generatedHarnessResolutionIssue(bundle);
+  if (issue) throw new Error(issue);
 }
 
 /** Generated Python resolves the API declared for each role at measurement time. */

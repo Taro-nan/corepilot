@@ -4,6 +4,7 @@ import { summarizeValidationTestpack } from '../testpack/validation-freeze.js';
 import type { LoadedValidationTestpack } from '../contracts/validation-testpack.js';
 import type { PublicWorkflowRequest } from '../contracts/public-workflow.js';
 import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
+import { assertGeneratedHarnessResolution } from '../evaluator/generated-harness-compatibility.js';
 import { packageTaskReference, packageValidationTestpack, resolveLibraryPackageTask, type ResolvedPackageTask } from '../library-package/task-definition.js';
 import { resolveSourceBranch } from '../workspace/git-repository.js';
 import { isRegisteredRunner } from '../config/runner-config.js';
@@ -64,13 +65,14 @@ export function loadPublicOptimizationPreflight(
   if (runner.mode === 'rpc' && !testpack.testpack.evaluator) {
     throw new Error('RPC formal execution requires testpack.evaluator with a verified owner, version, root, and SHA-256 digest.');
   }
-  if (runner.mode === 'rpc' && testpack.testpack.evaluator) {
+  if (testpack.testpack.evaluator) {
     const evaluator = testpack.testpack.evaluator;
     const bundle = loadFormalEvaluatorBundle(evaluator.root, {
-      requireQualified: true,
+      requireQualified: runner.mode === 'rpc',
       expected: { evaluatorId: evaluator.id, version: evaluator.version, digest: evaluator.sha256 },
     });
-    if (bundle.manifest.domain.api !== testpack.testpack.function_name) {
+    assertGeneratedHarnessResolution(bundle);
+    if (runner.mode === 'rpc' && bundle.manifest.domain.api !== testpack.testpack.function_name) {
       throw new Error(`evaluator API '${bundle.manifest.domain.api}' differs from testpack function '${testpack.testpack.function_name}'`);
     }
   }

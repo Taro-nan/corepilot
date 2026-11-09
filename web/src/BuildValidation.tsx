@@ -156,6 +156,7 @@ export function BuildValidation({ projectId, config, catalog, selectedSymbols, o
     if (taskFunction && refreshed.validation?.function_name !== taskFunction) {
       throw new Error(`当前方案的目标与任务函数 ${taskFunction} 不一致，或方案尚无法读取。请选择匹配的方案后重新检查。`);
     }
+    if (refreshed.validation?.formal_execution_blocker) throw new Error(refreshed.validation.formal_execution_blocker);
     if (refreshed.validation && refreshed.validation.evaluator_status !== 'QUALIFIED' && refreshed.validation.evaluator_status !== 'LEGACY') {
       if (refreshed.validation.review_error) throw new Error(refreshed.validation.review_error);
       setCheckGuidance(refreshed.validation.review?.state === 'READY_FOR_REVIEW' ? 'review' : 'draft');

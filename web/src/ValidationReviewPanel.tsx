@@ -31,8 +31,8 @@ export function ValidationReviewPanel({ url, draft, dirty, refreshKey, onApprove
     } catch (error) { setError((error as Error).message); } finally { setBusy(false); }
   }
   return <section className="validation-review" aria-label="审阅并启用测试方案">
-    <strong>{review?.state === 'QUALIFIED' ? '测试方案已确认，可用于正式优化' : review?.state === 'READY_FOR_REVIEW' ? '试跑已通过，下一步确认测试方案' : '正式优化前的测试方案确认'}</strong>
-    {review?.state === 'QUALIFIED' ? <><p>审阅人：{review.approval?.reviewer}</p>{review.approval?.trial_id && <details><summary>查看审阅依据标识</summary><CopyValue value={review.approval.trial_id} label="审阅依据" /></details>}</>
+    <strong>{review?.state === 'QUALIFIED' && review.formal_execution_blocker ? '历史上已获资格，暂不能用于新的正式优化' : review?.state === 'QUALIFIED' ? '测试方案已确认，可用于正式优化' : review?.state === 'READY_FOR_REVIEW' ? '试跑已通过，下一步确认测试方案' : '正式优化前的测试方案确认'}</strong>
+    {review?.state === 'QUALIFIED' ? <>{review.formal_execution_blocker && <p role="status">{review.formal_execution_blocker}</p>}<p>审阅人：{review.approval?.reviewer}</p>{review.approval?.trial_id && <details><summary>查看审阅依据标识</summary><CopyValue value={review.approval.trial_id} label="审阅依据" /></details>}</>
       : review?.state === 'READY_FOR_REVIEW' ? <><p>{review.trial?.machine_name} 上正确性 {review.trial?.correctness_passed}/{review.trial?.correctness_planned} 通过，性能样本 {review.trial?.performance_measured}/{review.trial?.performance_planned} 齐全。请核对测试代码、基线与条件后确认启用。</p>
         <button type="button" className="primary" disabled={dirty} onClick={() => setOpen(true)}>审阅并启用测试方案</button>
         {dirty && <p className="hint">当前还有未保存的修改。保存后需对新版本试跑，再确认启用。</p>}</>

@@ -8,6 +8,8 @@ import { inspectInBackground } from '../onboarding/inspect-in-background.js';
 import { LibraryPackageLoader } from '../library-package/loader.js';
 import { loadValidationTestpack } from '../testpack/validation-yaml.js';
 import { packageBaselineBinding } from '../library-package/task-definition.js';
+import { generatedHarnessResolutionIssue } from '../evaluator/generated-harness-compatibility.js';
+import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
 
 /** Project-specific discovery and input assessment, with no model or command execution. */
 export class ProjectSetupService {
@@ -41,14 +43,17 @@ export class ProjectSetupService {
         const loader = new LibraryPackageLoader({ catalogRoot: path.join(this.dataDir, 'catalog') });
         const resolved = loader.resolveSelection(config.validation.library_package);
         const bundle = resolved.bundle;
+        const formalExecutionBlocker = generatedHarnessResolutionIssue(bundle);
         validation = { function_name: resolved.functionDefinition.api, correctness_cases: bundle.correctness.cases.length,
-          performance_workloads: bundle.workloads.workloads.length, evaluator_status: bundle.qualification.status };
+          performance_workloads: bundle.workloads.workloads.length, evaluator_status: bundle.qualification.status,
+          ...(formalExecutionBlocker ? { formal_execution_blocker: formalExecutionBlocker } : {}) };
         const reviewed = bundle.qualification.status === 'QUALIFIED';
+        const usable = reviewed && !formalExecutionBlocker;
         const buildConfigured = !!resolved.build.executable && resolved.build.executable !== 'false';
         add('build', '编译项目', buildConfigured ? 'CONFIGURED' : 'MISSING', buildConfigured ? '接入方案提供构建命令；是否能编译成功仍需在目标机实际执行。' : '接入草稿还没有可用的构建命令。');
-        add('correctness', '正确性测试', reviewed ? 'CONFIGURED' : 'NEEDS_REVIEW', `${validation.correctness_cases} 个用例；${reviewed ? '使用已获资格的独立测试。' : '草稿用例和独立参考结果尚需审阅与目标机验证。'}`);
-        add('performance', '性能测量', reviewed ? 'CONFIGURED' : 'NEEDS_REVIEW', `${validation.performance_workloads} 个负载；${reviewed ? '采样规则由接入方案提供。' : '负载、计时、单位和采样规则尚需验证。'}`);
-        add('evaluator', '验证方案资格', reviewed && ['REVIEWED', 'QUALIFIED'].includes(resolved.loaded.manifest.qualification.state) ? 'CONFIGURED' : 'NEEDS_REVIEW', `接入方案审阅状态：${resolved.loaded.manifest.qualification.state}；当前函数测试方案：${bundle.qualification.status}。`);
+        add('correctness', '正确性测试', usable ? 'CONFIGURED' : 'NEEDS_REVIEW', `${validation.correctness_cases} 个用例；${formalExecutionBlocker ? reviewed ? '历史测试记录保留，新正式任务需要新的测试方案。' : '需要更新旧适配器并重新验证。' : reviewed ? '使用已获资格的独立测试。' : '草稿用例和独立参考结果尚需审阅与目标机验证。'}`);
+        add('performance', '性能测量', usable ? 'CONFIGURED' : 'NEEDS_REVIEW', `${validation.performance_workloads} 个负载；${formalExecutionBlocker ? reviewed ? '历史测量记录保留，新正式任务需要新的测试方案。' : '需要更新旧适配器并重新验证。' : reviewed ? '采样规则由接入方案提供。' : '负载、计时、单位和采样规则尚需验证。'}`);
+        add('evaluator', '验证方案资格', usable && ['REVIEWED', 'QUALIFIED'].includes(resolved.loaded.manifest.qualification.state) ? 'CONFIGURED' : 'NEEDS_REVIEW', formalExecutionBlocker ?? `接入方案审阅状态：${resolved.loaded.manifest.qualification.state}；当前函数测试方案：${bundle.qualification.status}。`);
         const binding = packageBaselineBinding(resolved, config.validation.baseline_artifact ?? '');
         await this.baseline(config.validation.baseline_artifact, binding.artifactDigest, add);
       } catch (error) {
@@ -60,11 +65,16 @@ export class ProjectSetupService {
         try {
           const loaded = loadValidationTestpack(config.validation.testpack);
           const testpack = loaded.testpack;
+          const evaluator = testpack.evaluator;
+          const formalExecutionBlocker = evaluator ? generatedHarnessResolutionIssue(loadFormalEvaluatorBundle(evaluator.root, {
+            expected: { evaluatorId: evaluator.id, version: evaluator.version, digest: evaluator.sha256 },
+          })) : null;
           validation = { function_name: testpack.function_name, correctness_cases: testpack.correctness.cases.length,
-            performance_workloads: testpack.performance.cases.length, evaluator_status: testpack.evaluator ? 'REQUIRES_QUALIFICATION_CHECK' : 'LEGACY' };
+            performance_workloads: testpack.performance.cases.length, evaluator_status: evaluator ? 'REQUIRES_QUALIFICATION_CHECK' : 'LEGACY',
+            ...(formalExecutionBlocker ? { formal_execution_blocker: formalExecutionBlocker } : {}) };
           add('correctness', '正确性测试', 'CONFIGURED', `${validation.correctness_cases} 个用例，目标：${validation.function_name}。`);
           add('performance', '性能测量', 'CONFIGURED', `${validation.performance_workloads} 个负载，单位与采样规则来自测试方案。`);
-          add('evaluator', '独立验证方案', 'NEEDS_REVIEW', testpack.evaluator ? '已声明独立 evaluator；正式运行前还要核验内容与资格。' : '这是兼容测试方案；正式 RPC 运行仍需要独立且合格的 evaluator。');
+          add('evaluator', '独立验证方案', 'NEEDS_REVIEW', formalExecutionBlocker ?? (testpack.evaluator ? '已声明独立 evaluator；正式运行前还要核验内容与资格。' : '这是兼容测试方案；正式 RPC 运行仍需要独立且合格的 evaluator。'));
           await this.baseline(testpack.performance.baselines.comparison.path, testpack.performance.baselines.comparison.sha256, add);
         } catch (error) { add('correctness', '测试方案', 'INVALID', (error as Error).message); }
       } else {

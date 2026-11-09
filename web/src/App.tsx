@@ -137,11 +137,13 @@ export function App() {
       const p = latestCatalog.packages.find(p => p.package_id === data.config.validation.library_package?.package_id && p.version === data.config.validation.library_package?.package_version);
       const target = p?.targets.find(t => t.target_id === data.config.validation.library_package?.target_id);
       const validationFunctionName = setup.validation?.function_name ?? p?.functions.find(f => f.function_id === target?.function_id)?.api;
-      const validationReady = !!data.config.validation.testpack.trim() && !!setup.validation
-        || !!p && !!target && ['REVIEWED', 'QUALIFIED'].includes(p.qualification.state) && target.evaluator.qualification === 'QUALIFIED';
+      const validationReady = (!!data.config.validation.testpack.trim() && !!setup.validation
+        || !!p && !!target && ['REVIEWED', 'QUALIFIED'].includes(p.qualification.state) && target.evaluator.qualification === 'QUALIFIED')
+        && !setup.validation?.formal_execution_blocker;
       const projectAssetPrefix = `/v1/projects/${encodeURIComponent(targetProject.project_id)}/validation-assets/`;
       const hasUnsavedChanges = hasUnsavedProjectConfig() || [...validationDrafts.current.keys()].some(key => key.startsWith(projectAssetPrefix));
-      setRunSetup({ config: data.config, repository, machines: machines.machines, functionName: targetProject.default_function ?? validationFunctionName ?? '', validationFunctionName, validationReady, hasUnsavedChanges, selection });
+      setRunSetup({ config: data.config, repository, machines: machines.machines, functionName: targetProject.default_function ?? validationFunctionName ?? '', validationFunctionName, validationReady,
+        validationBlocker: setup.validation?.formal_execution_blocker, validationWasQualified: setup.validation?.evaluator_status === 'QUALIFIED', hasUnsavedChanges, selection });
       setModal('run');
     } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
   }

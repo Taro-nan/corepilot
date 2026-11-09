@@ -8,6 +8,8 @@ export interface ValidationReview {
   package_digest: string;
   function_name: string;
   blockers: string[];
+  /** Known incompatibility for new formal execution; historical qualification remains unchanged. */
+  formal_execution_blocker?: string;
   build: PackageBuildDefinition;
   scope: CandidateSourceScope;
   acceptance: LibraryPackageTarget['performance_acceptance'];

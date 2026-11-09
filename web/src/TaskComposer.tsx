@@ -11,7 +11,7 @@ import { TaskTestReview, VerificationChoice, type VerificationMode } from './Tas
 import { SourceScopeField, sourceScopeFromText } from './SourceScopeField';
 import { newRequestId } from './request-id';
 
-export interface TaskComposerContext { config: OptimizationConfig; repository: RepositoryInspection; machines: ExecutionMachineSummary[]; functionName: string; validationFunctionName?: string; validationReady: boolean; hasUnsavedChanges?: boolean; selection?: { functionName: string; sourceBranch: string } }
+export interface TaskComposerContext { config: OptimizationConfig; repository: RepositoryInspection; machines: ExecutionMachineSummary[]; functionName: string; validationFunctionName?: string; validationReady: boolean; validationBlocker?: string; validationWasQualified?: boolean; hasUnsavedChanges?: boolean; selection?: { functionName: string; sourceBranch: string } }
 export interface TaskPreparationContext { projectId: string; functionName: string; sourceBranch: string; machineId: string; returnTo: 'task' | 'overview' | 'testing'; returnPath?: string }
 interface TaskDraft { functionName: string; sourceBranch: string; machineId: string; minutes: number; candidates: number; entryFile: string; sourceInclude: string; sourceExclude: string; performance: boolean; verificationMode: VerificationMode }
 
@@ -32,7 +32,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
   const [form, setForm] = useState<TaskDraft>(() => {
     const defaults: TaskDraft = { functionName: context.functionName, sourceBranch: project.source_branch ?? context.repository.current_branch ?? context.repository.branches[0]?.name ?? '',
       machineId: isRegisteredRunner(context.config.runner) ? context.config.runner.machine_id : '', minutes: 60, candidates: 8, entryFile: '', sourceInclude: '', sourceExclude: '', performance: true,
-      verificationMode: context.validationReady ? 'verified' : 'source_only' };
+      verificationMode: context.validationReady || context.validationWasQualified && context.validationBlocker ? 'verified' : 'source_only' };
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null');
       if (!saved || saved.version !== 1) return { ...defaults, ...context.selection };
@@ -66,7 +66,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
   }, [project.project_id, selection?.package_id, selection?.package_version, selection?.target_id, planRetry, sourceOnly]);
   function change(patch: Partial<TaskDraft>) { setForm(current => ({ ...current, ...patch })); setError(''); setCheck(''); id.current = null; }
   async function submit(event: React.FormEvent) {
-    if (needsValidation) { event.preventDefault(); setError('请先为所选函数准备并确认匹配的测试方案。'); return; }
+    if (needsValidation) { event.preventDefault(); setError(context.validationBlocker ?? '请先为所选函数准备并确认匹配的测试方案。'); return; }
     event.preventDefault(); setBusy('submit'); setError('');
     try {
       id.current ??= newRequestId();
@@ -106,7 +106,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
             {context.machines.map(item => <option key={item.machine_id} value={item.machine_id} disabled={!item.enabled}>{item.name} · {item.status === 'ONLINE' ? '在线' : item.status === 'OFFLINE' ? '离线' : '状态待检测'}{item.hardware ? ' · ' + item.hardware.architecture + ' / ' + item.hardware.cpu_count + ' CPU' : ''}</option>)}
           </select></Field>
         </div>
-        {needsValidation && <div className="notice compact" role="status">{mismatchedFunction ? `当前测试方案用于 ${context.validationFunctionName}，与所选函数 ${form.functionName.trim()} 不同。` : '当前测试方案尚未准备完成或未获资格。'}请为目标函数准备匹配的测试方案。 <button type="button" className="text-btn" onClick={() => configure('validation', preparation())}>准备构建与验证</button></div>}
+        {needsValidation && <div className="notice compact" role="status">{mismatchedFunction ? `当前测试方案用于 ${context.validationFunctionName}，与所选函数 ${form.functionName.trim()} 不同。请为目标函数准备匹配的测试方案。` : context.validationBlocker ?? '当前测试方案尚未准备完成或未获资格。请为目标函数准备匹配的测试方案。'} <button type="button" className="text-btn" onClick={() => configure('validation', preparation())}>准备构建与验证</button></div>}
         <SourceBranchSelect repository={context.repository} value={form.sourceBranch} compact onChange={sourceBranch => change({ sourceBranch })} />
         {sourceOnly && <SourceScopeField include={form.sourceInclude} exclude={form.sourceExclude} onChange={value => change({ ...(value.include === undefined ? {} : { sourceInclude: value.include }), ...(value.exclude === undefined ? {} : { sourceExclude: value.exclude }) })} />}
         {!sourceOnly && machine && machine.status !== 'ONLINE' && <p className="notice compact">所选机器最近未确认在线。运行前检查会检测本次所选机器，不会创建实验。</p>}
