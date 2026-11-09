@@ -90,6 +90,9 @@ test('review refuses conflicting, duplicate, foreign and unplanned trial measure
     r.state.measurements.push({ ...original[1], sample_index: 99 });
     await check(/不属于本次固定测试计划/);
     r.state.measurements = structuredClone(original);
+    Object.assign(r.state.measurements[0], { sample_index: undefined });
+    await check(/不属于本次固定测试计划/);
+    r.state.measurements = structuredClone(original);
     assert.equal((await preview()).state, 'READY_FOR_REVIEW', 'no history or qualification is rewritten');
   } finally { await r.close(); await f.close(); }
 });

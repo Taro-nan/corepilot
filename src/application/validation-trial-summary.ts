@@ -44,6 +44,11 @@ export function trialSummary(record: TrialSummaryInput, measurements: Measuremen
       if (observation.experiment_id !== record.trial_id) unexpected++;
       continue;
     }
+    if (observation.kind === 'CORRECTNESS_CASE' ? observation.sample_index !== null
+      : !Number.isInteger(observation.sample_index) || (observation.sample_index as number) < 0) {
+      unexpected++;
+      continue;
+    }
     const slot = slots.get(key(observation.kind, observation.subject_id, observation.role, observation.sample_index));
     if (slot) slot.observations.push(observation);
     else unexpected++;
