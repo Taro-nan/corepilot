@@ -113,6 +113,13 @@ export class OptimizationRuntime {
   }
 
   createTask(input: CreateOptimizationTaskInput): OptimizationTask {
+    const task = this.prepareTask(input);
+    this.store.saveOptimizationTask(task);
+    return task;
+  }
+
+  /** Prepare the same domain fact for atomic use-case persistence. */
+  prepareTask(input: CreateOptimizationTaskInput): OptimizationTask {
     const timestamp = this.timestamp();
     const task: OptimizationTask = {
       schema_version: OPTIMIZATION_DOMAIN_SCHEMA_VERSION,
@@ -128,7 +135,6 @@ export class OptimizationRuntime {
       created_at: timestamp,
       updated_at: timestamp,
     };
-    this.store.saveOptimizationTask(task);
     return task;
   }
 

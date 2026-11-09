@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { TaskStore } from '../storage/task-store.js';
 import { canRetryWorkflowValidation, isWorkflowValidationBlocked, type OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import type { PublicWorkflowRequest } from '../contracts/public-workflow.js';
+import type { OptimizationTask } from '../contracts/optimization-domain.js';
 import { loadPublicOptimizationPreflight } from './public-optimization.js';
 import { createPiModels, COREPILOT_PI_PROVIDER_ID, type PiRuntimeModelConfig } from '../model/pi-provider.js';
 import { verifyToolCalling } from '../model/tool-verification.js';
@@ -151,6 +152,17 @@ export class OptimizationWorkflowService {
     return { report, markdown: renderOptimizationReport(report) };
   }
 
+  private createIntake(record: OptimizationWorkflowRecord, task: OptimizationTask) {
+    record.optimization_task_id = task.task_id;
+    if (this.options.publicExecution === true) {
+      // If Control exits after the commit but before launching, startup recovery
+      // can distinguish this request from an intentionally non-executing intake.
+      record.status = 'GENERATING';
+      record.progress = { phase: 'PUBLIC_INTAKE_STARTING', last_event: '任务已保存，正在启动优化。' };
+    }
+    return this.options.store.createOptimizationIntake(task, record);
+  }
+
   submitPublic(request: PublicWorkflowRequest, options: { cliApiKey?: string; requestId?: string; packageLoader?: LibraryPackageLoader } = {}): { workflowId: string } {
     if (this.stopping) throw new Error('后台正在停止，请稍后重试。');
     if (request.verification_mode === 'source_only' && request.enable_performance === true) throw new Error('仅优化源码不执行性能测试，请选择优化并验证。');
@@ -175,10 +187,11 @@ export class OptimizationWorkflowService {
     }
     if (request.verification_mode === 'source_only') {
       const preflight = loadSourceOptimizationPreflight(request, { ...options, readMachine: id => this.options.store.getExecutionMachine(id) });
-      const { record, task } = sourceOptimizationIntake(`workflow:${randomUUID()}`, preflight);
-      record.optimization_task_id = this.runtime.createTask(task).task_id;
+      const { record, task: taskInput } = sourceOptimizationIntake(`workflow:${randomUUID()}`, preflight);
+      const task = this.runtime.prepareTask(taskInput);
       if (options.requestId) { record.request_id = options.requestId; record.request_digest = requestDigest; }
-      this.records.save(record);
+      const saved = this.createIntake(record, task);
+      if (!saved.created) return { workflowId: saved.workflowId };
       if (this.options.publicExecution === true) this.launchSourceWorkflow(record.workflow_id, preflight);
       return { workflowId: record.workflow_id };
     }
@@ -264,7 +277,7 @@ export class OptimizationWorkflowService {
         acceptance_policy: { ...preflight.testpack.testpack.performance.thresholds },
       },
     };
-    const task = this.runtime.createTask(preflight.libraryPackage
+    const task = this.runtime.prepareTask(preflight.libraryPackage
       ? packageOptimizationTaskInput(preflight.libraryPackage, {
         workflowId,
         sourceBaseline: taskInput.sourceBaseline,
@@ -272,9 +285,9 @@ export class OptimizationWorkflowService {
         declaredContext: taskInput.declaredContext,
       })
       : taskInput);
-    record.optimization_task_id = task.task_id;
     record.progress = { phase: 'PUBLIC_INTAKE_VALIDATED', last_event: 'public config and validation testpack accepted' };
-    this.records.save(record);
+    const saved = this.createIntake(record, task);
+    if (!saved.created) return { workflowId: saved.workflowId };
     if (this.options.publicExecution === true) {
       const controller = new AbortController();
       this.controllers.set(workflowId, controller);

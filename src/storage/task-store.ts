@@ -4,6 +4,7 @@ import type { OptimizationStore } from './optimization-store.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
 import type { Experiment, OptimizationTask } from '../contracts/optimization-domain.js';
+import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 
 export interface LeaseRecord {
   owner_id: string;
@@ -37,6 +38,8 @@ export interface TaskStore extends OptimizationStore {
   releaseLease(ownerId: string): void;
   getActiveLease(): LeaseRecord | null;
   saveOptimizationWorkflowJson(workflowId: string, workflowJson: string): void;
+  /** Atomically create the task and workflow, or return the existing matching request. */
+  createOptimizationIntake(task: OptimizationTask, workflow: OptimizationWorkflowRecord): { workflowId: string; created: boolean };
   saveRecoveredWorkflow(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   /** Create a reproduction and its workflow reference in one transaction, if the workflow has not changed. */
   createReproductionExperiment(experiment: Experiment, expectedWorkflowJson: string, workflowJson: string): void;

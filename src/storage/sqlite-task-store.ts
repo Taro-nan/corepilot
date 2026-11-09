@@ -278,6 +278,30 @@ export class SqliteTaskStore implements TaskStore {
     this.db.prepare('INSERT INTO optimization_workflows (workflow_id, workflow_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(workflow_id) DO UPDATE SET workflow_json=excluded.workflow_json, updated_at=excluded.updated_at').run(workflowId, workflowJson, new Date().toISOString());
   }
 
+  createOptimizationIntake(task: OptimizationTask, workflow: OptimizationWorkflowRecord): { workflowId: string; created: boolean } {
+    if (task.workflow_id !== workflow.workflow_id || task.task_id !== workflow.optimization_task_id || task.status !== 'CREATED' ||
+        !['CREATED', 'GENERATING'].includes(workflow.status) || (!!workflow.request_id !== !!workflow.request_digest)) {
+      throw new Error('optimization intake identity or status mismatch');
+    }
+    return this.transaction(() => {
+      if (workflow.request_id) {
+        const previous = this.getOptimizationWorkflowByRequestId(workflow.request_id);
+        if (previous) {
+          const existing = JSON.parse(previous) as OptimizationWorkflowRecord;
+          if (existing.request_digest !== workflow.request_digest) throw new Error('Idempotency-Key already used with different optimization inputs');
+          return { workflowId: existing.workflow_id, created: false };
+        }
+      }
+      // save* are upserts elsewhere; intake must never overwrite an existing fact.
+      if (this.getOptimizationTask(task.task_id) || this.getOptimizationWorkflowJson(workflow.workflow_id)) {
+        throw new Error('optimization intake identity already exists');
+      }
+      this.saveOptimizationTask(task);
+      this.saveOptimizationWorkflowJson(workflow.workflow_id, JSON.stringify(workflow));
+      return { workflowId: workflow.workflow_id, created: true };
+    });
+  }
+
   saveRecoveredWorkflow(workflowId: string, workflowJson: string, task: OptimizationTask | null): void {
     this.transaction(() => {
       if (task) {
@@ -358,8 +382,9 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   getOptimizationWorkflowByRequestId(requestId: string): string | null {
-    const row = this.db.prepare("SELECT workflow_json FROM optimization_workflows WHERE json_extract(workflow_json, '$.request_id') = ? LIMIT 1").get(requestId) as { workflow_json: string } | undefined;
-    return row?.workflow_json ?? null;
+    const rows = this.db.prepare("SELECT workflow_json FROM optimization_workflows WHERE json_extract(workflow_json, '$.request_id') = ? LIMIT 2").all(requestId) as Array<{ workflow_json: string }>;
+    if (rows.length > 1) throw new Error('Idempotency-Key 对应多条历史工作流记录，无法确认应复用哪条；请联系维护者核对，原记录均已保留。');
+    return rows[0]?.workflow_json ?? null;
   }
 
   listProjects(): ProjectRecord[] {
