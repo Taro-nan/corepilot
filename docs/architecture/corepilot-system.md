@@ -55,7 +55,7 @@ flowchart LR
 
 Control SQLite 在 [SqliteTaskStore](../../src/storage/sqlite-task-store.ts) 中保存项目、机器、工作流 JSON、领域对象、命令与测量；部分关联写入有事务，但跨 Workflow、领域事实、会话和文件系统没有统一原子提交。Runner 有独立 SQLite。源码归档、基线、测试包、构建产物和导出报告由文件系统保存；Pi 会话有自己的持久存储。当前命令输出与测量仍可随记录存储和整批读取，不能声称已实现通用分块日志或对象存储。
 
-启动恢复将中断的 Workflow 和其 OptimizationTask 在同一 SQLite 事务中标记为 `INTERRUPTED`；旧版已写入中断工作流、但领域任务仍为 `CREATED`/`RUNNING` 的记录也会对账。会话尚未保存时提示创建新任务，不声称能够恢复。复现的 `PREPARING`/`RUNNING` 只改为 `UNKNOWN` 并保留原实验 ID，继续复现时查询原 Runner；启动本身不会提交、取消或修改远端实验。没有会话且领域任务仍为 `CREATED` 的工作流无法区分尚未启动与启动前崩溃，保持原状态。其余运行期 Workflow、Task 和跨 Runner 的状态写入仍非统一原子状态机。
+启动恢复将中断的 Workflow 和状态仍为 `CREATED`/`RUNNING` 的 OptimizationTask 在同一 SQLite 事务中标记为 `INTERRUPTED`；旧版已写入中断工作流、但领域任务仍在运行的记录也会对账。领域任务已经处于终态或等待审批时保留原状态和候选、审批事实；任务缺失或归属不符时记录错误，不阻止其他记录恢复。会话尚未保存时提示创建新任务，不声称能够恢复。复现的 `PREPARING`/`RUNNING` 只改为 `UNKNOWN` 并保留原实验 ID，继续复现时查询原 Runner；启动本身不会提交、取消或修改远端实验。没有会话且领域任务仍为 `CREATED` 的工作流无法区分尚未启动与启动前崩溃，保持原状态。其余运行期 Workflow、Task 和跨 Runner 的状态写入仍非统一原子状态机。
 
 ### 优化与独立测试的已落地边界
 

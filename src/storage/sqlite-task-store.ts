@@ -312,6 +312,7 @@ export class SqliteTaskStore implements TaskStore {
   listRecoverableWorkflowJson(): string[] {
     const rows = this.db.prepare(`SELECT workflow.workflow_json FROM optimization_workflows AS workflow
       LEFT JOIN optimization_tasks AS task ON task.task_id = json_extract(workflow.workflow_json, '$.optimization_task_id')
+        AND (task.workflow_id IS NULL OR task.workflow_id = workflow.workflow_id)
       WHERE json_extract(workflow.workflow_json, '$.status') = 'GENERATING'
          OR (json_extract(workflow.workflow_json, '$.status') = 'CREATED'
              AND (json_type(workflow.workflow_json, '$.agent_session') = 'object' OR task.status = 'RUNNING'))

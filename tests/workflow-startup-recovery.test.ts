@@ -10,6 +10,9 @@ import { SqliteTaskStore } from '../src/storage/sqlite-task-store.js';
 import { OptimizationWorkflowService } from '../src/workflow/optimization-workflow-service.js';
 import { initialOptimizationWorkflowRecord } from '../src/workflow/optimization-workflow.js';
 import { sourceOptimizationFixture } from './source-optimization-fixture.js';
+import { startWebFixture } from './web-fixture.js';
+import { seedBlockedValidation } from './validation-recovery-fixture.js';
+import { approveFixture, seedApprovalFacts } from './workflow-approval-fixture.js';
 import type { OptimizationTaskStatus } from '../src/contracts/optimization-domain.js';
 import type { OptimizationWorkflowRecord } from '../src/contracts/workflow.js';
 
@@ -51,7 +54,17 @@ test('startup recovers older detached sessions and reproduction jobs without alt
     const duringStartup = f.seed('a-old-during-startup', 'CREATED', 'RUNNING', false);
     const incomplete = f.seed('a-old-partial-write', 'INTERRUPTED', 'RUNNING');
     const alreadyDone = f.seed('a-old-completed', 'CANDIDATE_READY', 'CANDIDATE_READY');
+    const priorTerminal = f.seed('a-old-terminal-task', 'GENERATING', 'COMPLETED');
     const draft = f.seed('a-old-created', 'CREATED', 'CREATED', false);
+    const missing = initialOptimizationWorkflowRecord('a-old-missing-task', { functionName: 'kernel', entryFile: 'kernel.c', configPath: 'fixture.yaml', repositoryRoot: f.root });
+    missing.status = 'GENERATING'; missing.optimization_task_id = 'missing-task';
+    f.store.saveOptimizationWorkflowJson(missing.workflow_id, JSON.stringify(missing));
+    const noIdentity = initialOptimizationWorkflowRecord('a-old-no-task-id', { functionName: 'kernel', entryFile: 'kernel.c', configPath: 'fixture.yaml', repositoryRoot: f.root });
+    noIdentity.status = 'GENERATING'; f.store.saveOptimizationWorkflowJson(noIdentity.workflow_id, JSON.stringify(noIdentity));
+    const foreign = f.seed('a-foreign-owner', 'CANDIDATE_READY', 'RUNNING');
+    const mismatched = initialOptimizationWorkflowRecord('a-old-mismatched-task', { functionName: 'kernel', entryFile: 'kernel.c', configPath: 'fixture.yaml', repositoryRoot: f.root });
+    mismatched.status = 'GENERATING'; mismatched.optimization_task_id = foreign.optimization_task_id;
+    f.store.saveOptimizationWorkflowJson(mismatched.workflow_id, JSON.stringify(mismatched));
     for (let i = 0; i < 205; i++) {
       const id = `z-other-${String(i).padStart(3, '0')}`;
       const record = initialOptimizationWorkflowRecord(id, { functionName: 'other', entryFile: null, configPath: 'fixture.yaml', repositoryRoot: f.root });
@@ -72,6 +85,14 @@ test('startup recovers older detached sessions and reproduction jobs without alt
     assert.equal(f.store.getOptimizationTask(beforeSession.optimization_task_id!)?.status, 'INTERRUPTED');
     assert.equal(service.get(duringStartup.workflow_id)!.status, 'INTERRUPTED');
     assert.equal(f.store.getOptimizationTask(incomplete.optimization_task_id!)?.status, 'INTERRUPTED');
+    assert.equal(service.get(priorTerminal.workflow_id)!.status, 'INTERRUPTED');
+    assert.equal(f.store.getOptimizationTask(priorTerminal.optimization_task_id!)?.status, 'COMPLETED');
+    assert.equal(service.get(missing.workflow_id)!.status, 'INTERRUPTED');
+    assert.match(service.get(missing.workflow_id)!.error!, /领域任务记录不存在/);
+    assert.equal(f.store.getOptimizationTask('missing-task'), null);
+    assert.match(service.get(noIdentity.workflow_id)!.error!, /缺少领域任务身份/);
+    assert.match(service.get(mismatched.workflow_id)!.error!, /属于其他工作流/);
+    assert.equal(f.store.getOptimizationTask(foreign.optimization_task_id!)?.status, 'RUNNING');
     assert.deepEqual(service.get(alreadyDone.workflow_id), alreadyDone);
     assert.deepEqual(service.get(draft.workflow_id), draft);
 
@@ -94,6 +115,35 @@ test('startup recovers older detached sessions and reproduction jobs without alt
     if (server) await new Promise<void>(resolve => server!.close(() => resolve()));
     await service?.stop(); f.close();
   }
+});
+
+test('startup preserves a saved candidate and human approval when the task is already awaiting approval', async () => {
+  const f = await startWebFixture();
+  let recovered: OptimizationWorkflowService | undefined;
+  try {
+    const seeded = await seedBlockedValidation(f, true);
+    seedApprovalFacts(f, seeded.workflowId);
+    await approveFixture(f, seeded.workflowId);
+    const workflow = f.service.get(seeded.workflowId)!;
+    const task = f.store.getOptimizationTask(workflow.optimization_task_id!)!;
+    f.store.saveOptimizationTask({ ...task, status: 'WAITING_APPROVAL' });
+    const candidate = f.store.getCandidate(workflow.candidate_id!)!;
+    const approval = f.store.getCandidateApproval(candidate.candidate_id)!;
+    assert.equal(candidate.status, 'APPROVED');
+    assert.equal(approval.approval_status, 'APPROVED');
+    assert.ok(workflow.review_evidence);
+    workflow.status = 'GENERATING';
+    f.store.saveOptimizationWorkflowJson(workflow.workflow_id, JSON.stringify(workflow));
+    await f.service.stop();
+    recovered = new OptimizationWorkflowService({ store: f.store, transportFactory: () => { throw new Error('startup must not contact the Runner'); } });
+    const saved = recovered.get(workflow.workflow_id)!;
+    assert.equal(saved.status, 'INTERRUPTED');
+    assert.match(saved.progress!.last_event!, /WAITING_APPROVAL/);
+    assert.equal(f.store.getOptimizationTask(task.task_id)!.status, 'WAITING_APPROVAL');
+    assert.deepEqual(f.store.getCandidate(candidate.candidate_id), candidate);
+    assert.deepEqual(f.store.getCandidateApproval(candidate.candidate_id), approval);
+    assert.deepEqual(saved.review_evidence, workflow.review_evidence);
+  } finally { await recovered?.stop(); await f.close(); }
 });
 
 test('failed recovery rolls back both the workflow and its domain task', async () => {

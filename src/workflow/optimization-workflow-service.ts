@@ -105,19 +105,27 @@ export class OptimizationWorkflowService {
         record.reproduction.status = 'UNKNOWN'; record.reproduction.error = 'Control 已重启；继续时先查询原复现实验，不重复提交新 ID';
         record.reproduction.updated_at = timestamp;
       }
-      const task = record.optimization_task_id ? options.store.getOptimizationTask(record.optimization_task_id) : null;
+      const referencedTask = record.optimization_task_id ? options.store.getOptimizationTask(record.optimization_task_id) : null;
+      const task = referencedTask && (referencedTask.workflow_id === null || referencedTask.workflow_id === record.workflow_id)
+        ? referencedTask : null;
       const wasRunning = record.status === 'GENERATING'
         || (record.status === 'CREATED' && (!!record.agent_session || task?.status === 'RUNNING'));
       if (wasRunning) {
-        if (record.optimization_task_id && !task) throw new Error(`optimization task '${record.optimization_task_id}' not found during recovery`);
         record.status = 'INTERRUPTED';
-        record.progress = { ...record.progress, phase: 'INTERRUPTED', last_event: record.agent_session
-          ? '后台已重新启动；若已保存检查点，可继续原会话。'
-          : '后台已重新启动，但会话尚未保存；请保留原记录并创建新任务。' };
+        const taskProblem = !record.optimization_task_id ? '缺少领域任务身份'
+          : !referencedTask ? '关联的领域任务记录不存在'
+            : !task ? '关联的领域任务属于其他工作流' : null;
+        const message = taskProblem ? `后台已重新启动，但${taskProblem}；请联系维护者核对记录。`
+          : task && !['CREATED', 'RUNNING', 'INTERRUPTED'].includes(task.status)
+            ? `后台已重新启动；领域任务保留原状态 ${task.status}，请核对记录后再继续。`
+            : record.agent_session ? '后台已重新启动；若已保存检查点，可继续原会话。'
+              : '后台已重新启动，但会话尚未保存；请保留原记录并创建新任务。';
+        if (taskProblem) record.error = record.error ? `${record.error}\n${message}` : message;
+        record.progress = { ...record.progress, phase: 'INTERRUPTED', last_event: message };
       }
       // Also repair a partial write left by earlier versions when the workflow
       // became INTERRUPTED before its still-running Task was updated.
-      const recoverTask = task && (wasRunning || (record.status === 'INTERRUPTED' && ['CREATED', 'RUNNING'].includes(task.status)))
+      const recoverTask = task && ['CREATED', 'RUNNING'].includes(task.status) && (wasRunning || record.status === 'INTERRUPTED')
         ? { ...task, status: 'INTERRUPTED' as const, updated_at: timestamp } : null;
       record.updated_at = timestamp;
       options.store.saveRecoveredWorkflow(record.workflow_id, JSON.stringify(record), recoverTask);
