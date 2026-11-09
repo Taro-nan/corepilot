@@ -73,7 +73,7 @@ export function customerSummary(report: OptimizationReport): CustomerOptimizatio
   else if (state === 'DELIVERED') next = { kind: 'REPRODUCE', message: '源码交付已记录，可从冻结提交在 Runner 的新目录重建复现。', command: command('reproduce') };
   else if (state === 'DELIVERY_UNVERIFIED') next = { kind: 'INSPECT', message: '核对原交付提交与当前候选的源码身份。历史记录已标记交付，不应再次批准或重复合并。', command: command('report') };
   else if (correctnessOnlyApproval && workflow.status === 'WAITING_APPROVAL') next = { kind: 'INSPECT', message: '本次任务只验证了正确性，当前正式批准还需要性能实验和独立复验；原正确性结果会保留。', command: command('report') };
-  else if (legacyApprovalEvidence && workflow.status === 'WAITING_APPROVAL') next = { kind: 'INSPECT', message: '原实验沿用旧版点估计或缺少有效统计区间。请确认新版测试方案，再重新执行正式实验与独立复验；原记录继续保留。', command: command('report') };
+  else if (legacyApprovalEvidence && workflow.status === 'WAITING_APPROVAL') next = { kind: 'INSPECT', message: '原实验沿用旧版点估计或缺少有效统计区间。请确认新版测试方案，创建绑定该方案的新任务并重新执行正式实验与独立复验；原记录继续保留。', command: command('report') };
   else if (missingExecutionPlan && workflow.status === 'WAITING_APPROVAL') next = { kind: 'INSPECT', message: '缺少原始 Runner 执行计划，无法核对本次测量的来源。请核对测试方案并重新执行正式实验与独立复验；原记录继续保留。', command: command('report') };
   else if (['BUDGET_EXHAUSTED', 'INTERRUPTED'].includes(workflow.status)) next = { kind: 'RESUME', message: '原会话与工作区已保留，可恢复调查；先核对已有 Runner 作业。', command: command('resume') };
   else if (workflow.status === 'VALIDATION_BLOCKED') next = { kind: 'RETRY_VALIDATION', message: (reanalysis ?? analysis)?.statistics?.verdict === 'INCONCLUSIVE'

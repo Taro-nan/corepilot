@@ -24,7 +24,7 @@ const jsonBytes = (value: unknown) => Buffer.from(JSON.stringify(value, null, 2)
 
 function requireCurrentApprovalStatistics(testpack: ValidationTestpack, first: Experiment, repeated: Experiment): void {
   if (!testpack.performance.statistics || !hasCurrentApprovalStatistics(first) || !hasCurrentApprovalStatistics(repeated)) {
-    throw new Error('当前记录采用旧版点估计或缺少有效统计区间，不能作为新的正式批准依据。请确认新版测试方案，并重新执行正式实验与独立复验；原结果和历史批准会保留。');
+    throw new Error('当前记录采用旧版点估计或缺少有效统计区间，不能作为新的正式批准依据。请确认新版测试方案，创建绑定该方案的新任务，并重新执行正式实验与独立复验；原结果和历史批准会保留。');
   }
 }
 
