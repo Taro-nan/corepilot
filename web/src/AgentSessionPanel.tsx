@@ -53,6 +53,7 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh, scopeAu
   const canRetry = !active && canRetryWorkflowValidation(workflow);
   const validationBlocked = isWorkflowValidationBlocked(workflow);
   const measurementInconclusive = workflow.candidate_evaluation_feedback?.performance_summary.status === 'INCONCLUSIVE';
+  const measurementInvalid = workflow.candidate_evaluation_feedback?.performance_summary.status === 'INVALID';
   const canResume = !deliveryPending && !validationBlocked && !!workflow.agent_session && !active && ['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'CANDIDATE_READY', 'CREATED', 'GENERATING'].includes(workflow.status);
   const canReconcileLegacy = legacyScope && !active && !deliveryPending && workflow.status === 'INTERRUPTED' && !!(workflow.experiment_id || workflow.revalidation_experiment_id);
   const running = useRef(active);
@@ -107,7 +108,7 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh, scopeAu
       setBusy(true); try { await api.resumeOptimizationWorkflow(workflow.workflow_id); notify('已提交原实验核对。'); refresh(); }
       catch (failure) { notify((failure as Error).message, true); } finally { setBusy(false); }
     }}>核对原实验</button></div>}
-    {canRetry && <div className="notice"><strong>{measurementInconclusive ? '测量证据不足，候选已保留' : validationBlocked ? '验证环境异常，候选已保留' : '当前候选已保留'}</strong><p>{measurementInconclusive ? '先检查测量噪声。采样方案变化需要建立新测试版本；不要重复试到通过。' : validationBlocked ? '本次测试未形成完整结论。修复执行环境后，可以重新验证当前候选。' : '可以继续优化以生成新候选，或保持当前源码重新验证。'}系统会创建新实验并保留原记录，重新验证不调用模型。</p><button className="primary" disabled={busy} onClick={async () => {
+    {canRetry && <div className="notice"><strong>{measurementInconclusive ? '测量证据不足，候选已保留' : measurementInvalid ? '测量结果无效，候选已保留' : validationBlocked ? '验证环境异常，候选已保留' : '当前候选已保留'}</strong><p>{measurementInconclusive ? '先检查测量噪声。采样方案变化需要建立新测试版本；不要重复试到通过。' : measurementInvalid ? '请核对测试程序和采样、执行资源及实验详情，处理原因后重新验证。' : validationBlocked ? '本次测试未形成完整结论。修复执行环境后，可以重新验证当前候选。' : '可以继续优化以生成新候选，或保持当前源码重新验证。'}系统会创建新实验并保留原记录，重新验证不调用模型。</p><button className="primary" disabled={busy} onClick={async () => {
       setBusy(true);
       try { await api.retryOptimizationValidation(workflow.workflow_id, workflow.candidate_id); notify('已开始重新验证当前候选。'); refresh(); }
       catch (failure) { notify((failure as Error).message, true); }

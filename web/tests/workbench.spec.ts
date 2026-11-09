@@ -219,6 +219,29 @@ test('inconclusive measurement is explained separately from an environment failu
   expect(f.service.get(seeded.workflowId)?.candidate_id).toBe(seeded.candidate.candidate_id);
 });
 
+test('invalid performance samples are explained as invalid data rather than an environment outage', async ({ page }) => {
+  await fixture.close(); fixture = await startWebFixture();
+  const f = fixture;
+  const packPath = loadOptimizationConfig(f.configPath).config.validation.testpack;
+  const pack = JSON.parse(fs.readFileSync(packPath, 'utf8'));
+  pack.performance.statistics = DEFAULT_STATISTICS;
+  pack.performance.sampling.samples = 9;
+  pack.performance.command.args = ['-e', 'console.log(JSON.stringify([{case_id:"p1",baseline_samples:Array(9).fill(1),candidate_samples:[1]}]))'];
+  fs.writeFileSync(packPath, JSON.stringify(pack));
+  const seeded = await seedBlockedValidation(f, true);
+  await new ApiClient(f.url, { token: f.token }).retryOptimizationValidation(seeded.workflowId);
+  await expect.poll(() => f.service.get(seeded.workflowId)?.status).toBe('VALIDATION_BLOCKED');
+  await login(page);
+  await page.getByRole('navigation').getByRole('button', { name: '优化任务', exact: true }).click();
+  await page.getByRole('row').filter({ hasText: seeded.workflowId }).click();
+  const panel = page.locator('.agent-session');
+  await expect(panel.getByText('测量结果无效，候选已保留', { exact: true })).toBeVisible();
+  await expect(panel).toContainText('核对测试程序和采样');
+  await expect(panel.getByRole('button', { name: '重新验证当前候选', exact: true })).toBeVisible();
+  expect(f.modelRequests.inference).toBe(0);
+  expect(f.service.get(seeded.workflowId)?.candidate_id).toBe(seeded.candidate.candidate_id);
+});
+
 test('latest valid evaluations replace the current warning while historical failures remain inspectable', async ({ page }) => {
   await fixture.close(); fixture = await startWebFixture();
   const seeded = await seedBlockedValidation(fixture);
