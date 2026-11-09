@@ -20,6 +20,8 @@ import type { ProjectService } from '../application/project-service.js';
 import { redactRecord, redactReportText } from '../report/optimization-report.js';
 import { OptimizationIntakeAmbiguousError, OptimizationIntakeClosedError, OptimizationIntakeConflictError } from '../contracts/optimization-intake.js';
 import { optimizationInputDigest } from '../workflow/optimization-intake.js';
+import type { ControlIdentityGuard } from '../storage/control-identity.js';
+import { CONTROL_GUARD_HEADER } from '../contracts/control-identity.js';
 
 export interface HttpServerOptions {
   host: string;
@@ -27,6 +29,7 @@ export interface HttpServerOptions {
   workflowService: OptimizationWorkflowService;
   projectService?: ProjectService;
   testingService?: TestingService;
+  controlIdentity?: ControlIdentityGuard;
   webRoot?: string;
   accessToken?: string;
   managedShutdown?: { token: string; requestShutdown: () => void };
@@ -69,6 +72,18 @@ function sendIntakeReceipt(res: http.ServerResponse, service: OptimizationWorkfl
     entry_file: record.entry_file, enable_performance: record.enable_performance });
 }
 
+function currentControlIdentity(options: HttpServerOptions) {
+  if (!options.controlIdentity) throw new ApiError(503, 'CONTROL_IDENTITY_UNAVAILABLE', '控制端尚未提供身份核对，请由维护者检查服务版本与数据目录。');
+  try { return options.controlIdentity.current(); }
+  catch (error) { throw new ApiError(503, 'CONTROL_IDENTITY_UNAVAILABLE', (error as Error).message); }
+}
+
+function requireControlIdentity(options: HttpServerOptions, databaseId: string, dataRootId: string): void {
+  const actual = currentControlIdentity(options);
+  if (databaseId !== actual.database_id) throw new ApiError(409, 'CONTROL_DATABASE_MISMATCH', '当前控制端数据库与原请求不同，请恢复原控制端后核对。');
+  if (dataRootId !== actual.data_root_id) throw new ApiError(409, 'CONTROL_DATA_ROOT_MISMATCH', '当前控制端数据目录与原请求不同，请恢复原数据目录后核对。');
+}
+
 /** 同时承载通用任务 API 和新的 public optimize workflow API。 */
 export function createHttpServer(host: TaskHost, options: HttpServerOptions): http.Server {
   const access = new ServerAccess(options.accessToken);
@@ -91,10 +106,30 @@ export function createHttpServer(host: TaskHost, options: HttpServerOptions): ht
 async function handle(host: TaskHost, req: http.IncomingMessage, res: http.ServerResponse, options: HttpServerOptions): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const method = req.method ?? 'GET';
-  const pathname = url.pathname;
+  let pathname = url.pathname;
+  let expectedControl: { databaseId: string; dataRootId: string } | null = null;
+
+  if (method === 'GET' && pathname === '/v1/control-identity') {
+    sendJson(res, 200, currentControlIdentity(options)); return;
+  }
+  const protectedPath = pathname.match(/^\/v1\/control-identities\/([^/]+)\/([^/]+)(\/.*)$/);
+  const guardHeader = req.headers[CONTROL_GUARD_HEADER];
+  if ((!protectedPath && guardHeader !== undefined) || (protectedPath && guardHeader !== '1')) {
+    throw new ApiError(409, 'CONTROL_GUARD_UNAVAILABLE', '控制端身份保护路径或保护标记缺失，请检查服务和代理配置。');
+  }
+  if (protectedPath) {
+    const [, databaseId, dataRootId, suffix] = protectedPath;
+    const allowed = method === 'POST' && suffix === '/workflows'
+      || method === 'GET' && /^\/workflow-requests\/[^/]+$/.test(suffix)
+      || method === 'POST' && /^\/workflow-requests\/[^/]+\/close$/.test(suffix);
+    if (!allowed) throw new ApiError(404, 'NOT_FOUND', '此身份保护路径不可用。');
+    expectedControl = { databaseId, dataRootId };
+    requireControlIdentity(options, databaseId, dataRootId);
+    pathname = '/v1' + suffix;
+  }
 
   if (method === 'GET' && pathname === '/v1/health') {
-    sendJson(res, 200, buildHealth({ capabilities: ['workflows', 'workflow-reports', 'optimization-sessions', 'tasks', 'events', ...(options.projectService ? ['projects'] : []), ...(options.testingService ? ['testing-tasks'] : []), ...(options.webRoot ? ['web'] : [])] }));
+    sendJson(res, 200, buildHealth({ capabilities: ['workflows', 'workflow-reports', 'optimization-sessions', 'tasks', 'events', ...(options.controlIdentity ? ['control-identity-v1'] : []), ...(options.projectService ? ['projects'] : []), ...(options.testingService ? ['testing-tasks'] : []), ...(options.webRoot ? ['web'] : [])] }));
     return;
   }
   if (method === 'POST' && pathname === MANAGED_SHUTDOWN_PATH) {
@@ -108,6 +143,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   if (method === 'POST' && pathname === '/v1/workflows') {
     try {
       const body = await readJson(req);
+      if (expectedControl) requireControlIdentity(options, expectedControl.databaseId, expectedControl.dataRootId);
       const header = req.headers[COREPILOT_MODEL_API_KEY_HEADER];
       const requestId = req.headers['idempotency-key'] === undefined ? undefined : intakeRequestId(req.headers['idempotency-key']);
       const inputDigest = requestId ? optimizationInputDigest(body) : undefined;

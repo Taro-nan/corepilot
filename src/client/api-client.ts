@@ -3,6 +3,7 @@ import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { OptimizationSessionBudget, OptimizationSessionEvents } from '../contracts/optimization-session.js';
 import type { OptimizationIntakeStatus } from '../contracts/optimization-intake.js';
+import { CONTROL_GUARD_HEADER, isControlIdentity, type ControlIdentity } from '../contracts/control-identity.js';
 import { TestingClient } from './testing-client.js';
 
 export class ApiClientError extends Error {
@@ -19,6 +20,11 @@ export class ApiClientError extends Error {
 
 interface ApiErrorBody {
   error?: { code?: string; message?: string; details?: Record<string, unknown> };
+}
+
+function controlRoute(identity: ControlIdentity, path: string): string {
+  if (!isControlIdentity(identity)) throw new Error('原请求缺少可核验的控制端身份，请联系维护者核对。');
+  return `/v1/control-identities/${identity.database_id}/${identity.data_root_id}${path}`;
 }
 
 export class ApiClient {
@@ -55,16 +61,28 @@ export class ApiClient {
     return this.request('GET', `/v1/tasks/${encodeURIComponent(taskId)}/events`);
   }
 
-  submitOptimizationWorkflow(payload: Record<string, unknown>, options: { apiKey?: string; requestId?: string } = {}): Promise<unknown> {
-    return this.request('POST', '/v1/workflows', payload, { ...(options.apiKey ? { 'x-corepilot-model-api-key': options.apiKey } : {}), ...(options.requestId ? { 'idempotency-key': options.requestId } : {}) });
+  async getControlIdentity(): Promise<ControlIdentity> {
+    const value = await this.request('GET', '/v1/control-identity');
+    if (!isControlIdentity(value)) throw new Error('控制端身份信息不完整，请由维护者核对服务版本。');
+    return value;
   }
 
-  getOptimizationIntake(requestId: string): Promise<OptimizationIntakeStatus> {
-    return this.request('GET', `/v1/workflow-requests/${encodeURIComponent(requestId)}`) as Promise<OptimizationIntakeStatus>;
+  submitOptimizationWorkflow(payload: Record<string, unknown>, options: { apiKey?: string; requestId?: string; controlIdentity?: ControlIdentity } = {}): Promise<unknown> {
+    return this.request('POST', options.controlIdentity ? controlRoute(options.controlIdentity, '/workflows') : '/v1/workflows', payload,
+      { ...(options.apiKey ? { 'x-corepilot-model-api-key': options.apiKey } : {}), ...(options.requestId ? { 'idempotency-key': options.requestId } : {}),
+        ...(options.controlIdentity ? { [CONTROL_GUARD_HEADER]: '1' } : {}) });
   }
 
-  closeOptimizationIntake(requestId: string): Promise<Exclude<OptimizationIntakeStatus, { status: 'NOT_FOUND' }>> {
-    return this.request('POST', `/v1/workflow-requests/${encodeURIComponent(requestId)}/close`, {}) as Promise<Exclude<OptimizationIntakeStatus, { status: 'NOT_FOUND' }>>;
+  getOptimizationIntake(requestId: string, identity?: ControlIdentity): Promise<OptimizationIntakeStatus> {
+    const path = `/workflow-requests/${encodeURIComponent(requestId)}`;
+    return this.request('GET', identity ? controlRoute(identity, path) : '/v1' + path, undefined,
+      identity ? { [CONTROL_GUARD_HEADER]: '1' } : undefined) as Promise<OptimizationIntakeStatus>;
+  }
+
+  closeOptimizationIntake(requestId: string, identity?: ControlIdentity): Promise<Exclude<OptimizationIntakeStatus, { status: 'NOT_FOUND' }>> {
+    const path = `/workflow-requests/${encodeURIComponent(requestId)}/close`;
+    return this.request('POST', identity ? controlRoute(identity, path) : '/v1' + path, {},
+      identity ? { [CONTROL_GUARD_HEADER]: '1' } : undefined) as Promise<Exclude<OptimizationIntakeStatus, { status: 'NOT_FOUND' }>>;
   }
 
   getOptimizationWorkflow(workflowId: string, signal?: AbortSignal): Promise<unknown> {

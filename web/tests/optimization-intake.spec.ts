@@ -27,7 +27,7 @@ async function prepare(page: Page) {
 test('a lost response and refresh recover the created task without a second POST', async ({ page }) => {
   const f = fixture;
   let posts = 0, originalId = '';
-  await page.route('**/v1/workflows', async route => {
+  await page.route('**/v1/control-identities/*/*/workflows', async route => {
     if (route.request().method() !== 'POST') return route.continue();
     posts++;
     const response = await route.fetch();
@@ -41,7 +41,7 @@ test('a lost response and refresh recover the created task without a second POST
   expect(f.service.list()).toHaveLength(1);
   const stored = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith('corepilot-optimization-request:')));
   expect(stored).toHaveLength(1);
-  expect(stored[0][1]).toBe('1');
+  expect(JSON.parse(stored[0][1])).toMatchObject({ version: 2, identity: { database_id: expect.any(String), data_root_id: expect.any(String) } });
   expect(JSON.stringify(stored)).not.toContain('kernel');
   await dialog.getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByRole('button', { name: /更换目标函数，当前/ }).click();
@@ -70,7 +70,7 @@ test('a lost response and refresh recover the created task without a second POST
 test('not found remains unresolved until closing blocks a late POST', async ({ page }) => {
   const f = fixture;
   let posts = 0, key = '', body: Record<string, unknown> = {};
-  await page.route('**/v1/workflows', async route => {
+  await page.route('**/v1/control-identities/*/*/workflows', async route => {
     if (route.request().method() !== 'POST') return route.continue();
     if (++posts > 1) return route.continue();
     key = route.request().headers()['idempotency-key'];
@@ -96,8 +96,8 @@ test('not found remains unresolved until closing blocks a late POST', async ({ p
 });
 
 test('failed lookup and close keep the request unresolved across refresh', async ({ page }) => {
-  await page.route('**/v1/workflows', route => route.request().method() === 'POST' ? route.abort('failed') : route.continue());
-  await page.route('**/v1/workflow-requests/**', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'WORKFLOW_REQUEST_BUSY', message: '数据库忙' } }) }));
+  await page.route('**/v1/control-identities/*/*/workflows', route => route.request().method() === 'POST' ? route.abort('failed') : route.continue());
+  await page.route('**/v1/control-identities/*/*/workflow-requests/**', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'WORKFLOW_REQUEST_BUSY', message: '数据库忙' } }) }));
   let dialog = await prepare(page);
   await dialog.getByRole('button', { name: '开始优化', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('提交结果尚未确认');
@@ -113,7 +113,7 @@ test('failed lookup and close keep the request unresolved across refresh', async
 });
 
 test('a second tab sees the unresolved key and cannot silently submit a new one', async ({ page, context }) => {
-  await page.route('**/v1/workflows', route => route.request().method() === 'POST' ? route.abort('failed') : route.continue());
+  await page.route('**/v1/control-identities/*/*/workflows', route => route.request().method() === 'POST' ? route.abort('failed') : route.continue());
   const dialog = await prepare(page);
   await dialog.getByRole('button', { name: '开始优化', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('提交结果尚未确认');
@@ -129,7 +129,7 @@ test('a second tab sees the unresolved key and cannot silently submit a new one'
 
 test('refuses to send when request identity cannot be persisted', async ({ page }) => {
   let posts = 0;
-  page.on('request', request => { if (request.method() === 'POST' && request.url().endsWith('/v1/workflows')) posts++; });
+  page.on('request', request => { if (request.method() === 'POST' && request.url().endsWith('/workflows')) posts++; });
   const dialog = await prepare(page);
   await page.evaluate(() => {
     const original = Storage.prototype.setItem;
@@ -141,6 +141,57 @@ test('refuses to send when request identity cannot be persisted', async ({ page 
   await dialog.getByRole('button', { name: '开始优化', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('无法保存任务请求标识');
   await expect(dialog.getByLabel('优化函数')).toHaveValue('kernel');
+  expect(posts).toBe(0);
+  expect(fixture.service.list()).toHaveLength(0);
+});
+
+test('a legacy pending key does not inherit the current Control identity', async ({ page }) => {
+  const f = fixture;
+  const project = f.projects.add({ name: 'Legacy pending', repository_root: f.repo, config_path: f.configPath });
+  await page.goto(f.url);
+  await page.getByLabel('管理员访问凭据').fill(f.token);
+  await page.getByRole('button', { name: '进入工作台' }).click();
+  await page.evaluate(id => localStorage.setItem(`corepilot-optimization-request:${id}:legacy-request`, '1'), project.project_id);
+  let protectedCalls = 0;
+  page.on('request', request => { if (request.url().includes('/v1/control-identities/')) protectedCalls++; });
+  let dialog = await openComposer(page);
+  await expect(dialog.getByText('此请求没有记录原控制端身份', { exact: false })).toBeVisible();
+  await expect(dialog.getByText('legacy-request', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '复制请求标识' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '查询原任务', exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: '关闭未创建的请求', exact: true })).toHaveCount(0);
+  await page.reload(); dialog = await openComposer(page);
+  await expect(dialog.getByRole('button', { name: '开始优化', exact: true })).toBeDisabled();
+  expect(protectedCalls).toBe(0);
+  expect(await page.evaluate(id => localStorage.getItem(`corepilot-optimization-request:${id}:legacy-request`), project.project_id)).toBe('1');
+  expect(f.service.list()).toHaveLength(0);
+});
+
+test('a changed Control identity cannot clear an unresolved request', async ({ page }) => {
+  await page.route('**/v1/control-identities/*/*/workflows', route => route.abort('failed'));
+  await page.route('**/v1/control-identities/*/*/workflow-requests/**', route => route.fulfill({ status: 409, contentType: 'application/json',
+    body: JSON.stringify({ error: { code: 'CONTROL_DATA_ROOT_MISMATCH', message: '当前控制端数据目录与原请求不同' } }) }));
+  let dialog = await prepare(page);
+  await dialog.getByRole('button', { name: '开始优化', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('提交结果尚未确认');
+  const saved = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith('corepilot-optimization-request:')));
+  await dialog.getByRole('button', { name: '查询原任务', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('数据目录与原请求不同');
+  await dialog.getByRole('button', { name: '关闭未创建的请求', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('数据目录与原请求不同');
+  await page.reload(); dialog = await openComposer(page);
+  await expect(dialog.getByRole('button', { name: '开始优化', exact: true })).toBeDisabled();
+  expect(await page.evaluate(key => localStorage.getItem(key), saved![0])).toBe(saved![1]);
+  expect(fixture.service.list()).toHaveLength(0);
+});
+
+test('an old or unavailable control identity never falls back to the unguarded API', async ({ page }) => {
+  let posts = 0;
+  await page.route('**/v1/control-identity', route => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'old service' } }) }));
+  page.on('request', request => { if (request.method() === 'POST' && request.url().endsWith('/workflows')) posts++; });
+  const dialog = await prepare(page);
+  await dialog.getByRole('button', { name: '开始优化', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('无法核对控制端身份');
   expect(posts).toBe(0);
   expect(fixture.service.list()).toHaveLength(0);
 });

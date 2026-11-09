@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import type { CommandRecord } from '../contracts/command.js';
 import type { Event, EventType, MockScenario, RunnerJob, Target, Task, TaskStatus } from '../contracts/index.js';
 import type {
@@ -19,6 +20,7 @@ import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
 import { taskStatusForExecutionOutcome, type OptimizationWorkflowRecord, type WorkflowExecutionOutcomePatch, type WorkflowExperimentIntent } from '../contracts/workflow.js';
 import { OptimizationIntakeAmbiguousError, OptimizationIntakeClosedError, OptimizationIntakeConflictError, type OptimizationIntakeStatus } from '../contracts/optimization-intake.js';
+import { isControlIdentityId } from '../contracts/control-identity.js';
 
 interface TaskRow {
   task_id: string; request_id: string; status: string; target_json: string; schema_version: number; is_mock: number;
@@ -187,6 +189,35 @@ export class SqliteTaskStore implements TaskStore {
     this.db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); this.db.exec('COMMIT'); return result; }
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+
+  /** Null means a legacy database has never had an identity table. */
+  readControlDatabaseIdentity(): string | null {
+    const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('control_database_identity', 'control_identity_guard')").all() as Array<{ name: string }>;
+    if (!tables.length) return null;
+    if (tables.length !== 2) throw new Error('控制端数据库身份缺失或损坏，请由维护者核对原数据库。');
+    const guard = this.db.prepare('SELECT singleton FROM control_identity_guard WHERE singleton = 1').get();
+    const row = this.db.prepare('SELECT database_id FROM control_database_identity WHERE singleton = 1').get() as { database_id: unknown } | undefined;
+    if (!guard || !row || !isControlIdentityId(row.database_id)) throw new Error('控制端数据库身份缺失或损坏，请由维护者核对原数据库。');
+    return row.database_id;
+  }
+
+  /** A transaction makes table creation and its first identity one durable step. */
+  initializeControlDatabaseIdentity(): string {
+    const timeout = (this.db.prepare('PRAGMA busy_timeout').get() as { timeout: number }).timeout;
+    this.db.exec('PRAGMA busy_timeout = 5000');
+    try {
+      return this.transaction(() => {
+        const existing = this.readControlDatabaseIdentity();
+        if (existing) return existing;
+        const id = randomUUID();
+        this.db.exec('CREATE TABLE control_database_identity (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), database_id TEXT NOT NULL)');
+        this.db.exec('CREATE TABLE control_identity_guard (singleton INTEGER PRIMARY KEY CHECK (singleton = 1))');
+        this.db.prepare('INSERT INTO control_database_identity (singleton, database_id) VALUES (1, ?)').run(id);
+        this.db.prepare('INSERT INTO control_identity_guard (singleton) VALUES (1)').run();
+        return id;
+      });
+    } finally { this.db.exec(`PRAGMA busy_timeout = ${Number(timeout)}`); }
   }
 
   createTaskWithJob(task: Task, taskEvent: Event, job: RunnerJob, jobEvent: Event): void {

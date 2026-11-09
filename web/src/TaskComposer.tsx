@@ -34,7 +34,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
   const formId = React.useId();
   const readPending = () => {
     try { return { ids: pendingOptimizationRequests(project.project_id), error: '' }; }
-    catch { return { ids: [] as string[], error: '无法读取浏览器本地存储。请启用本地存储后重新打开，以便安全核对任务请求。' }; }
+    catch { return { ids: [] as ReturnType<typeof pendingOptimizationRequests>, error: '无法读取浏览器本地存储。请启用本地存储后重新打开，以便安全核对任务请求。' }; }
   };
   const [pending, setPending] = useState(readPending);
   const [form, setForm] = useState<TaskDraft>(() => {
@@ -94,28 +94,32 @@ export function TaskComposer({ project, context, close, created, configure, retu
         budget: { time_limit_ms: form.minutes * 60_000, max_candidates: sourceOnly ? 1 : form.candidates } };
       try { sessionStorage.setItem(storageKey, JSON.stringify({ version: 1, form })); }
       catch { throw new Error('无法保存本次表单，请启用浏览器会话存储后重试。'); }
+      let identity: Awaited<ReturnType<typeof api.getControlIdentity>>;
+      try { identity = await api.getControlIdentity(); }
+      catch (failure) { throw new Error('无法核对控制端身份，请检查服务版本和数据目录。' + (failure as Error).message); }
       requestId = newRequestId();
-      try { rememberOptimizationRequest(project.project_id, requestId); }
+      try { rememberOptimizationRequest(project.project_id, requestId, identity); }
       catch { throw new Error('无法保存任务请求标识，请启用浏览器本地存储后重试。'); }
       setPending(readPending());
-      const result = await api.submitOptimizationWorkflow(payload, { requestId }) as { workflow_id: string };
+      const result = await api.submitOptimizationWorkflow(payload, { requestId, controlIdentity: identity }) as { workflow_id: string };
       try { forgetOptimizationRequest(project.project_id, requestId); } catch { /* A later check can still recover the created task. */ }
       try { sessionStorage.removeItem(storageKey); } catch { /* Optional local draft. */ }
       created(result.workflow_id);
     } catch (failure) {
       const currentPending = readPending();
       setPending(currentPending);
-      setError(requestId && (currentPending.error || currentPending.ids.includes(requestId))
+      setError(requestId && (currentPending.error || currentPending.ids.some(item => item.requestId === requestId))
         ? '任务提交结果尚未确认。请先查询原任务，或关闭未创建的请求后再修改。' + (failure as Error).message : (failure as Error).message);
     } finally { setBusy(''); }
   }
 
   async function resolveIntake(action: 'check' | 'close') {
-    const requestId = pending.ids[0];
-    if (!requestId) return;
+    const saved = pending.ids[0];
+    if (!saved?.identity) return;
+    const { requestId, identity } = saved;
     setBusy(action); setError(''); setIntakeMessage('');
     try {
-      const result = action === 'check' ? await api.getOptimizationIntake(requestId) : await api.closeOptimizationIntake(requestId);
+      const result = action === 'check' ? await api.getOptimizationIntake(requestId, identity) : await api.closeOptimizationIntake(requestId, identity);
       if (result.status === 'NOT_FOUND') {
         setIntakeMessage('暂未查到任务，原请求仍可能到达。请再次查询，或关闭未创建的请求后再修改。');
         return;
@@ -150,8 +154,10 @@ export function TaskComposer({ project, context, close, created, configure, retu
       {pending.error && <Feedback text={pending.error} bad />}
       {pending.ids.length > 0 && <section className="notice compact" aria-label="待核对的任务请求">
         <strong>上次任务请求需要核对{pending.ids.length > 1 ? `（还有 ${pending.ids.length} 项）` : ''}</strong>
-        <p>连接中断或页面关闭时，任务可能已经创建。请先查询；关闭只作用于尚未创建的请求，不会停止已有任务。其他标签页可能无法恢复原表单，请以查到的任务详情为准。</p>
-        <div className="actions"><button type="button" disabled={!!busy} onClick={() => void resolveIntake('check')}>查询原任务</button><button type="button" disabled={!!busy} onClick={() => void resolveIntake('close')}>关闭未创建的请求</button></div>
+        {pending.ids[0].identity ? <><p>连接中断或页面关闭时，任务可能已经创建。请先查询；关闭只作用于尚未创建的请求，不会停止已有任务。其他标签页可能无法恢复原表单，请以查到的任务详情为准。</p>
+          <div className="actions"><button type="button" disabled={!!busy} onClick={() => void resolveIntake('check')}>查询原任务</button><button type="button" disabled={!!busy} onClick={() => void resolveIntake('close')}>关闭未创建的请求</button></div></>
+          : <><p>此请求没有记录原控制端身份，无法安全判断是否已创建。请维护者核对原控制端数据库、数据目录及任务；系统不会自动查询、关闭或清除此请求。</p>
+            <p>请求标识：<CopyValue value={pending.ids[0].requestId} label="请求标识" /></p></>}
       </section>}
       {intakeMessage && <p role="status">{intakeMessage}</p>}
       <fieldset disabled={!!busy || awaitingIntake} className="config-fields">

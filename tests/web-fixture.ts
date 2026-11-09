@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { SqliteTaskStore } from '../src/storage/sqlite-task-store.js';
+import { ControlIdentityGuard } from '../src/storage/control-identity.js';
 import { TaskHost } from '../src/core/task-host.js';
 import { OptimizationWorkflowService } from '../src/workflow/optimization-workflow-service.js';
 import { createHttpServer } from '../src/http/server.js';
@@ -121,14 +122,16 @@ export async function startWebFixture(options: { execute?: boolean; validationTe
   const configPath = path.join(root, 'corepilot.yaml');
   fs.writeFileSync(configPath, JSON.stringify({ model: { endpoint: `http://127.0.0.1:${address.port}/v1`, model_id: 'fixture-model', api_key: 'fixture-model-secret', timeout_ms: 10_000 },
     target: { ssh_alias: 'fixture', workspace_root: '/tmp/fixture' }, build: command("console.log('build fixture')"), validation: { testpack: testpackPath }, output_dir: path.join(root, 'reports') }));
-  const store = new SqliteTaskStore(path.join(root, 'db.sqlite')); const host = new TaskHost(store); await host.start();
+  const store = new SqliteTaskStore(path.join(root, 'db.sqlite')); store.init();
+  const controlIdentity = ControlIdentityGuard.initialize(store, dataDir);
+  const host = new TaskHost(store); await host.start();
   const service = new OptimizationWorkflowService({ store, evidenceRoot: path.join(root, 'evidence'), publicExecution: options.execute === true, publicMaxRounds: 1,
     ...(options.rpcTransport ? { publicValidationTransportFactory: () => options.rpcTransport! } : {}),
     transportFactory: () => ({ transport_type: 'mock', runRemote: () => { throw new Error('offline fixture must not SSH'); } }) });
   const projects = new ProjectService(store, dataDir);
   const testing = options.testingService ?? new TestingService({ dataDir, projects, catalog: projects.packageLoader, machines: projects.machines });
   const token = 'fixture-server-access';
-  const server = createHttpServer(host, { host: '127.0.0.1', port: 0, workflowService: service, projectService: projects, testingService: testing, accessToken: token,
+  const server = createHttpServer(host, { host: '127.0.0.1', port: 0, workflowService: service, projectService: projects, testingService: testing, controlIdentity, accessToken: token,
     webRoot: path.join(repositoryRoot, 'web', 'dist') });
   await new Promise<void>(resolve => server.once('listening', resolve));
   const control = server.address(); assert.ok(control && typeof control === 'object');
@@ -146,7 +149,7 @@ export async function startWebFixture(options: { execute?: boolean; validationTe
     for (const worktree of worktrees) if (path.resolve(worktree) !== path.resolve(repo)) git('worktree', 'remove', '--force', worktree);
     fs.rmSync(root, { recursive: true, force: true });
   }
-  return { root, repo, configPath, dataDir, store, service, projects, testing, token, url, git, close, modelRequests, readyValidation };
+  return { root, repo, configPath, dataDir, store, service, projects, testing, controlIdentity, token, url, git, close, modelRequests, readyValidation };
 }
 
 export function runFixtureCli(url: string, token: string, args: string[]) {

@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util';
 import { parseOptimizeCliInput, renderOptimizeCliHelp, OptimizeCliInputError } from './config/optimize-cli-input.js';
 import { isBuildConfigured, loadOptimizationConfig, resolveOptimizationApiKey, resolveOptimizationProxy } from './config/optimization-config.js';
 import { SqliteTaskStore } from './storage/sqlite-task-store.js';
+import { ControlIdentityGuard } from './storage/control-identity.js';
 import { TaskHost } from './core/task-host.js';
 import { OptimizationWorkflowService } from './workflow/optimization-workflow-service.js';
 import { createHttpServer } from './http/server.js';
@@ -125,7 +126,7 @@ async function optimize(args: string[]): Promise<number> {
 async function serve(args: string[]): Promise<number> {
   let parsed: ReturnType<typeof parseArgs>;
   try {
-    parsed = parseArgs({ args, options: { db: { type: 'string' }, host: { type: 'string' }, port: { type: 'string' }, web: { type: 'boolean' }, 'data-dir': { type: 'string' }, transport: { type: 'string' }, 'ssh-alias': { type: 'string' }, 'ssh-host': { type: 'string' }, 'ssh-username': { type: 'string' }, 'ssh-port': { type: 'string' }, 'ssh-identity-file': { type: 'string' } }, allowPositionals: false, strict: true });
+    parsed = parseArgs({ args, options: { db: { type: 'string' }, host: { type: 'string' }, port: { type: 'string' }, web: { type: 'boolean' }, 'data-dir': { type: 'string' }, 'initialize-control-data': { type: 'boolean' }, transport: { type: 'string' }, 'ssh-alias': { type: 'string' }, 'ssh-host': { type: 'string' }, 'ssh-username': { type: 'string' }, 'ssh-port': { type: 'string' }, 'ssh-identity-file': { type: 'string' } }, allowPositionals: false, strict: true });
   } catch (error) { return fail((error as Error).message); }
   const hostName = typeof parsed.values.host === 'string' ? parsed.values.host : '127.0.0.1';
   const port = typeof parsed.values.port === 'string' ? Number(parsed.values.port) : 4317;
@@ -155,6 +156,10 @@ async function serve(args: string[]): Promise<number> {
       ? { host: configuredHost, username: configuredUsername, port: configuredPort, ...(configuredIdentityFile ? { identity_file: configuredIdentityFile } : {}), workspace_root: '/tmp/corepilot' }
       : 'localhost';
   const store = new SqliteTaskStore(dbPath);
+  try { store.init(); } catch (error) { store.close(); throw error; }
+  const controlIdentity = ControlIdentityGuard.initialize(store, dataDir, { initializeNewDataDir: parsed.values['initialize-control-data'] === true });
+  try { controlIdentity.current(); }
+  catch { console.warn('控制端身份暂不可核对；新版优化任务创建与恢复已暂停，请按部署指南检查数据库和数据目录标识。'); }
   const host = new TaskHost(store);
   await host.start();
   const transport = (target?: TargetConfig | string) => transportKind === 'mock' ? new MockRemoteTransport() : new AsyncSshTransport(target ?? configuredTarget);
@@ -169,7 +174,7 @@ async function serve(args: string[]): Promise<number> {
   const token = process.env[MANAGED_BACKEND_TOKEN_ENV];
   const projects = new ProjectService(store, dataDir);
   const testing = new TestingService({ dataDir, projects, catalog: projects.packageLoader, machines: projects.machines });
-  server = createHttpServer(host, { host: hostName, port, workflowService: service, projectService: projects, testingService: testing,
+  server = createHttpServer(host, { host: hostName, port, workflowService: service, projectService: projects, testingService: testing, controlIdentity,
     accessToken, ...(web ? { webRoot } : {}), ...(token ? { managedShutdown: { token, requestShutdown: shutdown } } : {}) });
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);

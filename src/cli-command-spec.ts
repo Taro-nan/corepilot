@@ -2,7 +2,7 @@ export function renderCliHelp(): string {
   return [
     'CorePilot：面向 CPU 基础算法库的 Agent 性能工程工具',
     '',
-    '  corepilot web [--host <host>] [--port <port>] [--data-dir <path>] [--db <path>]',
+    '  corepilot web [--host <host>] [--port <port>] [--data-dir <path>] [--db <path>] [--initialize-control-data]',
     '  corepilot project list | project add --name <名称> --root <服务器路径> [--config <path>] [--branch <name>]',
     '  corepilot project inspect|check <project-id>',
     '  corepilot project setup <project-id> [--inspect]',
