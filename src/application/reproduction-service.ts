@@ -39,19 +39,28 @@ export class ReproductionService {
       evaluator: original?.evaluator ?? null, machine: original?.observed_context?.machine ?? null,
       build_and_test_plan: original?.declared_context.runner_execution_plan ?? null, testpack_snapshot: record.testpack_snapshot_path ?? null,
       reproduction: record.reproduction ?? null, delivery: record.delivery ?? null,
+      unlinked_reproductions: experiments.filter(row => row.declared_context.purpose === 'DELIVERY_REPRODUCTION'
+        && ['PENDING', 'RUNNING', 'UNKNOWN'].includes(row.status) && row.experiment_id !== record.reproduction?.experiment_id)
+        .map(row => ({ experiment_id: row.experiment_id, status: row.status, reproduction_of: row.declared_context.reproduction_of ?? null })),
       command: `corepilot workflow reproduce ${workflowId}`,
       note: 'Reproduction creates a new independent REVALIDATION experiment, exports the frozen Git commit into a new Runner directory and builds there. It never calls a model or rewrites delivery/approval records. Saved baseline/evaluator identities are required.' });
   }
 
   start(workflowId: string) {
-    const record = this.required(workflowId);
+    const expectedWorkflowJson = this.store.getOptimizationWorkflowJson(workflowId);
+    if (!expectedWorkflowJson) throw new Error('workflow not found');
+    const record = JSON.parse(expectedWorkflowJson) as OptimizationWorkflowRecord;
     if (record.delivery_operation && record.delivery_operation.status !== 'COMPLETED') throw new Error('当前交付尚未结束，请先核对交付状态再重建复现。');
     if (this.active.has(workflowId)) return record.reproduction!;
     if (['CREATED', 'GENERATING'].includes(record.status)) throw new Error('优化任务仍在执行，请等待当前作业结束后再重建复现');
     if (!record.candidate_id || !record.optimization_task_id || !record.repository_root || !record.testpack_snapshot_path) throw new Error('任务缺少冻结候选、源码仓库或测试快照，不能重建复现');
     const candidate = this.runtime.getCandidate(record.candidate_id);
     const experiments = this.store.listExperiments(record.optimization_task_id).filter(row => row.candidate_id === record.candidate_id);
-    if (experiments.some(row => ['PENDING', 'RUNNING', 'UNKNOWN'].includes(row.status) && row.experiment_id !== record.reproduction?.experiment_id)) throw new Error('当前候选仍有未确认终态的实验，请先核对原作业');
+    const unresolved = experiments.find(row => ['PENDING', 'RUNNING', 'UNKNOWN'].includes(row.status) && row.experiment_id !== record.reproduction?.experiment_id);
+    if (unresolved) {
+      const detail = unresolved.declared_context.purpose === 'DELIVERY_REPRODUCTION' ? '存在未关联的历史复现实验' : '当前候选仍有未确认终态的实验';
+      throw new Error(`${detail} ${unresolved.experiment_id}（${unresolved.status}），请维护者按原实验 ID 核对 Runner；系统不会自动重新提交或认定它已停止。`);
+    }
     const original = experiments.filter(row => row.type === 'FORMAL_EVALUATION' && row.declared_context.runner_execution_plan).at(-1);
     if (!original) throw new Error('没有可复用的真实 RPC 执行计划；旧任务可查看报告，不能伪造复现');
     const identity = (original.observed_context?.machine as Record<string, unknown> | undefined)?.machine_identity_sha256;
@@ -60,12 +69,14 @@ export class ReproductionService {
     if (frozen.testpack.evaluator?.sha256 !== original.evaluator.digest) throw new Error('测试快照与原实验 evaluator 不一致');
     if (!unfinished(record.reproduction)) {
       const { runner_execution_plan: _plan, ...context } = original.declared_context;
-      const experiment = this.runtime.startExperiment({ taskId: record.optimization_task_id, candidateId: candidate.candidate_id, type: 'REVALIDATION', initialStatus: 'PENDING',
+      const experiment = this.runtime.prepareExperiment({ taskId: record.optimization_task_id, candidateId: candidate.candidate_id, type: 'REVALIDATION', initialStatus: 'PENDING',
         declaredContext: { ...context, purpose: 'DELIVERY_REPRODUCTION', reproduction_of: original.experiment_id } });
+      const now = new Date().toISOString();
       record.reproduction = { experiment_id: experiment.experiment_id, original_experiment_id: original.experiment_id, status: 'PREPARING', phase: '准备干净源码和测试资产',
         source_commit: candidate.source.commit, evaluator_digest: original.evaluator.digest!, machine_identity: identity,
-        remote_root: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), error: null };
-      this.records.save(record);
+        remote_root: '', created_at: now, updated_at: now, error: null };
+      record.updated_at = now;
+      this.store.createReproductionExperiment(experiment, expectedWorkflowJson, JSON.stringify(record));
     }
     const controller = new AbortController();
     const promise = this.run(workflowId, controller.signal).catch(error => this.update(workflowId, { status: 'UNKNOWN', error: (error as Error).message })).finally(() => this.active.delete(workflowId));

@@ -15,6 +15,7 @@ import type { HypothesisOutcome, OptimizationHypothesis } from '../contracts/opt
 import type { OptimizationApprovalRecord } from '../contracts/optimization-approval.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
+import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 
 interface TaskRow {
   task_id: string; request_id: string; status: string; target_json: string; schema_version: number; is_mock: number;
@@ -286,6 +287,31 @@ export class SqliteTaskStore implements TaskStore {
         this.saveOptimizationTask(task);
       }
       this.saveOptimizationWorkflowJson(workflowId, workflowJson);
+    });
+  }
+
+  createReproductionExperiment(experiment: Experiment, expectedWorkflowJson: string, workflowJson: string): void {
+    const before = JSON.parse(expectedWorkflowJson) as OptimizationWorkflowRecord;
+    const after = JSON.parse(workflowJson) as OptimizationWorkflowRecord;
+    if (before.workflow_id !== after.workflow_id || before.optimization_task_id !== experiment.task_id ||
+        before.candidate_id !== experiment.candidate_id || after.optimization_task_id !== experiment.task_id ||
+        (before.reproduction && ['PREPARING', 'RUNNING', 'UNKNOWN'].includes(before.reproduction.status)) ||
+        after.candidate_id !== experiment.candidate_id || after.reproduction?.experiment_id !== experiment.experiment_id ||
+        after.reproduction.status !== 'PREPARING' || experiment.type !== 'REVALIDATION' || experiment.status !== 'PENDING' ||
+        experiment.declared_context.purpose !== 'DELIVERY_REPRODUCTION' ||
+        experiment.declared_context.reproduction_of !== after.reproduction.original_experiment_id) {
+      throw new Error('reproduction experiment identity or status mismatch');
+    }
+    this.transaction(() => {
+      if (this.getOptimizationWorkflowJson(before.workflow_id) !== expectedWorkflowJson) {
+        throw new Error('任务状态已变化，请刷新后重新复现；原实验记录已保留。');
+      }
+      const pending = this.db.prepare(`SELECT experiment_id FROM optimization_experiments
+        WHERE task_id = ? AND candidate_id = ? AND status IN ('PENDING', 'RUNNING', 'UNKNOWN') LIMIT 1`)
+        .get(experiment.task_id, experiment.candidate_id) as { experiment_id: string } | undefined;
+      if (pending) throw new Error(`当前候选仍有未确认终态的实验 ${pending.experiment_id}，请先核对原作业。`);
+      this.createExperiment(experiment);
+      this.saveOptimizationWorkflowJson(before.workflow_id, workflowJson);
     });
   }
 

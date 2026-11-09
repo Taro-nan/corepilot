@@ -3,7 +3,7 @@ import type { Event, RunnerJob, Task, TaskStatus } from '../contracts/index.js';
 import type { OptimizationStore } from './optimization-store.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
-import type { OptimizationTask } from '../contracts/optimization-domain.js';
+import type { Experiment, OptimizationTask } from '../contracts/optimization-domain.js';
 
 export interface LeaseRecord {
   owner_id: string;
@@ -38,6 +38,8 @@ export interface TaskStore extends OptimizationStore {
   getActiveLease(): LeaseRecord | null;
   saveOptimizationWorkflowJson(workflowId: string, workflowJson: string): void;
   saveRecoveredWorkflow(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
+  /** Create a reproduction and its workflow reference in one transaction, if the workflow has not changed. */
+  createReproductionExperiment(experiment: Experiment, expectedWorkflowJson: string, workflowJson: string): void;
   saveCompletedDelivery(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   getOptimizationWorkflowJson(workflowId: string): string | null;
   listOptimizationWorkflowJson(limit: number): string[];

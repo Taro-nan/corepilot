@@ -339,6 +339,13 @@ export class OptimizationRuntime {
   }
 
   startExperiment(input: StartExperimentInput): Experiment {
+    const experiment = this.prepareExperiment(input);
+    this.store.createExperiment(experiment);
+    return experiment;
+  }
+
+  /** Prepare the same validated fact for a caller that must persist it with another record. */
+  prepareExperiment(input: StartExperimentInput): Experiment {
     const task = this.getTask(input.taskId);
     const evaluator = input.evaluator ?? task.evaluator;
     if (!task.evaluator || !evaluator) throw new Error('当前任务未绑定测试方案，请创建独立测试任务验证此源码候选。');
@@ -367,7 +374,6 @@ export class OptimizationRuntime {
       created_at: timestamp,
       updated_at: timestamp,
     };
-    this.store.createExperiment(experiment);
     return experiment;
   }
 
