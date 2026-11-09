@@ -1,7 +1,7 @@
 {
   "name": "corepilot-agent-vscode",
   "displayName": "CorePilot",
-  "description": "Minimal IDE task client for CorePilot (thin client over the existing backend).",
+  "description": "连接已有 CorePilot 服务，查看优化任务、报告和源码候选。",
   "version": "0.4.0",
   "publisher": "corepilot",
   "engines": {
@@ -15,50 +15,75 @@
   "contributes": {
     "commands": [
       {
+        "command": "corepilot.connect",
+        "title": "连接 CorePilot 服务",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.setToken",
+        "title": "设置服务连接令牌",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.selectProject",
+        "title": "选择项目",
+        "category": "CorePilot"
+      },
+      {
         "command": "corepilot.newExperiment",
-        "title": "CorePilot: 新建任务",
+        "title": "在网页创建优化任务",
         "category": "CorePilot"
       },
       {
         "command": "corepilot.initTask",
-        "title": "CorePilot: 优化所选文件",
-        "category": "CorePilot"
-      },
-      {
-        "command": "corepilot.showTasks",
-        "title": "CorePilot: 显示任务",
-        "category": "CorePilot"
-      },
-      {
-        "command": "corepilot.cancelTask",
-        "title": "CorePilot: 取消任务",
-        "category": "CorePilot"
-      },
-      {
-        "command": "corepilot.openReport",
-        "title": "CorePilot: 打开任务报告",
-        "category": "CorePilot"
-      },
-      {
-        "command": "corepilot.exportTask",
-        "title": "CorePilot: 导出报告",
-        "category": "CorePilot"
-      },
-      {
-        "command": "corepilot.showCandidateDiff",
-        "title": "CorePilot: 查看候选变更",
-        "category": "CorePilot"
-      },
-      {
-        "command": "corepilot.refreshTasks",
-        "title": "CorePilot: 刷新任务",
-        "icon": "$(refresh)",
+        "title": "在网页创建优化任务",
         "category": "CorePilot"
       },
       {
         "command": "corepilot.optimize",
-        "title": "CorePilot: 开始优化",
+        "title": "在网页创建优化任务",
         "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.openTesting",
+        "title": "在网页创建测试任务",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.showTasks",
+        "title": "显示优化任务",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.showTaskDetails",
+        "title": "查看任务进展",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.openReport",
+        "title": "查看优化报告",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.exportTask",
+        "title": "保存优化报告",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.showCandidateDiff",
+        "title": "查看候选补丁",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.cancelTask",
+        "title": "请求取消任务",
+        "category": "CorePilot"
+      },
+      {
+        "command": "corepilot.refreshTasks",
+        "title": "刷新任务",
+        "category": "CorePilot",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -67,76 +92,57 @@
           "command": "corepilot.optimize",
           "when": "resourceScheme == file",
           "group": "corepilot@1"
-        },
-        {
-          "command": "corepilot.newExperiment",
-          "when": "resourceScheme == file",
-          "group": "corepilot@2"
         }
       ],
       "editor/context": [
         {
           "command": "corepilot.optimize",
-          "when": "editorHasSelection",
-          "group": "corepilot@1"
-        },
-        {
-          "command": "corepilot.newExperiment",
-          "when": "editorHasSelection",
-          "group": "corepilot@2"
-        },
-        {
-          "command": "corepilot.initTask",
           "when": "editorTextFocus",
-          "group": "corepilot@3"
+          "group": "corepilot@1"
         }
       ],
       "view/item/context": [
         {
-          "command": "corepilot.exportTask",
-          "when": "view == corepilot.tasks && viewItem == corepilot.task",
+          "command": "corepilot.showTaskDetails",
+          "when": "view == corepilot.tasks && viewItem == corepilot.workflow",
           "group": "corepilot@1"
         },
         {
-          "command": "corepilot.cancelTask",
-          "when": "view == corepilot.tasks && viewItem == corepilot.task",
+          "command": "corepilot.openReport",
+          "when": "view == corepilot.tasks && viewItem == corepilot.workflow",
           "group": "corepilot@2"
         },
         {
-          "command": "corepilot.openReport",
-          "when": "view == corepilot.tasks && viewItem == corepilot.task",
+          "command": "corepilot.showCandidateDiff",
+          "when": "view == corepilot.tasks && viewItem == corepilot.workflow",
           "group": "corepilot@3"
+        },
+        {
+          "command": "corepilot.exportTask",
+          "when": "view == corepilot.tasks && viewItem == corepilot.workflow",
+          "group": "corepilot@4"
+        },
+        {
+          "command": "corepilot.cancelTask",
+          "when": "view == corepilot.tasks && viewItem == corepilot.workflow",
+          "group": "corepilot@5"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "corepilot.refreshTasks",
+          "when": "view == corepilot.tasks",
+          "group": "navigation"
+        },
+        {
+          "command": "corepilot.selectProject",
+          "when": "view == corepilot.tasks",
+          "group": "navigation"
         }
       ],
       "commandPalette": [
         {
-          "command": "corepilot.newExperiment"
-        },
-        {
-          "command": "corepilot.initTask"
-        },
-        {
-          "command": "corepilot.showTasks"
-        },
-        {
-          "command": "corepilot.optimize"
-        },
-        {
-          "command": "corepilot.showCandidateDiff"
-        },
-        {
-          "command": "corepilot.cancelTask",
-          "when": "false"
-        },
-        {
-          "command": "corepilot.openReport",
-          "when": "false"
-        },
-        {
-          "command": "corepilot.exportTask"
-        },
-        {
-          "command": "corepilot.refreshTasks",
+          "command": "corepilot.initTask",
           "when": "false"
         }
       ]
@@ -154,7 +160,7 @@
       "corepilot": [
         {
           "id": "corepilot.tasks",
-          "name": "Tasks"
+          "name": "优化任务"
         }
       ]
     },
@@ -163,18 +169,8 @@
       "properties": {
         "corepilot.serverUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:7346",
-          "description": "Backend task service base URL."
-        },
-        "corepilot.target": {
-          "type": "string",
-          "default": "",
-          "description": "Configured target name (from existing config)."
-        },
-        "corepilot.serveCommand": {
-          "type": "string",
-          "default": "corepilot",
-          "description": "Command used to start a managed backend (e.g. \"corepilot\", or a JSON array like [\"node\", \"/abs/path/dist/cli.js\"])."
+          "default": "http://127.0.0.1:4317",
+          "description": "已运行的 CorePilot 服务地址。连接令牌通过设置服务连接令牌保存到 VS Code SecretStorage。"
         }
       }
     }
