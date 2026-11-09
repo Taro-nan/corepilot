@@ -401,7 +401,7 @@ export class TaskHost {
         await this.tickOnce();
       } catch (err) {
         // log and keep going; the loop is the background worker
-        console.error('[phyopt-host] scheduler error:', (err as Error).message);
+        console.error('[corepilot-host] scheduler error:', (err as Error).message);
       }
       await this.interruptibleSleep(this.options.tickMs);
     }
@@ -801,7 +801,7 @@ export class TaskHost {
     // work and enter an unhealthy state; never schedule a Runner again.
     this.leaseLost = true;
     console.error(
-      `[phyopt-host] lease lost for owner ${this.ownerId}; entering unhealthy state and stopping scheduling`,
+      `[corepilot-host] lease lost for owner ${this.ownerId}; entering unhealthy state and stopping scheduling`,
     );
   }
 

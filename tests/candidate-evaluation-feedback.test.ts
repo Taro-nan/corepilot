@@ -9,7 +9,7 @@ import { structuredAgentFeedback, validationCycleFromCommandExecutions, type Com
 
 function failedValidation(): ValidationCycleResult {
   const observation = { kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', subject_id: 'edge-1', sample_index: null, value: 'FAIL', validity: 'VALID', domain_payload: { parameters: { elements: 1, seed: 101 }, observed_summary: { mismatches: 1, status: 0 }, reference_summary: { implementation: 'independent scalar oracle' } } };
-  const command: CommandRunResult = { command_execution_id: 'command:failed', command: 'test', args: [], cwd: '.', start_time: '2026-10-12T00:00:00Z', end_time: '2026-10-12T00:00:01Z', timeout_ms: 1000, duration_ms: 1000, ok: false, exit_code: 2, timed_out: false, cancelled: false, stdout: `PHYOPT_MEASUREMENT ${JSON.stringify(observation)}\n`, stderr: '', resource_context: { validity: 'VALID' } };
+  const command: CommandRunResult = { command_execution_id: 'command:failed', command: 'test', args: [], cwd: '.', start_time: '2026-10-12T00:00:00Z', end_time: '2026-10-12T00:00:01Z', timeout_ms: 1000, duration_ms: 1000, ok: false, exit_code: 2, timed_out: false, cancelled: false, stdout: `COREPILOT_MEASUREMENT ${JSON.stringify(observation)}\n`, stderr: '', resource_context: { validity: 'VALID' } };
   const status: ExperimentStatusResponse = { experiment_id: 'experiment:1', candidate_id: 'candidate:1', task_id: 'task:1', type: 'FORMAL_EVALUATION', status: 'FAILED', validity: 'INVALID', started_at: command.start_time, ended_at: command.end_time, updated_at: command.end_time, failure_category: 'EVALUATOR_FAILURE', observed_context: { resource_policy: { validity: 'VALID', observed: { cpu_sets: ['0'], thread_counts: { '1': { max_runtime_threads: 1 } } } } }, current_step: null, cancel_requested: false, failure: { code: 'MISSING_RESOURCE_CONTEXT', message: 'missing measurement threads', missing_fields: ['domain_payload.parameters.threads'], step: 'CORRECTNESS', command_execution_id: command.command_execution_id! } };
   return { build: { ...command, ok: true, exit_code: 0, stdout: '' }, correctness: command, correctness_cases: [{ case_id: 'edge-1', parameters: { elements: 1, seed: 101, threads: 1 }, status: 'FAILED', error: 'command exited with 2', command }], correctness_coverage: { planned: 3, executed: 1, passed: 0, failed: 1, complete: false }, formal_correctness_complete: false, performance: null, passed: false, runner_status: status };
 }
@@ -80,7 +80,7 @@ test('resource context is explicitly missing when no Runner or command observati
 
 test('feedback bounds raw evidence and never associates an undeclared observation with a failed case', () => {
   const validation = failedValidation();
-  validation.correctness!.stdout = 'PHYOPT_MEASUREMENT {invalid}\nPHYOPT_MEASUREMENT {"kind":"CORRECTNESS_CASE","subject_id":"other-case","value":"FAIL"}\n' + 'noise'.repeat(4096);
+  validation.correctness!.stdout = 'COREPILOT_MEASUREMENT {invalid}\nCOREPILOT_MEASUREMENT {"kind":"CORRECTNESS_CASE","subject_id":"other-case","value":"FAIL"}\n' + 'noise'.repeat(4096);
   const feedback = candidateEvaluationFeedback({ validation });
   assert.equal(feedback.failed_cases[0].evidence.observation, null);
   assert.equal(feedback.failed_cases[0].evidence.stdout.length, 8192);

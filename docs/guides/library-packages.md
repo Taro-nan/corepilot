@@ -97,7 +97,7 @@ Package 与旧 testpack、外部 build 覆盖互斥，避免多个领域事实�
 ```text
 corepilot package list
 corepilot package inspect ippi-ft 0.1.0
-corepilot optimize --config phyopt.yaml --function ippiDilate3x3_64f_C1R --performance
+corepilot optimize --config corepilot.yaml --function ippiDilate3x3_64f_C1R --performance
 ```
 
 inspect <id> 仅在恰好一个版本时省略版本。CLI 发行包携带 packages 与 evaluators。
@@ -113,6 +113,6 @@ qualification digest 固定为 06c50b60eb7de07861c39c87b4ab46030b881a9b2dcea3522
 
 Onboarding 的 build/API/test/benchmark 静态发现、Pi 只读调查、声明式 Draft 与调查 evidence 已实现。它不执行 build/test probe，build proposal 和静态 call_path 尚未经执行证明；未知字段、占位命令和待审 oracle 必须交由 Owner。
 
-Baseline/Build Freeze、目标机 qualification、Owner Qualification 和 Evidence/Approval 仍需要操作者组织；不存在一个从 package init 自动执行到 Approved 的命令。当前成功案例的领域审批与 CLI 审批并合并是不同路径，见[生命周期指南](optimization-workflow.md#qualification-与-approval-的区别)。
+项目自建方案的 Baseline/Build Freeze、受控试跑和显式 Owner Qualification 已有网页入口；`project validation-review` 复用相同后端，见[测试方案指南](test-plans.md)。不存在从 package init 自动执行到 Approved 的命令。当前成功案例的领域审批与 CLI 审批并合并是不同路径，见[生命周期指南](optimization-workflow.md#qualification-与-approval-的区别)。
 
 Schema/Loader 能记录 generic binary-bundle identity，但 [task-definition](../../src/library-package/task-definition.ts) 的正式执行映射仍拒绝该 baseline kind；不能把“可加载描述”写成“Formal staging 已可用”。相关外部 baseline 资料属于[历史调查](../history/legacy-and-external-baselines.md)，IPPI 当前使用 frozen self baseline。

@@ -14,10 +14,16 @@ import { normalizeModelProxy, readStoredModelProxy, redactModelProxy, removeStor
 import type { ModelTransport } from '../model/model-transport.js';
 import { DEFAULT_WORKSPACE_ROOT, isAliasTarget, targetAuthDescription, targetDescription, targetLabel, targetConnectionId, type TargetConfig } from '../config/target-config.js';
 import { listTargetProfiles, saveTargetProfile } from '../config/target-profiles.js';
+import { isRegisteredRunner } from '../config/runner-config.js';
+import { executeWorkflowCommand } from '../client/workflow-commands.js';
+import { checkOptimization, configuredOptimizationFunction } from '../workflow/check-optimization.js';
+import { configureValidation } from './validation-command.js';
+import { parseWorkbenchInput } from './command-input.js';
 
 export interface CommandIO {
   /** True for the Ink UI; allows prompt cancellation to finish immediately. */
   interactive?: boolean;
+  signal?: AbortSignal;
   print(text: string): void;
   error(text: string): void;
   prompt(question: string, options?: { secret?: boolean; initialValue?: string }): Promise<string | null>;
@@ -94,39 +100,63 @@ function isProxyConnectionFailure(error: unknown): boolean {
   return error instanceof ModelDiscoveryError && (error.status === undefined || error.status === 407);
 }
 
-async function optimize(ctx: WorkbenchContext, args: string[]): Promise<CommandOutcome> {
+async function optimize(ctx: WorkbenchContext, args: string[], io: CommandIO): Promise<CommandOutcome> {
+  if (!ctx.hasConfig()) return { ok: false, message: '请先使用 /model、/target、/validation 完成配置，然后 /check。' };
+  if (args.length === 0) {
+    let defaultFunction = '';
+    try { defaultFunction = configuredOptimizationFunction(ctx.configPath); } catch { /* A useful explicit error follows preflight if validation is incomplete. */ }
+    const fn = await io.prompt('要优化的函数：', { initialValue: defaultFunction });
+    if (!fn?.trim()) return { ok: true, message: '已取消优化。' };
+    const mode = await io.select('选择执行方式', [
+      { label: '正确性 + 性能 + 复验，持续观察并生成报告（推荐）', value: 'performance' },
+      { label: '仅验证源码与正确性，持续观察并生成报告', value: 'correctness' },
+      { label: '性能优化，提交到后台后返回', value: 'background' },
+    ]);
+    if (!mode) return { ok: true, message: '已取消优化。' };
+    args = ['--function', fn.trim(), ...(mode === 'correctness' ? [] : ['--performance']), ...(mode === 'background' ? [] : ['--watch'])];
+  }
   const effective = args.some((arg) => arg === '--config' || arg.startsWith('--config=')) ? args : ['--config', ctx.configPath, ...args];
   const input = parseOptimizeCliInput(effective);
   const loaded = loadOptimizationConfig(input.configPath);
   if (!loaded.config.validation.library_package && !isBuildConfigured(loaded.config.build)) return { ok: false, message: '请先使用 /build 配置构建命令。' };
   const credential = resolveOptimizationApiKey(loaded.config, { cliApiKey: input.apiKey });
   const api = await ctx.getApi();
-  const result = await api.submitOptimizationWorkflow({ function_name: input.functionName, entry_file: input.entryFile, config_path: input.configPath, repository_root: input.repositoryRoot, enable_performance: input.enablePerformance }, credential.apiKey ? { apiKey: credential.apiKey } : {}) as { workflow_id?: string };
+  const result = await api.submitOptimizationWorkflow({ function_name: input.functionName, entry_file: input.entryFile, config_path: input.configPath, repository_root: input.repositoryRoot, enable_performance: input.enablePerformance, ...(input.budget ? { budget: input.budget } : {}) }, credential.apiKey ? { apiKey: credential.apiKey } : {}) as { workflow_id?: string };
   if (!result.workflow_id) return { ok: false, message: '后台没有返回 workflow_id。' };
-  return { ok: true, message: `已提交优化工作流：${result.workflow_id}\n使用 /workflow status ${result.workflow_id} 查看进度。`, data: result };
+  ctx.setCurrentWorkflow(result.workflow_id);
+  io.print(`已提交优化工作流：${result.workflow_id}`);
+  if (input.watch) return executeWorkflowCommand(api, ['watch', result.workflow_id, ...(input.reportOutput ? ['--output', input.reportOutput] : [])], { print: io.print, signal: io.signal, reportRoot: loaded.config.output_dir });
+  return { ok: true, message: `使用 /workflow watch ${result.workflow_id} 观察并生成报告；/workflow report ${result.workflow_id} --output ./report 可导出已有结果。`, data: result };
 }
 
-async function workflow(ctx: WorkbenchContext, args: string[]): Promise<CommandOutcome> {
-  const [action, workflowId, ...rest] = args;
-  if (!workflowId) return { ok: false, message: '用法：/workflow status|cancel|approve <workflow-id>' };
+async function workflow(ctx: WorkbenchContext, args: string[], io: CommandIO): Promise<CommandOutcome> {
   const api = await ctx.getApi();
-  if (action === 'status' && rest.length === 0) {
-    const result = await api.getOptimizationWorkflow(workflowId) as { workflow?: Record<string, unknown> };
-    const record = result.workflow ?? {};
-    return { ok: true, message: [`工作流 ${workflowId}`, `状态：${String(record.status ?? 'UNKNOWN')}`, `阶段：${String((record.progress as { phase?: unknown } | undefined)?.phase ?? '-')}`, ...(record.error ? [`错误：${String(record.error)}`] : [])].join('\n'), data: result };
+  if (args.length === 0) {
+    const { workflows } = await api.listOptimizationWorkflows();
+    if (!workflows.length) return { ok: true, message: '暂无优化工作流。使用 /optimize 启动。' };
+    const selected = await io.select('选择优化工作流', workflows.map(w => ({ label: `${w.function_name}  ${w.status}  ${w.workflow_id}`, value: w.workflow_id })));
+    if (!selected) return { ok: true, message: '已返回。' };
+    ctx.setCurrentWorkflow(selected);
+    const action = await io.select('选择操作', [
+      { label: '查看状态', value: 'status' }, { label: '持续观察并导出报告', value: 'watch' },
+      { label: '查看 Agent 工作过程', value: 'events' },
+      ...(workflows.find(workflow => workflow.workflow_id === selected)?.agent_session ? [
+        { label: '继续原优化会话', value: 'resume' }, { label: '环境修复后重新验证当前候选', value: 'retry-validation' },
+      ] : []),
+      { label: '导出 Markdown / JSON 报告', value: 'report' }, { label: '取消优化任务', value: 'cancel' },
+    ]);
+    if (!action) return { ok: true, message: '已返回。' };
+    args = [action, selected];
+    if (action === 'report') {
+      const output = await io.prompt('报告输出目录：', { initialValue: path.join(path.dirname(ctx.configPath), '.corepilot', 'reports', selected.replace(/[^a-zA-Z0-9._-]/g, '_')) });
+      if (!output?.trim()) return { ok: true, message: '已取消导出。' };
+      args.push('--output', output);
+    }
+    if (action === 'cancel' && !await io.confirm('取消该工作流？')) return { ok: true, message: '未取消任务。' };
   }
-  if (action === 'cancel' && rest.length === 0) {
-    const result = await api.cancelOptimizationWorkflow(workflowId) as { status?: string; message?: string };
-    return { ok: true, message: `${result.status ?? 'CANCEL_REQUESTED'}${result.message ? `：${result.message}` : ''}`, data: result };
-  }
-  if (action === 'approve') {
-    const messageIndex = rest.indexOf('--commit-message');
-    const commitMessage = messageIndex >= 0 ? rest[messageIndex + 1] : rest.join(' ');
-    if (!commitMessage) return { ok: false, message: '用法：/workflow approve <workflow-id> --commit-message <说明>' };
-    const result = await api.requestWorkflowApprove(workflowId, { commit_message: commitMessage }) as { commit?: string };
-    return { ok: true, message: `已审批并合入：${result.commit ?? workflowId}`, data: result };
-  }
-  return { ok: false, message: '用法：/workflow status|cancel|approve <workflow-id>' };
+  if (args.length === 1 && ['status', 'watch', 'report', 'evidence', 'events', 'resume', 'retry-validation', 'cancel', 'delivery-check', 'delivery-resume', 'delivery-withdraw', 'delivery-cleanup'].includes(args[0]) && ctx.currentWorkflowId()) args.push(ctx.currentWorkflowId()!);
+  const reportRoot = ctx.hasConfig() ? loadOptimizationConfig(ctx.configPath).config.output_dir : undefined;
+  return executeWorkflowCommand(api, args, { print: io.print, signal: io.signal, reportRoot });
 }
 
 async function task(ctx: WorkbenchContext, args: string[]): Promise<CommandOutcome> {
@@ -165,7 +195,7 @@ async function configureModel(ctx: WorkbenchContext, io: CommandIO): Promise<Com
     let reusableProxy: string | undefined;
     if (source.id === 'openai') {
       const storedProxy = readStoredModelProxy(endpoint, { filePath: ctx.modelSettingsPath });
-      const configuredProxy = loaded ? resolveOptimizationProxy(loaded.config)?.proxy : process.env.PHYOPT_MODEL_PROXY?.trim();
+      const configuredProxy = loaded ? resolveOptimizationProxy(loaded.config)?.proxy : process.env.COREPILOT_MODEL_PROXY?.trim();
       reusableProxy = storedProxy ?? (configuredProxy ? normalizeModelProxy(configuredProxy) : undefined);
     }
 
@@ -289,14 +319,14 @@ async function configureModel(ctx: WorkbenchContext, io: CommandIO): Promise<Com
             timeout_ms: 1_200_000,
             inactivity_timeout_ms: 120_000,
           },
-          target: { ssh_alias: 'localhost', workspace_root: '/tmp/phyopt' },
+          target: { ssh_alias: 'localhost', workspace_root: '/tmp/corepilot' },
           build: { executable: '', args: [], cwd: DEFAULT_BUILD_CWD, environment: {}, timeout_ms: DEFAULT_BUILD_TIMEOUT_MS },
           validation: { testpack: './testpacks/domain.yaml' },
-          output_dir: './.phyopt/runs',
+          output_dir: './.corepilot/runs',
         };
     delete nextConfig.model.api_key;
     fs.writeFileSync(ctx.configPath, stringifyOptimizationConfig(nextConfig), 'utf8');
-    return { ok: true, message: `模型配置已验证并写入 ${ctx.configPath}\n模型：${selected.id}\nEndpoint：${endpoint}\n工具调用：通过`, data: { source: source.id as ModelSourceId, model_id: selected.id, endpoint } };
+    return { ok: true, message: `模型配置已验证并写入 ${ctx.configPath}\n模型：${selected.id}\nEndpoint：${endpoint}\n工具调用：通过\n下一步：/target 配置机器，/validation 选择验证来源，然后 /check、/optimize。`, data: { source: source.id as ModelSourceId, model_id: selected.id, endpoint } };
   }
 }
 
@@ -501,6 +531,18 @@ async function configureTarget(ctx: WorkbenchContext, io: CommandIO): Promise<Co
   const loaded = loadOptimizationConfig(ctx.configPath);
   const current = loaded.config.target;
 
+  if (isRegisteredRunner(loaded.config.runner) || process.env.COREPILOT_SERVER_URL) {
+    const api = await ctx.getApi();
+    const { machines } = await api.listExecutionMachines();
+    const enabled = machines.filter(machine => machine.enabled);
+    if (!enabled.length) return { ok: false, message: '尚无可用执行机器，请由维护者在网页「执行机器」中注册，或使用 corepilot machine add。' };
+    const selected = await io.select('选择已注册执行机器', enabled.map(machine => ({ label: `${machine.name} · ${machine.status}${machine.hardware ? ` · ${machine.hardware.architecture} / ${machine.hardware.cpu_count} CPU` : ''}`, value: machine })));
+    if (!selected) return { ok: true, message: '已返回，执行机器未修改。' };
+    const config = { ...loaded.config, runner: { mode: 'rpc' as const, machine_id: selected.machine_id } };
+    fs.writeFileSync(ctx.configPath, stringifyOptimizationConfig(config), 'utf8');
+    return { ok: true, message: `已选择执行机器：${selected.name}。连接信息由共享服务管理；下一步使用 /validation 配置验证方案。` };
+  }
+
   while (true) {
     const profiles = listTargetProfiles({ filePath: ctx.targetProfilesPath });
     const currentId = targetConnectionId(current);
@@ -565,7 +607,7 @@ async function configureTarget(ctx: WorkbenchContext, io: CommandIO): Promise<Co
       if (!target) continue;
     }
 
-    const check = ctx.targetChecker(target);
+    const check = await ctx.targetChecker(target);
     if (!check.ok) return { ok: false, message: `目标机器连接验证失败：${check.message}` };
     await writeTargetConfig(ctx, target);
     const mode = isAliasTarget(target) ? `SSH Alias ${target.ssh_alias}` : `${target.username}@${target.host}:${target.port}`;
@@ -575,12 +617,24 @@ async function configureTarget(ctx: WorkbenchContext, io: CommandIO): Promise<Co
 
 export async function runCommandArgs(ctx: WorkbenchContext, name: string, args: string[], io: CommandIO): Promise<CommandOutcome> {
   try {
-    if (name === '/optimize') return await optimize(ctx, args);
-    if (name === '/workflow') return await workflow(ctx, args);
+    if (name === '/optimize') return await optimize(ctx, args, io);
+    if (name === '/workflow') return await workflow(ctx, args, io);
+    if (name === '/validation') return await configureValidation(ctx, io);
+    if (name === '/check') {
+      const loaded = loadOptimizationConfig(ctx.configPath);
+      if (isRegisteredRunner(loaded.config.runner)) {
+        const api = await ctx.getApi();
+        const { projects } = await api.listProjects();
+        const project = projects.find(item => path.resolve(item.config_path) === path.resolve(ctx.configPath));
+        if (project) return { ok: true, ...await api.projectAction(project.project_id, 'check', {}) as { message: string } };
+        return { ok: false, message: '请先将此配置导入共享项目，再执行 corepilot project check <项目 ID>。' };
+      }
+      return { ok: true, ...await checkOptimization(ctx.configPath) };
+    }
     if (name === '/task') return await task(ctx, args);
     if (name === '/model') return await configureModel(ctx, io);
     if (name === '/build') return await configureBuild(ctx, io);
-    if (name === '/target') return configureTarget(ctx, io);
+    if (name === '/target') return await configureTarget(ctx, io);
     if (name === '/config') {
       try {
         const content = fs.readFileSync(ctx.configPath, 'utf8');
@@ -602,6 +656,8 @@ export async function runCommandArgs(ctx: WorkbenchContext, name: string, args: 
 export async function runCommand(ctx: WorkbenchContext, line: string, io: CommandIO): Promise<CommandOutcome> {
   const trimmed = line.trim();
   if (!trimmed.startsWith('/')) return { ok: false, message: '请输入以 / 开头的命令。' };
-  const [name, ...args] = trimmed.split(/\s+/);
-  return runCommandArgs(ctx, name, args, io);
+  try {
+    const [name, ...args] = parseWorkbenchInput(trimmed);
+    return runCommandArgs(ctx, name, args, io);
+  } catch (error) { return { ok: false, message: `命令解析失败：${(error as Error).message}` }; }
 }

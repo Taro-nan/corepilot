@@ -2,18 +2,9 @@ node_modules/
 # Codex/工作助手本地记忆，不属于项目源码或发布产物
 .workbuddy/
 dist/
-.phyopt/
-/tests/*
-!/tests/optimization-runtime.test.ts
-!/tests/runner-http.test.ts
-!/tests/validation-domain.test.ts
-!/tests/evaluator-isolation.test.ts
-!/tests/rpc-experiment-transition-adapter.test.ts
-!/tests/formal-evaluator-fixture.ts
-!/tests/formal-evaluator.test.ts
-!/tests/pi-agent-runtime.test.ts
-!/tests/pi-wire.test.ts
-!/tests/workspace-tools.test.ts
+.corepilot/
+/corepilot-data/
+# Tests and their fixtures are source assets; do not ignore tests/.
 /docs/dev-log/
 *.sqlite
 *.sqlite-*
@@ -29,8 +20,14 @@ source-archives/**/*.tar.gz
 # VS Code extension package
 *.vsix
 
-# local release build output (artifacts are not committed; historical notes are in docs/history/d17-delivery.md)
-build/
+# Local build/package output; retention rules: docs/development/repository-layout.md.
+/build/
+/web/test-results/
+/web/playwright-report/
+/.playwright-cli/
+/.tmp-model-test/
+__pycache__/
+*.pyc
 
 # ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
 .git/

@@ -1,5 +1,5 @@
 import type { Context, Models, Tool, ToolCall } from '@earendil-works/pi-ai';
-import { createPiModels, PHYOPT_PI_PROVIDER_ID, type PiRuntimeModelConfig } from './pi-provider.js';
+import { createPiModels, COREPILOT_PI_PROVIDER_ID, type PiRuntimeModelConfig } from './pi-provider.js';
 
 export interface ToolVerificationResult {
   ok: boolean;
@@ -9,7 +9,7 @@ export interface ToolVerificationResult {
 }
 
 const PROBE_TOOL: Tool = {
-  name: 'phyopt_probe',
+  name: 'corepilot_probe',
   description: '用于验证模型是否能返回工具调用；不要执行任何真实操作。',
   parameters: {
     type: 'object',
@@ -35,7 +35,7 @@ export async function verifyToolCalling(
   options: { models?: Models; timeoutMs?: number; signal?: AbortSignal; fetch?: typeof fetch } = {},
 ): Promise<ToolVerificationResult> {
   const models = options.models ?? createPiModels(config);
-  const model = models.getModel(PHYOPT_PI_PROVIDER_ID, config.modelId);
+  const model = models.getModel(COREPILOT_PI_PROVIDER_ID, config.modelId);
   if (!model) return { ok: false, model_id: config.modelId, tool_call: false, error: `模型未加载：${config.modelId}` };
 
   const controller = new AbortController();
@@ -45,8 +45,8 @@ export async function verifyToolCalling(
   options.signal?.addEventListener('abort', forwardAbort, { once: true });
   try {
     const context: Context = {
-      systemPrompt: '你正在进行模型能力验证。必须调用 phyopt_probe 工具，并将 ready 设置为 true。不要只返回文字。',
-      messages: [{ role: 'user', content: '请调用 phyopt_probe，ready=true。', timestamp: Date.now() }],
+      systemPrompt: '你正在进行模型能力验证。必须调用 corepilot_probe 工具，并将 ready 设置为 true。不要只返回文字。',
+      messages: [{ role: 'user', content: '请调用 corepilot_probe，ready=true。', timestamp: Date.now() }],
       tools: [PROBE_TOOL],
     };
     const message = await models.completeSimple(model, context, {
@@ -59,7 +59,7 @@ export async function verifyToolCalling(
     if (message.errorMessage) return { ok: false, model_id: config.modelId, tool_call: false, error: sanitizeError(message.errorMessage, config.apiKey) };
     const calls = toolCalls(message);
     const valid = calls.some((call) => call.name === PROBE_TOOL.name);
-    return { ok: valid, model_id: config.modelId, tool_call: valid, error: valid ? null : '模型未返回合法的 phyopt_probe tool call' };
+    return { ok: valid, model_id: config.modelId, tool_call: valid, error: valid ? null : '模型未返回合法的 corepilot_probe tool call' };
   } catch (error) {
     const message = controller.signal.aborted ? '模型工具调用验证超时或已取消' : sanitizeError((error as Error).message, config.apiKey);
     return { ok: false, model_id: config.modelId, tool_call: false, error: message };

@@ -1,18 +1,24 @@
 import path from 'node:path';
+import { resolveOptimizationBudget, type OptimizationSessionBudget } from './optimization-session.js';
 
 /** HTTP 层公开 optimize 请求；配置正文由 config_path 指向的 YAML 解析。 */
 export interface PublicWorkflowRequest {
+  budget?: OptimizationSessionBudget;
   function_name: string;
   entry_file: string | null;
   config_path: string;
   /** CLI 从调用目录派生出的算法库根目录；直接调用 HTTP 时可省略。 */
   repository_root?: string;
+  /** Exact local branch, resolved to a frozen commit at submission. */
+  source_branch?: string;
+  /** Registered execution machine selected for this submission. */
+  machine_id?: string;
   /** 可选性能闭环开关；未提供时默认只做构建和正确性。 */
   enable_performance?: boolean;
 }
 
 /** 可选的单次模型凭据请求头；服务端只在内存中使用，不持久化。 */
-export const PHYOPT_MODEL_API_KEY_HEADER = 'x-phyopt-model-api-key';
+export const COREPILOT_MODEL_API_KEY_HEADER = 'x-corepilot-model-api-key';
 
 export class PublicWorkflowRequestError extends Error {
   constructor(message: string) {
@@ -40,11 +46,22 @@ export function parsePublicWorkflowRequest(value: unknown): PublicWorkflowReques
   if (body.enable_performance !== undefined && typeof body.enable_performance !== 'boolean') {
     throw new PublicWorkflowRequestError('enable_performance must be boolean when present');
   }
+  let budget: OptimizationSessionBudget | undefined;
+  if (body.budget !== undefined) {
+    if (!body.budget || typeof body.budget !== 'object' || Array.isArray(body.budget)) throw new PublicWorkflowRequestError('budget must be an object');
+    const input = body.budget as Record<string, unknown>;
+    if (Object.keys(input).some(key => !['time_limit_ms', 'max_candidates'].includes(key))) throw new PublicWorkflowRequestError('unknown optimization budget field');
+    try { budget = resolveOptimizationBudget(input); }
+    catch (error) { throw new PublicWorkflowRequestError((error as Error).message); }
+  }
   return {
     function_name: functionName,
     entry_file: entryFile,
     config_path: configPath,
+    ...(budget ? { budget } : {}),
     ...(repositoryRoot === undefined ? {} : { repository_root: path.resolve(repositoryRoot) }),
+    ...(body.source_branch === undefined ? {} : { source_branch: requiredString(body.source_branch, 'source_branch') }),
+    ...(body.machine_id === undefined ? {} : { machine_id: requiredString(body.machine_id, 'machine_id') }),
     ...(body.enable_performance === undefined ? {} : { enable_performance: body.enable_performance }),
   };
 }

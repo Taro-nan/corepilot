@@ -19,7 +19,7 @@ import { candidateEvaluationFeedback } from '../src/workspace/candidate-evaluati
 import { proposeFixtureHypothesis } from './hypothesis-fixture.js';
 
 async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-rpc-transition-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-rpc-transition-'));
   const runnerRoot = path.join(root, 'runner');
   const localRepository = path.join(root, 'local-source');
   const stagedCandidate = path.join(runnerRoot, 'candidates', 'candidate-1');
@@ -90,7 +90,7 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
     correctness: {
       command: {
         executable: process.execPath,
-        args: ['-e', "const fs=require('node:fs');fs.readFileSync('oracle.txt');fs.readFileSync(process.env.PHYOPT_CANDIDATE_ROOT+'/candidate.txt')"],
+        args: ['-e', "const fs=require('node:fs');fs.readFileSync('oracle.txt');fs.readFileSync(process.env.COREPILOT_CANDIDATE_ROOT+'/candidate.txt')"],
         cwd: evaluatorRoot,
         environment: {},
         timeout_ms: 5_000,
@@ -185,6 +185,16 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
     );
     assert.equal(measurements.some((item) => Object.hasOwn(item.domain_payload.parameters as object, 'm')), false);
     assert.equal((runtime.getExperiment(experiment.experiment_id).observed_context as { evaluator: { digest: string } }).evaluator.digest, evaluatorDigest);
+    const resumed = new RpcExperimentTransitionAdapter({ backend: new RunnerClientExperimentExecutionBackend(runnerClient), runtime, pollIntervalMs: 10,
+      stageCandidate: async () => { throw new Error('Recovery must not restage or delete live source directories'); },
+      stageEvaluator: async () => { throw new Error('Recovery must use the persisted execution plan'); },
+      stageBaseline: async () => { throw new Error('Recovery must not replace the baseline'); } });
+    const recovered = await resumed.executeValidation({ experimentId: experiment.experiment_id, workspace, build, testpack,
+      sourceRoot: localRepository, includePerformance: true, resume: true });
+    assert.equal(recovered.passed, true);
+    assert.deepEqual(store.listCommandExecutions(experiment.experiment_id), commands);
+    assert.deepEqual(store.listMeasurements(experiment.experiment_id), measurements);
+    assert.equal(store.listExperiments(task.task_id).length, 1, 'reconnecting observes the original execution');
   } finally {
     await server.close();
     store.close();

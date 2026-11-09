@@ -9,7 +9,7 @@ interface ModelSettings {
 
 /** User-scoped model connection settings that should survive project changes. */
 export function defaultModelSettingsPath(homeDirectory = os.homedir()): string {
-  return path.join(homeDirectory, '.phyopt', 'settings.json');
+  return path.join(homeDirectory, '.corepilot', 'settings.json');
 }
 
 export class ModelSettingsStoreError extends Error {

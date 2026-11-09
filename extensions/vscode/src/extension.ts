@@ -14,7 +14,7 @@ import { VscodeSecretStore } from '../../../src/config/vscode-secret-store.js';
 import { BackendManager } from '../../../src/backend/backend-manager.js';
 import type { ServeSpec } from '../../../src/backend/backend-manager.js';
 import { ensureBaselineIdentity } from '../../../src/core/git-baseline-flow.js';
-import type { PhyOptConfig } from '../../../src/config/phyopt-config.js';
+import type { CorePilotConfig } from '../../../src/config/corepilot-config.js';
 
 // ---- module-level state (lazy) ----
 let configService: ConfigService | null = null;
@@ -35,7 +35,7 @@ function getCredentials(context: vscode.ExtensionContext): CredentialService {
 }
 
 /** Resolve the model credential (if any) to inject into a spawned backend. */
-async function resolveBackendExtraEnv(context: vscode.ExtensionContext, config: PhyOptConfig): Promise<Record<string, string>> {
+async function resolveBackendExtraEnv(context: vscode.ExtensionContext, config: CorePilotConfig): Promise<Record<string, string>> {
   const extra: Record<string, string> = {};
   const ref = config.model?.credential_ref ?? null;
   if (ref) {
@@ -48,13 +48,13 @@ async function resolveBackendExtraEnv(context: vscode.ExtensionContext, config: 
 /**
  * How the managed backend is started. The bundled extension cannot use
  * `import.meta.url` (empty in CJS), so the serve command must come from an
- * explicit source: the `phyopt.serveCommand` setting, or PHYOPT_SERVE_CMD.
+ * explicit source: the `corepilot.serveCommand` setting, or COREPILOT_SERVE_CMD.
  * The resolved credential is injected via env (extraEnv), never argv.
  */
 function resolveServeCommand(): string {
-  const configured = vscode.workspace.getConfiguration('phyopt').get<string>('serveCommand', '');
+  const configured = vscode.workspace.getConfiguration('corepilot').get<string>('serveCommand', '');
   if (configured.trim().length > 0) return configured.trim();
-  return process.env.PHYOPT_SERVE_CMD ?? 'corepilot';
+  return process.env.COREPILOT_SERVE_CMD ?? 'corepilot';
 }
 
 /** Ensure a backend is reachable (reuse, else start a managed one with the
@@ -63,7 +63,7 @@ async function getApi(context: vscode.ExtensionContext): Promise<ApiClient> {
   if (api) return api;
   // Explicit test/dev override: connect as a pure thin client (no spawn; the
   // external backend already owns its environment).
-  const overrideUrl = process.env.PHYOPT_SERVER_URL;
+  const overrideUrl = process.env.COREPILOT_SERVER_URL;
   if (overrideUrl) {
     api = new ApiClient(overrideUrl);
     return api;
@@ -79,7 +79,7 @@ async function getApi(context: vscode.ExtensionContext): Promise<ApiClient> {
     sshAlias: cfg.backend.ssh_alias,
     extraEnv: await resolveBackendExtraEnv(context, cfg),
   };
-  process.env.PHYOPT_SERVE_CMD = resolveServeCommand();
+  process.env.COREPILOT_SERVE_CMD = resolveServeCommand();
   backendManager = new BackendManager({ url, spec, allowSpawn: true });
   const result = await backendManager.ensure();
   api = new ApiClient(result.url);
@@ -88,7 +88,7 @@ async function getApi(context: vscode.ExtensionContext): Promise<ApiClient> {
 
 function getClientForList(): IdeTaskClient {
   const cfg = getConfigService().load();
-  const url = process.env.PHYOPT_SERVER_URL ?? `http://${cfg.backend.host}:${cfg.backend.port}`;
+  const url = process.env.COREPILOT_SERVER_URL ?? `http://${cfg.backend.host}:${cfg.backend.port}`;
   return new IdeTaskClient(new ApiClient(url));
 }
 
@@ -108,9 +108,9 @@ class TaskItem extends vscode.TreeItem {
     super(summary.task_id + ' - ' + summary.target_name + mockTag, vscode.TreeItemCollapsibleState.None);
     const errText = summary.error ? ': ' + summary.error : '';
     this.description = summary.status + errText;
-    this.contextValue = 'phyopt.task';
+    this.contextValue = 'corepilot.task';
     this.tooltip = 'request_id: ' + summary.request_id + '\nstatus: ' + summary.status + (summary.error ? '\nerror: ' + summary.error : '');
-    this.command = { command: 'phyopt.openReport', title: 'Open Report', arguments: [this] };
+    this.command = { command: 'corepilot.openReport', title: 'Open Report', arguments: [this] };
   }
 }
 
@@ -132,15 +132,15 @@ class TaskTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
       mode === 'Experiment' ? '模式：Experiment（真实实验）' : '模式：Mock（模拟，真实实验提交已禁用）',
       vscode.TreeItemCollapsibleState.None,
     );
-    modeHeader.contextValue = 'phyopt.mode';
+    modeHeader.contextValue = 'corepilot.mode';
     modeHeader.iconPath = new vscode.ThemeIcon(mode === 'Experiment' ? 'beaker' : 'debug-console');
 
     // Welcome actions: start optimize / configure / recent tasks.
     const actions = new vscode.TreeItem('开始优化（右键文件，或点这里新建任务）', vscode.TreeItemCollapsibleState.None);
-    actions.command = { command: 'phyopt.newExperiment', title: '新建任务' };
+    actions.command = { command: 'corepilot.newExperiment', title: '新建任务' };
     actions.iconPath = new vscode.ThemeIcon('play');
     const config = new vscode.TreeItem('配置模型 / 硬件 / 测试', vscode.TreeItemCollapsibleState.None);
-    config.command = { command: 'phyopt.newExperiment', title: '配置' };
+    config.command = { command: 'corepilot.newExperiment', title: '配置' };
     config.iconPath = new vscode.ThemeIcon('settings-gear');
 
     try {
@@ -242,7 +242,7 @@ async function configureModel(context: vscode.ExtensionContext): Promise<void> {
   if (provider === undefined) return;
   const providerId = provider || (cfg.model?.provider ?? 'openai-compatible');
   const piProvider = providerId === 'pi'
-    ? await input('Pi 底层 provider ID（例如 anthropic、openai、zai；可跳过则使用 PHYOPT_PI_PROVIDER）', cfg.model?.pi_provider ?? process.env.PHYOPT_PI_PROVIDER ?? '')
+    ? await input('Pi 底层 provider ID（例如 anthropic、openai、zai；可跳过则使用 COREPILOT_PI_PROVIDER）', cfg.model?.pi_provider ?? process.env.COREPILOT_PI_PROVIDER ?? '')
     : undefined;
   if (providerId === 'pi' && piProvider === undefined) return;
   const name = await input('模型名（可跳过）', cfg.model?.name ?? '');
@@ -435,7 +435,7 @@ async function doSubmit(context: vscode.ExtensionContext, prefill: WizardPrefill
     getConfigService().setCurrentTask(result.taskId);
     treeProvider.refresh();
     void vscode.window.showInformationMessage(`CorePilot: 已提交实验任务 ${result.taskId}（${experimentModeLabel(cfg)}，transport=${result.transport}${result.grantConfigured ? '' : '，无授权 → 等待资源'}）`);
-    void vscode.commands.executeCommand('phyopt.tasks.focus');
+    void vscode.commands.executeCommand('corepilot.tasks.focus');
   } catch (err) {
     void vscode.window.showErrorMessage('CorePilot: ' + (err as Error).message);
   }
@@ -445,13 +445,13 @@ let treeProvider: TaskTreeProvider;
 
 export function activate(context: vscode.ExtensionContext): void {
   treeProvider = new TaskTreeProvider();
-  context.subscriptions.push(vscode.window.registerTreeDataProvider('phyopt.tasks', treeProvider));
+  context.subscriptions.push(vscode.window.registerTreeDataProvider('corepilot.tasks', treeProvider));
 
-  context.subscriptions.push(vscode.commands.registerCommand('phyopt.refreshTasks', () => treeProvider.refresh()));
+  context.subscriptions.push(vscode.commands.registerCommand('corepilot.refreshTasks', () => treeProvider.refresh()));
 
   // 新建实验任务：右键文件 / 右键选区 / 命令面板均进入同一向导，预填来源。
   context.subscriptions.push(
-    vscode.commands.registerCommand('phyopt.newExperiment', async (uri?: vscode.Uri) => {
+    vscode.commands.registerCommand('corepilot.newExperiment', async (uri?: vscode.Uri) => {
       const rootDir = root();
       const prefill: WizardPrefill = { sourceFiles: [] };
       const file = uri ?? vscode.window.activeTextEditor?.document.uri;
@@ -470,14 +470,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // 旧命令保留为别名：同样进入真实实验向导（不再静默提交 mock）。
   context.subscriptions.push(
-    vscode.commands.registerCommand('phyopt.initTask', async (uri?: vscode.Uri) => {
-      void vscode.commands.executeCommand('phyopt.newExperiment', uri);
+    vscode.commands.registerCommand('corepilot.initTask', async (uri?: vscode.Uri) => {
+      void vscode.commands.executeCommand('corepilot.newExperiment', uri);
     }),
   );
 
   // 开始优化：复用已有模型候选生成器 + 门禁，接入真实 provider 接线。
   context.subscriptions.push(
-    vscode.commands.registerCommand('phyopt.optimize', async (uri?: vscode.Uri) => {
+    vscode.commands.registerCommand('corepilot.optimize', async (uri?: vscode.Uri) => {
       const rootDir = root();
       if (!rootDir) {
         void vscode.window.showErrorMessage('CorePilot: 未打开工作区文件夹。');
@@ -508,7 +508,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       void vscode.window.showInformationMessage(`CorePilot: 本次发送文件：${rel}；预算：最多 1 个候选、0 自动重试。`);
 
-      const candidatesDir = path.join(rootDir, '.phyopt', 'candidates');
+      const candidatesDir = path.join(rootDir, '.corepilot', 'candidates');
       const result = await generateCandidate({
         project_root: rootDir,
         goal,
@@ -523,19 +523,19 @@ export function activate(context: vscode.ExtensionContext): void {
       const c = result.candidate;
       treeProvider.refresh();
       void vscode.window.showInformationMessage(`CorePilot: 候选已生成，待验证（${c.candidate_id}${c.simulated ? '，模拟来源' : ''}）。`);
-      void vscode.commands.executeCommand('phyopt.showCandidateDiff');
+      void vscode.commands.executeCommand('corepilot.showCandidateDiff');
     }),
   );
 
   // 查看候选变更：VS Code 原生 diff（左=冻结源码，右=候选源码）。
   context.subscriptions.push(
-    vscode.commands.registerCommand('phyopt.showCandidateDiff', async () => {
+    vscode.commands.registerCommand('corepilot.showCandidateDiff', async () => {
       const rootDir = root();
       if (!rootDir) {
         void vscode.window.showErrorMessage('CorePilot: 未打开工作区文件夹。');
         return;
       }
-      const candidates = listCandidates(path.join(rootDir, '.phyopt', 'candidates'));
+      const candidates = listCandidates(path.join(rootDir, '.corepilot', 'candidates'));
       if (candidates.length === 0) {
         void vscode.window.showInformationMessage('CorePilot: 尚无已生成候选。请先用「开始优化」生成候选。');
         return;
@@ -545,7 +545,7 @@ export function activate(context: vscode.ExtensionContext): void {
         { title: 'CorePilot 查看候选变更', placeHolder: '选择候选' },
       );
       if (!picked) return;
-      const bundle = loadCandidate(path.join(rootDir, '.phyopt', 'candidates'), picked.value);
+      const bundle = loadCandidate(path.join(rootDir, '.corepilot', 'candidates'), picked.value);
       if (!bundle) {
         void vscode.window.showErrorMessage('CorePilot: 候选不存在。');
         return;
@@ -567,7 +567,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       // 写临时文件，用原生 diff 展示；不改用户工作文件。
-      const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-ide-diff-'));
+      const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-ide-diff-'));
       const leftUri = vscode.Uri.file(path.join(scratch, 'original-' + path.basename(chosenFile)));
       const rightUri = vscode.Uri.file(path.join(scratch, 'candidate-' + path.basename(chosenFile)));
       fs.writeFileSync(leftUri.fsPath, original.content);
@@ -577,13 +577,13 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('phyopt.showTasks', () => {
-      void vscode.commands.executeCommand('phyopt.refreshTasks');
+    vscode.commands.registerCommand('corepilot.showTasks', () => {
+      void vscode.commands.executeCommand('corepilot.refreshTasks');
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('phyopt.cancelTask', async (item?: TaskItem) => {
+    vscode.commands.registerCommand('corepilot.cancelTask', async (item?: TaskItem) => {
       const taskId = item?.summary.task_id ?? (await vscode.window.showInputBox({ prompt: 'Task ID to cancel' }));
       if (!taskId) return;
       await getClientForList().cancelTask(taskId, 'ide-cancel:' + Date.now());
@@ -591,9 +591,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // 导出报告：markdown/json 写入 .phyopt/exports/。
+  // 导出报告：markdown/json 写入 .corepilot/exports/。
   context.subscriptions.push(
-    vscode.commands.registerCommand('phyopt.exportTask', async (item?: TaskItem) => {
+    vscode.commands.registerCommand('corepilot.exportTask', async (item?: TaskItem) => {
       const taskId = item?.summary.task_id ?? getConfigService().load().current.task_id ?? (await vscode.window.showInputBox({ prompt: 'Task ID to export' }));
       if (!taskId) {
         void vscode.window.showInformationMessage('CorePilot: 无任务可导出（先提交一个任务，或从任务列表选择）。');
@@ -620,7 +620,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('phyopt.openReport', async (item?: TaskItem) => {
+    vscode.commands.registerCommand('corepilot.openReport', async (item?: TaskItem) => {
       const taskId = item?.summary.task_id ?? (await vscode.window.showInputBox({ prompt: 'Task ID' }));
       if (!taskId) return;
       const reportPath = await getClientForList().getReportPath(taskId);

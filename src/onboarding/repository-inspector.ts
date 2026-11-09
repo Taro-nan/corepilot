@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { BuildRequirements } from '../contracts/build-planning.js';
 
 export interface InspectedFile { path: string; sha256: string; bytes: number }
 export interface BuildCandidate { kind: string; command: string; evidence: string[]; status: 'DISCOVERED' | 'VERIFIED' | 'UNVERIFIED' }
@@ -19,6 +20,7 @@ export interface RepositoryInspection {
   files: string[];
   inspected_files: InspectedFile[];
   build_candidates: BuildCandidate[];
+  build_requirements: BuildRequirements;
   functions: FunctionCandidate[];
   tests: string[];
   benchmarks: string[];
@@ -32,7 +34,7 @@ export interface RepositoryInspection {
   unknowns: string[];
 }
 
-const SKIP_DIRS = new Set(['.git', '.phyopt', 'node_modules', 'dist', 'build', '.cache', '.venv', 'vendor']);
+const SKIP_DIRS = new Set(['.git', '.corepilot', 'node_modules', 'dist', 'build', '.cache', '.venv', 'vendor']);
 const MAX_FILES = 50_000;
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 const SOURCE = /\.(?:c|cc|cpp|cxx|s|S)$/;
@@ -40,6 +42,40 @@ const HEADER = /\.(?:h|hh|hpp|hxx)$/;
 const TEXT = /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|s|S|md|txt|cmake|meson|sh|yml|yaml|toml|json)$/i;
 const IDENTIFIER = /^[A-Za-z_][A-Za-z_0-9]*$/;
 const SENSITIVE = /(?:^|\/)(?:\.env(?:\..*)?|[^/]*(?:secret|credential|private[_-]?key)[^/]*|id_rsa|id_ed25519|[^/]+\.(?:pem|key|p12))$/i;
+
+/** Extract build facts from already indexed source; no build command is executed. */
+function inspectBuildRequirements(files: string[], content: Map<string, string>): BuildRequirements {
+  const roots = [
+    ['cmake', 'CMakeLists.txt'], ['meson', 'meson.build'], ['make', 'Makefile'], ['make', 'GNUmakefile'],
+    ['configure', 'configure'], ['cargo', 'Cargo.toml'], ['go', 'go.mod'], ['ninja', 'build.ninja'],
+  ];
+  const root_builds = roots.filter(([, file]) => files.includes(file)).map(([kind, file]) => ({ kind, path: file }));
+  const evidence: BuildRequirements['evidence'] = [];
+  let cmake_minimum: string | null = null;
+  let cxx_standard: number | null = null;
+  let openmp_option: string | null = null;
+  const record = (file: string, index: number, line: string) => {
+    if (evidence.length < 12) evidence.push({ path: file, line: index + 1, text: line.trim().slice(0, 180) });
+  };
+  const cmake = content.get('CMakeLists.txt');
+  if (cmake) for (const [index, line] of cmake.split(/\r?\n/).entries()) {
+    const minimum = line.match(/^\s*cmake_minimum_required\s*\(\s*VERSION\s+(\d+(?:\.\d+){1,2})/i);
+    if (minimum && !cmake_minimum) { cmake_minimum = minimum[1]; record('CMakeLists.txt', index, line); }
+    const standard = line.match(/(?:CMAKE_CXX_STANDARD\s+|cxx_std_)(11|14|17|20|23|26)\b/i);
+    if (standard && Number(standard[1]) > (cxx_standard ?? 0)) { cxx_standard = Number(standard[1]); record('CMakeLists.txt', index, line); }
+    const openmp = line.match(/^\s*option\s*\(\s*([A-Za-z_][A-Za-z_0-9]*)\b.*\bOpenMP\b/i);
+    if (openmp && !openmp_option) { openmp_option = openmp[1]; record('CMakeLists.txt', index, line); }
+  }
+  if (!cxx_standard) {
+    for (const [file, text] of content) {
+      if (!/\.(?:cc|cpp|cxx|hpp|hxx)$/.test(file) || /(?:^|\/)(?:test|ctest|bench)/i.test(file)) continue;
+      const lines = text.split(/\r?\n/);
+      const index = lines.findIndex(line => /\bstd::(?:is_same_v|optional|variant|string_view)\b|\bif\s+constexpr\s*\(/.test(line) && !/^\s*(?:\/\/|\*)/.test(line));
+      if (index >= 0) { cxx_standard = 17; record(file, index, lines[index]); break; }
+    }
+  }
+  return { root_builds, cmake_minimum, cxx_standard, openmp_option, evidence };
+}
 
 function sha256(data: Buffer): string { return createHash('sha256').update(data).digest('hex'); }
 function slash(value: string): string { return value.split(path.sep).join('/'); }
@@ -144,15 +180,24 @@ export class RepositoryInspector {
     const buildCandidates: BuildCandidate[] = [];
     const addBuild = (kind: string, command: string, evidence: string[]) => buildCandidates.push({ kind, command, evidence, status: 'DISCOVERED' });
     const make = files.filter((item) => /(?:^|\/)Makefile$|(?:^|\/)GNUmakefile$/i.test(item));
-    if (make.length) addBuild('make', 'make', make);
+    const rootMake = make.filter(item => !item.includes('/'));
+    if (rootMake.length) addBuild('make', 'make', rootMake);
     const cmake = files.filter((item) => /(?:^|\/)CMakeLists\.txt$/.test(item));
-    if (cmake.length) addBuild('cmake', 'cmake -S . -B build && cmake --build build', cmake);
+    if (cmake.includes('CMakeLists.txt')) addBuild('cmake', 'cmake -S . -B build && cmake --build build', ['CMakeLists.txt']);
     const meson = files.filter((item) => /(?:^|\/)meson\.build$/.test(item));
-    if (meson.length) addBuild('meson', 'meson setup build && meson compile -C build', meson);
+    if (meson.includes('meson.build')) addBuild('meson', 'meson setup build && meson compile -C build', ['meson.build']);
     const configure = files.filter((item) => /(?:^|\/)configure$|(?:^|\/)configure\.ac$/.test(item));
-    if (configure.length) addBuild('configure', './configure && make', configure);
+    if (configure.includes('configure')) addBuild('configure', './configure && make', ['configure']);
     const scripts = files.filter((item) => /(?:^|\/)scripts\/[^/]*(?:build|compile)[^/]*\.sh$/i.test(item));
     for (const script of scripts.slice(0, 5)) addBuild('script', script, [script]);
+    const additionalBuilds = [
+      { file: 'Cargo.toml', kind: 'cargo', command: 'cargo build --release' },
+      { file: 'go.mod', kind: 'go', command: 'go build ./...' },
+      { file: 'pyproject.toml', kind: 'python', command: 'python3 -m build' },
+      { file: 'BUILD.bazel', kind: 'bazel', command: 'bazel build //...' },
+      { file: 'build.ninja', kind: 'ninja', command: 'ninja' },
+    ].filter(item => files.includes(item.file));
+    for (const item of additionalBuilds) addBuild(item.kind, item.command, [item.file]);
     const docs = files.filter((item) => /(?:^|\/)(?:README|INSTALL|CONTRIBUTING)[^/]*$/i.test(item)).slice(0, 8);
     const ci = files.filter((item) => /(?:^|\/)\.github\/workflows\/[^/]+\.(?:yml|yaml)$|(?:^|\/)\.gitlab-ci\.yml$/i.test(item)).slice(0, 12);
     const tests = files.filter(isTest);
@@ -163,9 +208,10 @@ export class RepositoryInspector {
     const selectedHeaders = publicHeaders.length ? publicHeaders : headers.filter((item) => !item.includes('/')).slice(0, 80);
     const sourceFiles = files.filter((item) => SOURCE.test(item) && !isProtected(item));
     const content = new Map<string, string>();
-    for (const file of [...new Set([...docs, ...ci, ...make, ...cmake, ...meson, ...configure, ...scripts, ...selectedHeaders, ...sourceFiles.slice(0, 500), ...tests.slice(0, 100), ...benchmarks.slice(0, 100), ...references.slice(0, 50)])].slice(0, 1200)) {
+    for (const file of [...new Set([...docs, ...ci, ...make, ...cmake, ...meson, ...configure, ...scripts, ...additionalBuilds.map(item => item.file), ...selectedHeaders, ...sourceFiles.slice(0, 500), ...tests.slice(0, 100), ...benchmarks.slice(0, 100), ...references.slice(0, 50)])].slice(0, 1200)) {
       try { content.set(file, this.readFile(file)); } catch { continue; }
     }
+    const buildRequirements = inspectBuildRequirements(files, content);
     const candidates = new Map<string, FunctionCandidate>();
     for (const header of selectedHeaders) {
       const text = content.get(header) ?? '';
@@ -176,18 +222,31 @@ export class RepositoryInspector {
         if (!candidates.has(symbol)) candidates.set(symbol, { symbol, public_api: symbol, header, implementation_files: [], architecture_files: [], call_path: [header], confidence: 'MEDIUM' });
       }
     }
+    const symbolsInFile = new Map<string, Set<string>>();
+    const symbols = (file: string): Set<string> => {
+      if (!symbolsInFile.has(file)) symbolsInFile.set(file, new Set([...((content.get(file) ?? '').matchAll(/\b([A-Za-z_]\w*)\s*\(/g))].map(match => match[1])));
+      return symbolsInFile.get(file)!;
+    };
+    const occurrences = new Map<string, string[]>();
+    const byBasename = new Map<string, string[]>();
+    const sourceOrder = new Map(sourceFiles.map((file, index) => [file, index]));
+    for (const file of sourceFiles) {
+      const basename = path.posix.basename(file).replace(/\.(?:c|cc|cpp|cxx|s|S)$/, '');
+      byBasename.set(basename, [...(byBasename.get(basename) ?? []), file]);
+      for (const symbol of symbols(file)) if (candidates.has(symbol)) occurrences.set(symbol, [...(occurrences.get(symbol) ?? []), file]);
+    }
     for (const candidate of candidates.values()) {
-      const expression = new RegExp('\\b' + candidate.symbol + '\\s*\\(');
-      candidate.implementation_files = sourceFiles.filter((file) => {
-        const basename = path.posix.basename(file).replace(/\.(?:c|cc|cpp|cxx|s|S)$/, '');
-        return candidate.symbol === basename || candidate.symbol.startsWith(`${basename}_`) || expression.test(content.get(file) ?? '');
-      }).slice(0, 30);
+      const implementations = new Set([...(occurrences.get(candidate.symbol) ?? []), ...(byBasename.get(candidate.symbol) ?? [])]);
+      for (let index = candidate.symbol.indexOf('_'); index >= 0; index = candidate.symbol.indexOf('_', index + 1)) {
+        for (const file of byBasename.get(candidate.symbol.slice(0, index)) ?? []) implementations.add(file);
+      }
+      candidate.implementation_files = [...implementations].sort((left, right) => sourceOrder.get(left)! - sourceOrder.get(right)!).slice(0, 30);
       candidate.architecture_files = candidate.implementation_files.filter((file) => /(?:arm|aarch|x86|avx|neon|simd|kernel|asm)/i.test(file));
       candidate.call_path = [candidate.header!, ...candidate.implementation_files];
       candidate.confidence = candidate.implementation_files.length ? 'HIGH' : 'LOW';
     }
     const dependencies = new Set<string>();
-    const metadata = [...docs, ...ci, ...make, ...cmake, ...meson, ...configure, ...scripts];
+    const metadata = [...docs, ...ci, ...make, ...cmake, ...meson, ...configure, ...scripts, ...additionalBuilds.map(item => item.file)];
     const versionClues: Array<{ path: string; value: string }> = [];
     for (const candidate of buildCandidates) {
       const expression = new RegExp('\\b' + candidate.kind + '\\b', 'i');
@@ -199,7 +258,7 @@ export class RepositoryInspector {
       const version = text.match(/\b(?:version\s*[:=]?\s*|project\s*\([^)]*\bVERSION\s+)(\d+\.\d+(?:\.\d+)?)/i)?.[1];
       if (version) versionClues.push({ path: file, value: version });
     }
-    const languages = [...new Set(files.flatMap((file) => /\.(?:c|h)$/.test(file) ? ['C'] : /\.(?:cc|cpp|cxx|hpp)$/.test(file) ? ['C++'] : /\.(?:s|S)$/.test(file) ? ['Assembly'] : []))];
+    const languages = [...new Set(files.flatMap((file) => /\.(?:c|h)$/.test(file) ? ['C'] : /\.(?:cc|cpp|cxx|hpp)$/.test(file) ? ['C++'] : /\.(?:s|S)$/.test(file) ? ['Assembly'] : /\.rs$/.test(file) ? ['Rust'] : /\.go$/.test(file) ? ['Go'] : /\.py$/.test(file) ? ['Python'] : []))];
     const testAssets = tests.map((file) => {
       const text = content.get(file) ?? '';
       return { path: file, assertion_clues: [
@@ -215,7 +274,7 @@ export class RepositoryInspector {
         output_clues: [...new Set([...text.matchAll(/\b(?:printf|fprintf|cout|write)\b/g)].map((match) => match[0]))],
         workload_clues: [
           ...( /\bfor\s*\(/.test(text) ? ['loop'] : []),
-          ...[...candidates.keys()].filter((symbol) => new RegExp('\\b' + symbol + '\\s*\\(').test(text)).slice(0, 10),
+          ...[...candidates.keys()].filter(symbol => symbols(file).has(symbol)).slice(0, 10),
         ],
       };
     });
@@ -230,7 +289,7 @@ export class RepositoryInspector {
     return {
       repository: { path: this.root, name: path.basename(this.root), ...this.inspectGit() }, files,
       inspected_files: this.inspectedFiles(),
-      build_candidates: buildCandidates, functions: [...candidates.values()].slice(0, 5000), tests, benchmarks,
+      build_candidates: buildCandidates, build_requirements: buildRequirements, functions: [...candidates.values()].slice(0, 5000), tests, benchmarks,
       test_assets: testAssets, benchmark_assets: benchmarkAssets, references,
       dependencies: [...dependencies], version_clues: versionClues, languages,
       public_headers: publicHeaders.length ? publicHeaders : selectedHeaders, unknowns,

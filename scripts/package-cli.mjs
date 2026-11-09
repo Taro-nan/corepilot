@@ -22,25 +22,27 @@ console.log('[package-cli] building dist...');
 execSync('npm run build', { cwd: root, stdio: 'inherit' });
 
 console.log('[package-cli] staging into', stage);
-rmSync(stageRoot, { recursive: true, force: true });
+clearStaging();
 mkdirSync(stage, { recursive: true });
 
 for (const f of ['package.json', 'package-lock.json', 'README.md']) {
   cpSync(path.join(root, f), path.join(stage, f));
 }
-// The package's postinstall applies the ink resize-reflow patch, so the patch
-// script must ship with the tarball (see scripts/apply-ink-patch.mjs).
-cpSync(path.join(root, 'scripts'), path.join(stage, 'scripts'), { recursive: true });
+// Only postinstall tooling is needed at runtime; repository checks, packaging
+// tools and developer utilities do not belong in the installed application.
+mkdirSync(path.join(stage, 'scripts'), { recursive: true });
+cpSync(path.join(root, 'scripts', 'apply-ink-patch.mjs'), path.join(stage, 'scripts', 'apply-ink-patch.mjs'));
 cpSync(path.join(root, 'dist'), path.join(stage, 'dist'), { recursive: true });
+mkdirSync(path.join(stage, 'web'), { recursive: true });
+cpSync(path.join(root, 'web', 'dist'), path.join(stage, 'web', 'dist'), { recursive: true });
+cpSync(path.join(root, 'deploy'), path.join(stage, 'deploy'), { recursive: true });
 for (const directory of ['packages', 'evaluators']) {
   cpSync(path.join(root, directory), path.join(stage, directory), { recursive: true });
 }
-// Include only the build-time verified knowledge snapshot. The catalog carries
-// reviewed records and hashes, not private raw evidence or source archives.
-execSync(`node "${path.join(root, 'scripts', 'generate-knowledge-catalog.mjs')}" "${path.join(stage, 'dist', 'knowledge')}" "${root}"`, {
-  cwd: root,
-  stdio: 'inherit',
-});
+// The current source tree has no knowledge runtime. Do not require removed
+// modules (or stale local dist files) to create an installable package.
+mkdirSync(path.join(stage, 'docs'), { recursive: true });
+cpSync(path.join(root, 'docs', 'guides'), path.join(stage, 'docs', 'guides'), { recursive: true });
 // The tarball's `bin` points at dist/entry.js; it must carry a node shebang so
 // npm generates shims that invoke `node` (otherwise PowerShell runs the .js directly).
 const cliEntry = path.join(stage, 'dist', 'entry.js');
@@ -71,7 +73,14 @@ const out = path.join(root, 'build', `${pkgName}.tgz`);
 const tarVersion = execSync('tar --version 2>&1', { cwd: root, encoding: 'utf8' });
 const forceLocal = /bsdtar|libarchive/i.test(tarVersion) ? '' : '--force-local';
 execSync(`tar ${forceLocal} -czf "${out}" -C "${stageRoot}" "${pkgName}"`, { cwd: root, stdio: 'inherit' });
+clearStaging();
 console.log('[package-cli] wrote', out);
+
+function clearStaging() {
+  const target = path.resolve(stageRoot);
+  if (path.dirname(target) !== path.join(root, 'build', 'package') || path.basename(target) !== 'cli') throw new Error('Unexpected CLI staging path');
+  rmSync(target, { recursive: true, force: true });
+}
 
 function collectLicenses(nodeModulesDir) {
   const entries = [];

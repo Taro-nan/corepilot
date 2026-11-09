@@ -1,0 +1,124 @@
+import React, { useEffect, useRef, useState } from 'react';
+import type { ProjectRecord, RepositoryInspection } from '../../src/contracts/project';
+import type { OptimizationConfig } from '../../src/config/optimization-config';
+import type { ExecutionMachineSummary } from '../../src/contracts/execution-machine';
+import type { ValidationAssetDraft } from '../../src/contracts/validation-assets';
+import { isRegisteredRunner } from '../../src/config/runner-config';
+import { api, request } from './api';
+import { CopyValue, Disclosure, Feedback, Field, Icon, Modal } from './components';
+import { SourceBranchSelect } from './SourceProject';
+import { TestConditionsSummary } from './TestConditionsSummary';
+
+export interface TaskComposerContext { config: OptimizationConfig; repository: RepositoryInspection; machines: ExecutionMachineSummary[]; functionName: string; validationFunctionName?: string; validationReady: boolean; hasUnsavedChanges?: boolean }
+export interface TaskPreparationContext { projectId: string; functionName: string; sourceBranch: string; machineId: string; returnTo: 'task' | 'overview' }
+interface TaskDraft { functionName: string; sourceBranch: string; machineId: string; minutes: number; candidates: number; entryFile: string; performance: boolean }
+const newRequestId = () => 'web-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+
+/** An overview change updates only that field in an existing task draft. */
+export function updateTaskDraftSelection(projectId: string, patch: Partial<Pick<TaskDraft, 'functionName' | 'sourceBranch' | 'machineId'>>) {
+  const key = 'corepilot-task-draft:' + projectId;
+  try {
+    const draft = JSON.parse(sessionStorage.getItem(key) ?? 'null');
+    if (draft?.version === 1 && draft.form && typeof draft.form === 'object') sessionStorage.setItem(key, JSON.stringify({ ...draft, form: { ...draft.form, ...patch } }));
+  } catch { /* The saved project default remains authoritative when browser storage is unavailable. */ }
+}
+
+export function TaskComposer({ project, context, close, created, configure, returnFocus }: {
+  project: ProjectRecord; context: TaskComposerContext; close: () => void; created: (id: string) => void; configure: (page: string, preparation: TaskPreparationContext) => void; returnFocus?: HTMLElement | null;
+}) {
+  const storageKey = 'corepilot-task-draft:' + project.project_id;
+  const formId = React.useId();
+  const [form, setForm] = useState<TaskDraft>(() => {
+    const defaults: TaskDraft = { functionName: context.functionName, sourceBranch: project.source_branch ?? context.repository.current_branch ?? context.repository.branches[0]?.name ?? '',
+      machineId: isRegisteredRunner(context.config.runner) ? context.config.runner.machine_id : '', minutes: 60, candidates: 8, entryFile: '', performance: true };
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null');
+      if (!saved || saved.version !== 1) return defaults;
+      const draft = saved.form;
+      return { ...defaults, ...Object.fromEntries(Object.entries(defaults).filter(([key, value]) => typeof draft?.[key] === typeof value).map(([key]) => [key, draft[key]])) };
+    } catch { return defaults; }
+  });
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [check, setCheck] = useState('');
+  const [plan, setPlan] = useState<ValidationAssetDraft | null>(null);
+  const [planError, setPlanError] = useState('');
+  const [planRetry, setPlanRetry] = useState(0);
+  const id = useRef(newRequestId());
+  const selection = context.config.validation.library_package;
+  const owned = selection?.package_id === 'project-' + project.project_id.slice(0, 8);
+  const machine = context.machines.find(item => item.machine_id === form.machineId);
+  const mismatchedFunction = !!form.functionName.trim() && !!context.validationFunctionName && form.functionName.trim() !== context.validationFunctionName;
+  const needsValidation = !context.validationReady || mismatchedFunction;
+  const preparation = (): TaskPreparationContext => ({ projectId: project.project_id, functionName: form.functionName.trim(),
+    sourceBranch: form.sourceBranch, machineId: form.machineId, returnTo: 'task' });
+  const advancedModified = form.minutes !== 60 || form.candidates !== 8 || !!form.entryFile || !form.performance;
+  useEffect(() => { try { sessionStorage.setItem(storageKey, JSON.stringify({ version: 1, form })); } catch { /* Storage can be disabled by the browser. */ } }, [form, storageKey]);
+  useEffect(() => {
+    if (!owned || !selection) return;
+    let active = true; setPlan(null); setPlanError('');
+    request<ValidationAssetDraft>('/v1/projects/' + project.project_id + '/validation-assets/' + encodeURIComponent(selection.package_id) + '/' + encodeURIComponent(selection.package_version) + '/' + encodeURIComponent(selection.target_id))
+      .then(value => { if (active) setPlan(value); }).catch(failure => { if (active) setPlanError(failure.message); });
+    return () => { active = false; };
+  }, [project.project_id, selection?.package_id, selection?.package_version, selection?.target_id, planRetry]);
+  function change(patch: Partial<TaskDraft>) { setForm(current => ({ ...current, ...patch })); setError(''); setCheck(''); id.current = newRequestId(); }
+  async function submit(event: React.FormEvent) {
+    if (needsValidation) { event.preventDefault(); setError('请先为所选函数准备并确认匹配的测试方案。'); return; }
+    event.preventDefault(); setBusy('submit'); setError('');
+    try {
+      const result = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: form.functionName.trim() || undefined,
+        source_branch: form.sourceBranch || undefined, ...(form.machineId ? { machine_id: form.machineId } : {}),
+        entry_file: form.entryFile.trim() || null, enable_performance: form.performance,
+        budget: { time_limit_ms: form.minutes * 60_000, max_candidates: form.candidates } }, { requestId: id.current }) as { workflow_id: string };
+      try { sessionStorage.removeItem(storageKey); } catch { /* Optional local draft. */ }
+      created(result.workflow_id);
+    } catch (failure) { setError((failure as Error).message); } finally { setBusy(''); }
+  }
+  async function preflight() {
+    setBusy('check'); setError(''); setCheck('');
+    try {
+      const result = await api.projectAction(project.project_id, 'check', { function_name: form.functionName.trim() || undefined,
+        source_branch: form.sourceBranch || undefined, machine_id: form.machineId || undefined }) as { message: string };
+      setCheck(result.message);
+    } catch (failure) {
+      const message = (failure as Error).message;
+      setError(mismatchedFunction && message.includes('differs from testpack function')
+        ? `所选函数 ${form.functionName.trim()} 与当前测试方案 ${context.validationFunctionName} 不匹配，请先配置对应的测试方案。` : message);
+    } finally { setBusy(''); }
+  }
+  return <Modal title="创建优化任务" returnFocus={returnFocus} onClose={() => { if (busy !== 'submit') close(); }} wide className="task-dialog" footer={<div className="composer-actions"><span className="hint">预算：{form.minutes} 分钟 · {form.candidates} 个候选</span><div className="actions"><button type="button" disabled={!!busy} onClick={() => void preflight()}>{busy === 'check' ? '正在检查…' : '运行前检查'}</button><button className="primary" type="submit" form={formId} disabled={!!busy || needsValidation || !!form.machineId && !machine || owned && !plan}>{busy === 'submit' ? '正在提交…' : '开始优化'}<Icon name="arrow" size={15} /></button></div></div>}>
+    <form id={formId} className="task-composer" onSubmit={event => void submit(event)}>
+      <p className="composer-intro">项目 <strong>{project.name}</strong> · 以下选择仅用于本次任务。</p>
+      {context.hasUnsavedChanges && <div className="notice compact" role="status">该项目还有未保存的配置或测试修改。本次任务使用服务器上已保存的版本；需要使用这些修改时，请先返回相应页面保存。 <button type="button" className="text-btn" onClick={() => configure('validation', preparation())}>返回构建与验证</button></div>}
+      <fieldset disabled={!!busy} className="config-fields">
+        <div className="composer-fields">
+          <Field label="优化函数"><input autoFocus value={form.functionName} onChange={event => change({ functionName: event.target.value })} placeholder="输入目标函数名" /></Field>
+          <Field label="执行机器"><select required={context.machines.length > 0} value={form.machineId} onChange={event => change({ machineId: event.target.value })}>
+            <option value="" disabled={context.machines.length > 0}>{context.machines.length ? '选择已注册机器' : '沿用项目的现有执行配置'}</option>
+            {form.machineId && !machine && <option value={form.machineId} disabled>原执行机器不可用，请重新选择</option>}
+            {context.machines.map(item => <option key={item.machine_id} value={item.machine_id} disabled={!item.enabled}>{item.name} · {item.status === 'ONLINE' ? '在线' : item.status === 'OFFLINE' ? '离线' : '状态待检测'}{item.hardware ? ' · ' + item.hardware.architecture + ' / ' + item.hardware.cpu_count + ' CPU' : ''}</option>)}
+          </select></Field>
+        </div>
+        {needsValidation && <div className="notice compact" role="status">{mismatchedFunction ? `当前测试方案用于 ${context.validationFunctionName}，与所选函数 ${form.functionName.trim()} 不同。` : '当前测试方案尚未准备完成或未获资格。'}请为目标函数准备匹配的测试方案。 <button type="button" className="text-btn" onClick={() => configure('validation', preparation())}>准备构建与验证</button></div>}
+        <SourceBranchSelect repository={context.repository} value={form.sourceBranch} compact onChange={sourceBranch => change({ sourceBranch })} />
+        {machine && machine.status !== 'ONLINE' && <p className="notice compact">所选机器最近未确认在线。运行前检查会检测本次所选机器，不会创建实验。</p>}
+        <section className="submission-review" aria-label="本次任务条件"><div className="review-heading"><h3>测试条件</h3><span>已保存的方案</span></div>
+          <dl className="review-facts"><div><dt>模型</dt><dd>{context.config.model.model_id || '尚未配置'}</dd></div><div><dt>比较基线</dt><dd>{mismatchedFunction ? '需先选择目标函数对应的方案' : plan?.comparison_baseline ? <>{plan.comparison_baseline.library} · {plan.comparison_baseline.version}{plan.comparison_baseline.source_detail && <span className="resource-review-line">{plan.comparison_baseline.source_kind === 'branch' ? '来源分支：' : '来源：'}{plan.comparison_baseline.source_detail}</span>}</> : context.config.validation.baseline_artifact?.split(/[\\/]/).at(-1) || (selection ? '使用接入方案中固定的比较基线' : context.config.validation.testpack.trim() ? '使用已有测试方案的基线' : '尚未准备')}</dd></div></dl>
+          {!mismatchedFunction && plan ? <TestConditionsSummary draft={plan} /> : !mismatchedFunction && owned ? <div role="status">{planError ? <><Feedback text={'测试条件暂时无法读取：' + planError} bad /><button type="button" onClick={() => setPlanRetry(value => value + 1)}>重新读取测试条件</button></> : '正在读取输入范围、线程和采样条件…'}</div>
+            : <p className="hint">测试范围、资源、采样和误差规则由已有测试方案定义。运行前检查会核对配置；任务提交后固定本次方案。</p>}
+          {!needsValidation && <button type="button" className="text-btn" onClick={() => configure('validation', preparation())}>查看或调整构建与验证<Icon name="arrow" size={14} /></button>}
+          <p className="submission-budget"><strong>{form.performance ? '正确性 + 性能测量 + 独立复验' : '仅验证正确性，不测量性能'}</strong></p>
+        </section>
+        <Disclosure title="高级设置" summary={advancedModified ? form.minutes + ' 分钟 · ' + form.candidates + ' 个候选' + (form.entryFile ? ' · 已指定调查文件' : '') + (!form.performance ? ' · 仅正确性' : '') : '预算与调查范围'} modified={advancedModified}>
+          <div className="field-grid"><Field label="运行时间（分钟）"><input type="number" min={1} max={1440} required value={form.minutes} onChange={event => change({ minutes: Number(event.target.value) })} /></Field><Field label="最多评估候选数"><input type="number" min={1} max={1000} required value={form.candidates} onChange={event => change({ candidates: Number(event.target.value) })} /></Field></div>
+          <Field label="优先调查文件（可选）" help="指定调查入口，不扩大允许修改的源码范围。"><input value={form.entryFile} onChange={event => change({ entryFile: event.target.value })} placeholder="src/kernel.c" /></Field>
+          <label className="checkbox"><input type="checkbox" checked={form.performance} onChange={event => change({ performance: event.target.checked })} />执行性能优化与复验</label>
+          <p className="hint">预算用尽会保留源码和实验，可在任务详情增加预算并继续。</p>
+        </Disclosure>
+        <Disclosure title="项目与测试方案标识" summary="源码路径、配置与接入版本"><dl className="definition"><dt>源码目录</dt><dd><CopyValue value={project.repository_root} label="源码目录" /></dd><dt>配置文件</dt><dd><CopyValue value={project.config_path} label="配置路径" /></dd>{selection && <><dt>接入方案</dt><dd><CopyValue value={selection.package_id + '@' + selection.package_version + ' / ' + selection.target_id} label="接入方案" /></dd></>}</dl></Disclosure>
+      </fieldset>
+      {error && <><Feedback text={error} bad /><div className="run-next-steps"><button type="button" className="text-btn" disabled={!!busy} onClick={() => configure('validation', preparation())}>准备构建与验证<Icon name="arrow" size={14} /></button><button type="button" className="text-btn" disabled={!!busy} onClick={() => configure('settings', preparation())}>前往模型与机器<Icon name="arrow" size={14} /></button></div></>}
+      {check && <div className="preflight-result"><Feedback text="运行前检查通过。尚未启动构建或实验。" /><Disclosure title="查看检查详情"><pre className="check-output">{check}</pre></Disclosure></div>}
+    </form>
+  </Modal>;
+}

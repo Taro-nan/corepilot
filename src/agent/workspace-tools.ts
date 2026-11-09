@@ -18,6 +18,8 @@ export interface WorkspaceToolResult {
 }
 
 export interface WorkspaceToolOptions {
+  baselineCommit?: string;
+  candidateSubmission?: boolean;
   candidateSourceScope?: CandidateSourceScope;
   beforeSourceMutation?: () => void;
   buildContext?: () => Promise<unknown> | unknown;
@@ -139,7 +141,7 @@ function searchWithRipgrep(
     '--ignore-case',
     '--color', 'never',
     '--glob', '!.git/**',
-    '--glob', '!.phyopt/**',
+    '--glob', '!.corepilot/**',
     '--glob', '!node_modules/**',
     ...(regexp ? [] : ['--fixed-strings']),
     '--', query, '.',
@@ -247,7 +249,7 @@ export class WorkspaceToolset {
     if (this.options.candidateSourceScope) assertCandidateSourceScope(this.options.candidateSourceScope, [this.relative(this.resolve(relative))]);
     const normalized = relative.replace(/\\/g, '/').replace(/^\/+/, '');
     const first = normalized.split('/')[0];
-    if (first === '.git' || first === '.phyopt' || first === 'node_modules') throw new WorkspaceToolError(`protected workspace path: ${relative}`);
+    if (first === '.git' || first === '.corepilot' || first === 'node_modules') throw new WorkspaceToolError(`protected workspace path: ${relative}`);
   }
 
   private assertMutationAllowed(): void {
@@ -268,20 +270,22 @@ export class WorkspaceToolset {
     return this.findings ? structuredClone(this.findings) : null;
   }
 
+  restoreDevelopmentFindings(findings: DevelopmentFindings | null): void {
+    this.findings = findings ? structuredClone(findings) : null;
+  }
+
   private relative(absolute: string): string {
     return path.relative(this.root, absolute).split(path.sep).join('/');
   }
 
-  private listFiles(current = this.root): string[] {
-    const output: string[] = [];
+  private *listFiles(current = this.root): Generator<string> {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      if (entry.name === '.git' || entry.name === '.phyopt' || entry.name === 'node_modules') continue;
+      if (['.git', '.corepilot', 'node_modules', 'CMakeFiles'].includes(entry.name)) continue;
       const absolute = path.join(current, entry.name);
-      if (entry.isSymbolicLink()) throw new WorkspaceToolError(`symbolic link is not allowed: ${this.relative(absolute)}`);
-      if (entry.isDirectory()) output.push(...this.listFiles(absolute));
-      else output.push(this.relative(absolute));
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) yield* this.listFiles(absolute);
+      else yield this.relative(absolute);
     }
-    return output.sort();
   }
 
   private read(relative: string): string {
@@ -297,7 +301,11 @@ export class WorkspaceToolset {
         case 'list_tree': {
           const limit = args.limit === undefined ? 500 : Number(args.limit);
           if (!Number.isInteger(limit) || limit < 1 || limit > 5000) throw new WorkspaceToolError('limit must be an integer in 1..5000');
-          const files = this.listFiles();
+          const files: string[] = [];
+          for (const file of this.listFiles()) {
+            files.push(file);
+            if (files.length > limit) break;
+          }
           return result(JSON.stringify({ root: this.root, files: files.slice(0, limit), truncated: files.length > limit }));
         }
         case 'search_code': {
@@ -310,9 +318,15 @@ export class WorkspaceToolset {
           return this.execute('search_code', { query: `\\b${symbol.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, regex: true }, signal);
         }
         case 'find_references':
-          return this.execute('search_code', { query: asString(args, 'symbol'), regex: false }, signal);
-        case 'read_file':
-          return result(this.read(asString(args, 'path')));
+          return this.execute('search_code', { query: asString(args, 'query'), regex: false }, signal);
+        case 'read_file': {
+          const lines = this.read(asString(args, 'path')).split(/\r?\n/);
+          const start = asBoundedInteger(args, 'start_line', 1, 1, Number.MAX_SAFE_INTEGER);
+          const count = asBoundedInteger(args, 'line_count', 200, 1, 2000);
+          const content = lines.slice(start - 1, start - 1 + count).join('\n');
+          return result(JSON.stringify({ path: args.path, start_line: start, total_lines: lines.length,
+            truncated: start - 1 + count < lines.length, content }));
+        }
         case 'read_build_context':
           return result(JSON.stringify(await this.options.buildContext?.() ?? null));
         case 'read_target_profile':
@@ -422,11 +436,20 @@ export class WorkspaceToolset {
           this.assertMutationAllowed();
           const relative = asString(args, 'path');
           this.assertWritable(relative);
-          runGit(this.root, ['restore', '--', relative]);
+          runGit(this.root, ['restore', '--source', this.options.baselineCommit ?? 'HEAD', '--', relative]);
           return result(JSON.stringify({ path: relative, reverted: true }));
         }
         case 'git_status':
           return result(runGit(this.root, ['status', '--short']));
+        case 'finish_optimization':
+          return result(JSON.stringify({ finished: true, reason: asString(args, 'reason') }));
+        case 'submit_candidate': {
+          if (!this.options.candidateSubmission) throw new WorkspaceToolError('candidate submission is not configured');
+          const summary = asString(args, 'summary');
+          const status = runGit(this.root, ['status', '--porcelain']);
+          if (!status) throw new WorkspaceToolError('No source changes to submit. Stop without a Candidate if no justified transformation remains.');
+          return result(JSON.stringify({ submitted: true, summary, git_status: status, next: 'System will checkpoint the complete changes and run build/correctness/performance checks.' }));
+        }
         case 'show_diff':
           return result(runGit(this.root, ['diff', '--', ...(args.path ? [asString(args, 'path')] : [])]));
         case 'run_build':
@@ -455,7 +478,7 @@ export class WorkspaceToolset {
       { name: 'search_code', label: 'Search code', description: 'Search the repository with ripgrep. Use regex=false for literal text.', parameters: Type.Object({ query: Type.String(), regex: Type.Optional(Type.Boolean()) }, { additionalProperties: false }) },
       { name: 'find_symbol', label: 'Find symbol', description: 'Find exact symbol occurrences with ripgrep.', parameters: Type.Object({ symbol: Type.String() }, { additionalProperties: false }) },
       { name: 'find_references', label: 'Find references', description: 'Find literal references to a symbol or identifier.', parameters: Type.Object({ query: Type.String() }, { additionalProperties: false }) },
-      { name: 'read_file', label: 'Read file', description: 'Read one UTF-8 file relative to the Candidate workspace.', parameters: Type.Object({ path: Type.String() }, { additionalProperties: false }) },
+      { name: 'read_file', label: 'Read file', description: 'Read a bounded range of a UTF-8 source file. Lines start at 1; default 200 lines. Continue at the next range when truncated.', parameters: Type.Object({ path: Type.String(), start_line: Type.Optional(Type.Integer({ minimum: 1 })), line_count: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 })) }, { additionalProperties: false }) },
       { name: 'read_build_context', label: 'Read build context', description: 'Read the configured build command and repository context.', parameters: empty() },
       { name: 'read_target_profile', label: 'Read target profile', description: 'Read the configured target machine profile.', parameters: empty() },
       { name: 'read_performance_evidence', label: 'Read performance evidence', description: 'Read structured baseline, workload, and acceptance-policy evidence.', parameters: empty() },
@@ -482,6 +505,8 @@ export class WorkspaceToolset {
       { name: 'delete_file', label: 'Delete file', description: 'Delete one workspace file.', parameters: Type.Object({ path: Type.String() }, { additionalProperties: false }) },
       { name: 'move_file', label: 'Move file', description: 'Move one workspace file to a new relative path.', parameters: Type.Object({ from: Type.String(), to: Type.String() }, { additionalProperties: false }) },
       { name: 'revert_file', label: 'Revert file', description: 'Restore one workspace file from the Candidate baseline.', parameters: Type.Object({ path: Type.String() }, { additionalProperties: false }) },
+      { name: 'submit_candidate', label: 'Submit complete Candidate', description: 'Submit one complete source change for system-run validation. Finish every related edit first, including recreating files after a delete. File operations alone do not submit a Candidate. This grants no correctness, performance or approval decision.', parameters: Type.Object({ summary: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }) },
+      { name: 'finish_optimization', label: 'Finish investigation', description: 'End this optimization when no credible further transformation remains. Give an evidence-based reason; no Candidate or successful measurement is fabricated.', parameters: Type.Object({ reason: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }) },
       { name: 'git_status', label: 'Git status', description: 'Show concise Candidate workspace changes.', parameters: empty() },
       { name: 'show_diff', label: 'Show diff', description: 'Show the Candidate diff, optionally for one file.', parameters: Type.Object({ path: Type.Optional(Type.String()) }, { additionalProperties: false }) },
       { name: 'run_build', label: 'Run development build', description: 'Run the configured development build feedback command.', parameters: empty() },
@@ -490,6 +515,7 @@ export class WorkspaceToolset {
     ];
 
     const available = definitions.filter(({ name }) => {
+      if (name === 'submit_candidate') return this.options.candidateSubmission === true;
       if (name === 'run_build') return this.options.runBuild !== undefined;
       if (name === 'run_correctness') return this.options.runCorrectness !== undefined;
       if (name === 'run_performance') return this.options.runPerformance !== undefined;

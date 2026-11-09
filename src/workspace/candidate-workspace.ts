@@ -7,6 +7,7 @@ import { sourceTreeSha256 } from '../core/source-identity.js';
 export interface CandidateWorkspacePaths {
   repository: string;
   baseline_commit: string;
+  source_branch?: string;
   run_id: string;
   editing: string;
   validation: string;
@@ -30,6 +31,18 @@ export interface CandidateSourceIdentity {
   commit: string;
   tree: string;
   source_sha256: string;
+}
+
+/** Reattach existing worktrees without recreating or resetting the Agent's edits. */
+export function restoreCandidateWorkspace(state: CandidateWorkspaceState): CandidateWorkspaceState {
+  for (const root of [state.editing, state.validation]) {
+    if (!fs.existsSync(root)) throw new CandidateWorkspaceError(`saved workspace is missing: ${root}`);
+    const common = git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    const expected = git(state.repository, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    if (path.resolve(common) !== path.resolve(expected)) throw new CandidateWorkspaceError(`saved worktree belongs to another repository: ${root}`);
+  }
+  git(state.repository, ['rev-parse', '--verify', `${state.baseline_commit}^{commit}`]);
+  return structuredClone(state);
 }
 
 export class CandidateWorkspaceError extends Error {
@@ -91,10 +104,10 @@ function workspaceFileSha256(root: string, relative: string): string | null {
   return fileSha256(absolute);
 }
 
-function isBuildArtifact(relative: string): boolean {
+export function isBuildArtifact(relative: string): boolean {
   const normalized = relative.toLowerCase();
   return normalized.endsWith('.o') || normalized.endsWith('.obj') || normalized.endsWith('.a') || normalized.endsWith('.so') ||
-    normalized.endsWith('.d') || normalized.endsWith('.pyc') || normalized.includes('/cmakefiles/') || normalized.startsWith('.phyopt/');
+    normalized.endsWith('.d') || normalized.endsWith('.pyc') || normalized.includes('/cmakefiles/') || normalized.startsWith('.corepilot/');
 }
 
 function addDetached(repository: string, directory: string, commit: string): void {
@@ -118,8 +131,8 @@ export function ensureCandidateRepository(repositoryPath: string): { repository:
     const init = spawnSync('git', ['-C', repository, 'init', '--initial-branch=main'], { encoding: 'utf8', windowsHide: true });
     if (init.status !== 0) throw new CandidateWorkspaceError(`git init failed: ${(init.stderr ?? '').trim()}`);
     // 新仓库可能没有全局身份，使用仓库级临时身份保证 baseline 可记录。
-    spawnSync('git', ['-C', repository, 'config', 'user.email', 'phyopt@localhost'], { encoding: 'utf8', windowsHide: true });
-    spawnSync('git', ['-C', repository, 'config', 'user.name', 'PhyOpt Agent'], { encoding: 'utf8', windowsHide: true });
+    spawnSync('git', ['-C', repository, 'config', 'user.email', 'corepilot@localhost'], { encoding: 'utf8', windowsHide: true });
+    spawnSync('git', ['-C', repository, 'config', 'user.name', 'CorePilot Agent'], { encoding: 'utf8', windowsHide: true });
   } else {
     // 调用目录可能是仓库子目录；候选身份始终绑定实际 Git 根。
     repository = path.resolve((probe.stdout ?? '').trim());
@@ -128,7 +141,7 @@ export function ensureCandidateRepository(repositoryPath: string): { repository:
   if (head.status !== 0) {
     const add = spawnSync('git', ['-C', repository, 'add', '-A'], { encoding: 'utf8', windowsHide: true });
     if (add.status !== 0) throw new CandidateWorkspaceError(`git add baseline failed: ${(add.stderr ?? '').trim()}`);
-    const commit = spawnSync('git', ['-C', repository, 'commit', '--allow-empty', '-m', 'phyopt baseline'], { encoding: 'utf8', windowsHide: true });
+    const commit = spawnSync('git', ['-C', repository, 'commit', '--allow-empty', '-m', 'corepilot baseline'], { encoding: 'utf8', windowsHide: true });
     if (commit.status !== 0) throw new CandidateWorkspaceError(`git baseline commit failed: ${(commit.stderr ?? '').trim()}`);
   }
   // 已有仓库以用户当前检出的分支 HEAD 为基线；只有上面的新仓库初始化
@@ -171,6 +184,7 @@ export function createCandidateWorkspace(options: {
   worktreeRoot: string;
   runId: string;
   baselineCommit?: string;
+  sourceBranch?: string;
 }): CandidateWorkspaceState {
   const prepared = ensureCandidateRepository(options.repository);
   const repository = prepared.repository;
@@ -198,6 +212,7 @@ export function createCandidateWorkspace(options: {
   return {
     repository,
     baseline_commit: baselineCommit,
+    ...(options.sourceBranch ? { source_branch: options.sourceBranch } : {}),
     run_id: options.runId,
     editing,
     validation,
@@ -209,7 +224,7 @@ export function createCandidateWorkspace(options: {
 }
 
 /** 将编辑树源码记录为候选 checkpoint，并让验证树重新指向该 commit。 */
-export function checkpointCandidate(state: CandidateWorkspaceState, message = 'phyopt candidate checkpoint'): CandidateCheckpoint {
+export function checkpointCandidate(state: CandidateWorkspaceState, message = 'corepilot candidate checkpoint'): CandidateCheckpoint {
   if (!fs.existsSync(state.editing)) throw new CandidateWorkspaceError(`editing workspace does not exist: ${state.editing}`);
   assertInside(state.editing, path.dirname(path.dirname(state.editing)));
 

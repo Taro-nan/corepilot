@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { inspectFormalEvaluatorBundle } from './evaluator/formal-evaluator.js';
 import { startRunnerHttpServer } from './runner/http-server.js';
+import { RunnerClient } from './client/runner-client.js';
 
 interface RunnerCliOptions {
   host: string;
@@ -16,13 +17,24 @@ interface RunnerCliOptions {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args[0] === 'confirm-stopped') {
+    const options = new Map<string, string>();
+    for (let index = 1; index < args.length; index += 2) {
+      if (!['--endpoint', '--experiment', '--reviewer', '--reason'].includes(args[index]) || !args[index + 1]) throw new Error('confirm-stopped requires --endpoint --experiment --reviewer --reason');
+      options.set(args[index], args[index + 1]);
+    }
+    for (const key of ['--endpoint', '--experiment', '--reviewer', '--reason']) if (!options.get(key)) throw new Error(`Missing ${key}; confirm only after checking that the previous processes have stopped`);
+    const client = new RunnerClient({ baseUrl: options.get('--endpoint')!, token: process.env.COREPILOT_RUNNER_TOKEN ?? '' });
+    process.stdout.write(JSON.stringify(await client.confirmExperimentStopped(options.get('--experiment')!, options.get('--reviewer')!, options.get('--reason')!), null, 2) + '\n');
+    return;
+  }
   if (args[0] === 'qualify-evaluator') {
     runEvaluatorQualification(args.slice(1));
     return;
   }
   const parsed = parseArgs(args);
   if (parsed === null) {
-    process.stdout.write('Usage: corepilot-runner [--host 127.0.0.1] [--port 4327] [--db .phyopt/runner.sqlite] [--workspace-root <dir>] [--runner-id <id>] [--token <secret>] [--resource-enforcement disabled|required] [--allow-target-validated-digest <sha256>]\n       corepilot-runner qualify-evaluator --bundle <directory>\n');
+    process.stdout.write('Usage: corepilot-runner [--host 127.0.0.1] [--port 4327] [--db .corepilot/runner.sqlite] [--workspace-root <dir>] [--runner-id <id>] [--token <secret>] [--resource-enforcement disabled|required] [--allow-target-validated-digest <sha256>]\n       corepilot-runner qualify-evaluator --bundle <directory>\n       corepilot-runner confirm-stopped --endpoint <url> --experiment <id> --reviewer <name> --reason <termination evidence>\n');
     return;
   }
   const server = await startRunnerHttpServer(parsed);
@@ -57,8 +69,8 @@ function parseArgs(args: string[]): RunnerCliOptions | null {
   }
   const port = Number(values.get('--port') ?? '4327');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port must be an integer in 0..65535');
-  const token = values.get('--token') ?? process.env.PHYOPT_RUNNER_TOKEN ?? '';
-  if (!token) throw new Error('set PHYOPT_RUNNER_TOKEN or pass --token');
+  const token = values.get('--token') ?? process.env.COREPILOT_RUNNER_TOKEN ?? '';
+  if (!token) throw new Error('set COREPILOT_RUNNER_TOKEN or pass --token');
   const resourceValue = values.get('--resource-enforcement') ?? 'disabled';
   if (resourceValue !== 'disabled' && resourceValue !== 'required') throw new Error('--resource-enforcement must be disabled or required');
   const allowTargetValidatedDigest = values.get('--allow-target-validated-digest');
@@ -70,7 +82,7 @@ function parseArgs(args: string[]): RunnerCliOptions | null {
   return {
     host: values.get('--host') ?? '127.0.0.1',
     port,
-    dbPath: path.resolve(values.get('--db') ?? '.phyopt/runner.sqlite'),
+    dbPath: path.resolve(values.get('--db') ?? '.corepilot/runner.sqlite'),
     workspaceRoot: path.resolve(values.get('--workspace-root') ?? process.cwd()),
     token,
     resourceEnforcement: resourceValue === 'required' ? 'REQUIRED' : 'DISABLED',

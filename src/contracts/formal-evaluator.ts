@@ -1,5 +1,6 @@
 export const FORMAL_EVALUATOR_SCHEMA_VERSION = 1;
-export const FORMAL_EVALUATOR_DIGEST_ALGORITHM = 'phyopt-evaluator-content-sha256-v1';
+export const FORMAL_EVALUATOR_DIGEST_ALGORITHM = 'corepilot-evaluator-content-sha256-v1';
+export type EvaluatorContentDigestAlgorithm = `${string}-evaluator-content-sha256-v1`;
 
 export type EvaluatorQualificationState =
   | 'DRAFT'
@@ -65,6 +66,7 @@ export interface FormalCaseDefinition {
   case_id: string;
   parameters: Record<string, EvaluatorParameter>;
   threads: number;
+  execution?: { input_id: string; profile_id: string };
 }
 
 export interface FormalCorrectnessInventory {
@@ -79,6 +81,7 @@ export interface FormalWorkloadDefinition {
   threads: number;
   critical: boolean;
   weight: number;
+  execution?: { input_id: string; profile_id: string };
 }
 
 export interface FormalWorkloadInventory {
@@ -119,7 +122,7 @@ export interface FormalEvaluatorManifest {
     build_target: string;
     compatibility_scope: string;
   };
-  digest_algorithm: typeof FORMAL_EVALUATOR_DIGEST_ALGORITHM;
+  digest_algorithm: EvaluatorContentDigestAlgorithm;
   digest: string;
   qualification: {
     record: string;

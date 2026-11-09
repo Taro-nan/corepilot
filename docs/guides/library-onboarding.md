@@ -7,8 +7,8 @@
 ```text
 corepilot package init /path/to/new-library
 corepilot package init /path/to/new-library --target public_symbol
-corepilot package init /path/to/new-library --id my-library --version 0.1.0 --target public_symbol --config phyopt.yaml
-corepilot package init /path/to/new-library --output-root /path/to/phyopt-catalog
+corepilot package init /path/to/new-library --id my-library --version 0.1.0 --target public_symbol --config corepilot.yaml
+corepilot package init /path/to/new-library --output-root /path/to/corepilot-catalog
 ```
 
 路径、package ID 和 symbol 是使用者提供的值，以上不是本轮执行的命令。

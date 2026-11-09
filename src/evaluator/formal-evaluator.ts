@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { readValidationTestPlan } from './validation-test-plan.js';
+import { entryResources } from './execution-matrix.js';
+import { isMeasurementPrefix } from './measurement-protocol.js';
 import {
-  FORMAL_EVALUATOR_DIGEST_ALGORITHM,
   FORMAL_EVALUATOR_SCHEMA_VERSION,
   type EvaluatorQualificationCheck,
   type EvaluatorQualificationRecord,
@@ -94,6 +96,11 @@ export function evaluatorContentSha256(root: string): string {
 /** Compatibility name retained for callers; its value is the content digest. */
 export const evaluatorBundleSha256 = evaluatorContentSha256;
 
+/** The exact files included in the evaluator content/attestation boundary. */
+export function listFormalEvaluatorFiles(root: string): string[] {
+  return bundleFiles(path.resolve(root));
+}
+
 export function loadFormalEvaluatorBundle(
   root: string,
   options: LoadFormalEvaluatorOptions = {},
@@ -144,6 +151,11 @@ export function loadFormalEvaluatorBundle(
     problems,
   );
   validateInventories(manifest, correctness, workloads, problems);
+  try {
+    const plan = readValidationTestPlan(absoluteRoot, manifest);
+    for (const entry of [...correctness.cases, ...workloads.workloads]) entryResources(entry, plan, manifest);
+    if (plan.execution_matrix && [...correctness.cases, ...workloads.workloads].some(entry => !entry.execution)) problems.push('matrix inventories require execution profile references');
+  } catch (error) { problems.push((error as Error).message); }
   validatePoliciesAndScripts(absoluteRoot, manifest, problems);
   validateOutputSchema(absoluteRoot, manifest, problems);
   validateNoMutableDependencies(absoluteRoot, problems);
@@ -222,7 +234,7 @@ function parseManifest(value: unknown, problems: string[]): FormalEvaluatorManif
   const evaluatorId = requiredString(raw.evaluator_id, 'manifest.evaluator_id', problems);
   const version = requiredString(raw.version, 'manifest.version', problems);
   const owner = requiredString(raw.owner, 'manifest.owner', problems);
-  if (raw.digest_algorithm !== FORMAL_EVALUATOR_DIGEST_ALGORITHM) problems.push(`manifest.digest_algorithm must be ${FORMAL_EVALUATOR_DIGEST_ALGORITHM}`);
+  if (typeof raw.digest_algorithm !== 'string' || !/^[a-z][a-z0-9-]*-evaluator-content-sha256-v1$/.test(raw.digest_algorithm)) problems.push(`manifest.digest_algorithm must identify the evaluator-content-sha256-v1 method`);
   const digest = requiredString(raw.digest, 'manifest.digest', problems).toLowerCase();
   if (digest && !/^[0-9a-f]{64}$/.test(digest)) problems.push('manifest.digest must be a SHA-256 digest');
 
@@ -285,7 +297,7 @@ function parseManifest(value: unknown, problems: string[]): FormalEvaluatorManif
       build_target: requiredString(target.build_target, 'manifest.target.build_target', problems),
       compatibility_scope: requiredString(target.compatibility_scope, 'manifest.target.compatibility_scope', problems),
     },
-    digest_algorithm: FORMAL_EVALUATOR_DIGEST_ALGORITHM,
+    digest_algorithm: raw.digest_algorithm as FormalEvaluatorManifest['digest_algorithm'],
     digest,
     qualification: {
       record: qualificationRecord,
@@ -448,10 +460,11 @@ function parseWorkloadInventory(value: unknown, problems: string[]): FormalWorkl
     if (typeof item.critical !== 'boolean') problems.push(`workloads[${index}].critical must be boolean`);
     return [{
       workload_id: requiredString(item.workload_id, `${field}.workload_id`, problems),
-      parameters: parseInventoryParameters(item, field, new Set(['workload_id', 'parameters', 'threads', 'critical', 'weight']), problems),
+      parameters: parseInventoryParameters(item, field, new Set(['workload_id', 'parameters', 'threads', 'critical', 'weight', 'execution']), problems),
       threads: positiveInteger(item.threads, `${field}.threads`, problems),
       critical: item.critical === true,
       weight: nonNegativeNumber(item.weight, `${field}.weight`, problems),
+      ...parseExecutionReference(item.execution, field, problems),
     } satisfies FormalWorkloadDefinition];
   });
   return { schema_version: FORMAL_EVALUATOR_SCHEMA_VERSION, workloads };
@@ -460,9 +473,18 @@ function parseWorkloadInventory(value: unknown, problems: string[]): FormalWorkl
 function parseFormalCase(raw: Record<string, unknown>, field: string, problems: string[]): FormalCaseDefinition {
   return {
     case_id: requiredString(raw.case_id, `${field}.case_id`, problems),
-    parameters: parseInventoryParameters(raw, field, new Set(['case_id', 'parameters', 'threads']), problems),
+    parameters: parseInventoryParameters(raw, field, new Set(['case_id', 'parameters', 'threads', 'execution']), problems),
     threads: positiveInteger(raw.threads, `${field}.threads`, problems),
+    ...parseExecutionReference(raw.execution, field, problems),
   };
+}
+
+function parseExecutionReference(value: unknown, field: string, problems: string[]) {
+  if (value === undefined) return {};
+  const item = record(value, `${field}.execution`, problems);
+  if (!item) return {};
+  return { execution: { input_id: requiredString(item.input_id, `${field}.execution.input_id`, problems),
+    profile_id: requiredString(item.profile_id, `${field}.execution.profile_id`, problems) } };
 }
 
 const RESERVED_COMMAND_ARGUMENTS = new Set([
@@ -645,7 +667,7 @@ function validatePoliciesAndScripts(root: string, manifest: FormalEvaluatorManif
       problems.push(`${name} command script is missing: ${command.script}`);
       continue;
     }
-    const marker = fs.readFileSync(scriptPath, 'utf8').match(/PHYOPT_ARGUMENT_CONTRACT:\s*([^\r\n]+)/)?.[1]
+    const marker = fs.readFileSync(scriptPath, 'utf8').match(/\b[A-Z][A-Z0-9_]*_ARGUMENT_CONTRACT:\s*([^\r\n]+)/)?.[1]
       ?.split(',').map((item) => item.trim()).filter(Boolean) ?? [];
     if (JSON.stringify(marker) !== JSON.stringify(command.arguments)) problems.push(`${name} script argument contract differs from manifest`);
     const policy = readBundleJson(root, policyFile, problems);
@@ -654,14 +676,14 @@ function validatePoliciesAndScripts(root: string, manifest: FormalEvaluatorManif
       const policyArgs = stringArray(policyRecord.argument_contract, `${name} policy.argument_contract`, problems, true);
       if (JSON.stringify(policyArgs) !== JSON.stringify(command.arguments)) problems.push(`${name} policy argument contract differs from manifest`);
     }
-    if (command.measurement_prefix !== 'PHYOPT_MEASUREMENT') problems.push(`${name} measurement prefix is not Runner-compatible`);
+    if (!isMeasurementPrefix(command.measurement_prefix)) problems.push(`${name} measurement prefix is not Runner-compatible`);
   }
 }
 
 function validateOutputSchema(root: string, manifest: FormalEvaluatorManifest, problems: string[]): void {
   const schema = record(readBundleJson(root, manifest.performance.measurement.output_schema, problems), 'benchmark output schema', problems);
   if (!schema) return;
-  if (schema.line_prefix !== 'PHYOPT_MEASUREMENT') problems.push('benchmark output schema line_prefix must be PHYOPT_MEASUREMENT');
+  if (schema.line_prefix !== manifest.performance.command.measurement_prefix) problems.push('benchmark output schema line_prefix must match the declared measurement prefix');
   const required = ['kind', 'role', 'subject_id', 'sample_index', 'value', 'unit', 'validity', 'domain_payload'];
   const fields = stringArray(schema.required_fields, 'benchmark output schema.required_fields', problems, true);
   if (JSON.stringify(fields) !== JSON.stringify(required)) problems.push('benchmark output schema required_fields differs from Runner measurement contract');

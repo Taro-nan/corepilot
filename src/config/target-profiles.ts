@@ -6,7 +6,7 @@ import { targetConnectionId, targetLabel } from './target-config.js';
 
 /** 用户级目标记录只保存连接地址，不保存密码、私钥内容或 token。 */
 export function defaultTargetProfilesPath(homeDirectory = os.homedir()): string {
-  return path.join(homeDirectory, '.phyopt', 'targets.json');
+  return path.join(homeDirectory, '.corepilot', 'targets.json');
 }
 
 export class TargetProfilesStoreError extends Error {

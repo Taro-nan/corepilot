@@ -4,7 +4,7 @@ import path from 'node:path';
 
 /** User-scoped API key storage. It deliberately lives outside a project. */
 export function defaultCredentialsPath(homeDirectory = os.homedir()): string {
-  return path.join(homeDirectory, '.phyopt', 'credentials.json');
+  return path.join(homeDirectory, '.corepilot', 'credentials.json');
 }
 
 export function normalizeCredentialEndpoint(endpoint: string): string {

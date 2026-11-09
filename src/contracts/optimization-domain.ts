@@ -11,6 +11,9 @@ export const OPTIMIZATION_DOMAIN_SCHEMA_VERSION = 1;
 export type OptimizationTaskStatus =
   | 'CREATED'
   | 'RUNNING'
+  | 'BUDGET_EXHAUSTED'
+  | 'INTERRUPTED'
+  | 'VALIDATION_BLOCKED'
   | 'WAITING_APPROVAL'
   | 'COMPLETED'
   | 'FAILED'
@@ -109,12 +112,15 @@ export interface PerformanceWorkloadSummary {
   speedup: number;
   critical: boolean;
   regression: boolean;
+  ci_lower?: number;
+  ci_upper?: number;
+  conclusion?: 'IMPROVED' | 'REGRESSED' | 'INCONCLUSIVE';
 }
 
 export interface ExperimentEvaluationSummary {
   build: 'PASSED' | 'FAILED' | 'NOT_EXECUTED';
-  correctness: 'PASSED' | 'FAILED' | 'INCOMPLETE' | 'NOT_EXECUTED';
-  performance: 'PASSED' | 'FAILED' | 'NOT_EXECUTED';
+  correctness: 'PASSED' | 'FAILED' | 'INVALID' | 'INCOMPLETE' | 'NOT_EXECUTED';
+  performance: 'PASSED' | 'FAILED' | 'INVALID' | 'INCONCLUSIVE' | 'NOT_EXECUTED';
   correctness_coverage?: {
     planned: number;
     executed: number;
@@ -147,6 +153,7 @@ export interface Experiment {
 }
 
 export interface CommandExecution {
+  diagnostic_probe?: { probe_id: string; defect: string; input_id: string };
   schema_version: typeof OPTIMIZATION_DOMAIN_SCHEMA_VERSION;
   command_execution_id: string;
   experiment_id: string;

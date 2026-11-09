@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Check, Errors } from 'typebox/value';
 import type { TSchema } from 'typebox';
@@ -83,7 +84,12 @@ export function validateBinaryBundleBaselineDefinition(value: unknown): BinaryBu
   const definition = value as BinaryBundleBaselineDefinition;
   const files = [...definition.headers, ...definition.libraries];
   unique(files.map((item) => item.path), 'binary bundle file path');
-  unique(definition.libraries.map((item) => item.soname), 'binary bundle SONAME');
+  const sonameDigests = new Map<string, string>();
+  for (const library of definition.libraries) {
+    const existing = sonameDigests.get(library.soname);
+    if (existing && existing !== library.sha256) throw new LibraryPackageError(`binary bundle has conflicting bytes for SONAME '${library.soname}'`);
+    sonameDigests.set(library.soname, library.sha256);
+  }
   if (!definition.libraries.some((item) => item.role === 'ENTRY')) throw new LibraryPackageError('binary bundle requires an entry library');
   if (definition.sha256 !== binaryBundleIdentitySha256(definition)) throw new LibraryPackageError('binary bundle aggregate digest differs from file identities');
   const sonames = new Set(definition.libraries.map((item) => item.soname));
@@ -165,23 +171,33 @@ function contentDigest(root: string): string {
 export class LibraryPackageLoader {
   readonly packagesRoot: string;
   readonly evaluatorsRoot: string;
+  private readonly catalogRoot?: string;
 
-  constructor(options: { packagesRoot?: string; evaluatorsRoot?: string } = {}) {
+  constructor(options: { packagesRoot?: string; evaluatorsRoot?: string; catalogRoot?: string } = {}) {
     const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     this.packagesRoot = path.resolve(options.packagesRoot ?? path.join(repositoryRoot, 'packages'));
     this.evaluatorsRoot = path.resolve(options.evaluatorsRoot ?? path.join(repositoryRoot, 'evaluators'));
+    const catalog = options.catalogRoot ?? (!options.packagesRoot && !options.evaluatorsRoot
+      ? process.env.COREPILOT_CATALOG_DIR ?? path.join(os.homedir(), '.corepilot', 'catalog') : undefined);
+    this.catalogRoot = catalog ? path.resolve(catalog) : undefined;
+  }
+
+  private packageRoots(): string[] {
+    return [...new Set([this.packagesRoot, ...(this.catalogRoot ? [path.join(this.catalogRoot, 'packages')] : [])])];
   }
 
   listPackages(): Array<{ package_id: string; version: string; owner: string; qualification: LibraryPackageManifest['qualification'] }> {
-    if (!fs.existsSync(this.packagesRoot)) return [];
     const packages = [];
-    for (const packageEntry of fs.readdirSync(this.packagesRoot, { withFileTypes: true }).sort(byName)) {
-      if (!packageEntry.isDirectory()) continue;
-      for (const versionEntry of fs.readdirSync(path.join(this.packagesRoot, packageEntry.name), { withFileTypes: true }).sort(byName)) {
-        if (!versionEntry.isDirectory()) continue;
-        const loaded = this.loadPackage(packageEntry.name, versionEntry.name);
-        const { package_id, version, owner, qualification } = loaded.manifest;
-        packages.push({ package_id, version, owner, qualification });
+    for (const packagesRoot of this.packageRoots()) {
+      if (!fs.existsSync(packagesRoot)) continue;
+      for (const packageEntry of fs.readdirSync(packagesRoot, { withFileTypes: true }).sort(byName)) {
+        if (!packageEntry.isDirectory()) continue;
+        for (const versionEntry of fs.readdirSync(path.join(packagesRoot, packageEntry.name), { withFileTypes: true }).sort(byName)) {
+          if (!versionEntry.isDirectory()) continue;
+          const loaded = this.loadPackage(packageEntry.name, versionEntry.name);
+          const { package_id, version, owner, qualification } = loaded.manifest;
+          packages.push({ package_id, version, owner, qualification });
+        }
       }
     }
     return packages;
@@ -189,7 +205,9 @@ export class LibraryPackageLoader {
 
   loadPackage(packageId: string, packageVersion: string): LoadedLibraryPackage {
     validateLibraryPackageSelection({ package_id: packageId, package_version: packageVersion, target_id: 'identity-check' });
-    const root = containedPath(this.packagesRoot, `${packageId}/${packageVersion}`);
+    const roots = this.packageRoots().filter(directory => fs.existsSync(path.join(directory, packageId, packageVersion)));
+    if (roots.length > 1) throw new LibraryPackageError(`duplicate package identity '${packageId}@${packageVersion}' across catalogs`);
+    const root = containedPath(roots[0] ?? this.packagesRoot, `${packageId}/${packageVersion}`);
     const manifest = validateLibraryPackageManifest(readJson(containedPath(root, 'package.json')));
     if (manifest.package_id !== packageId || manifest.version !== packageVersion) throw new LibraryPackageError('package directory and manifest identity differ');
     const builds: Record<string, PackageBuildDefinition> = {};
@@ -241,7 +259,9 @@ export class LibraryPackageLoader {
   resolveEvaluator(loaded: LoadedLibraryPackage, evaluatorId: string, evaluatorVersion: string, options: { requireQualified?: boolean } = {}): LoadedFormalEvaluatorBundle {
     const definition = loaded.manifest.formal_evaluators.find((item) => item.evaluator_id === evaluatorId && item.version === evaluatorVersion);
     if (!definition) throw new LibraryPackageError(`unknown evaluator '${evaluatorId}@${evaluatorVersion}'`);
-    const bundle = loadFormalEvaluatorBundle(containedPath(this.evaluatorsRoot, definition.catalog_path), {
+    const overlayPackages = this.catalogRoot ? path.join(this.catalogRoot, 'packages') + path.sep : null;
+    const evaluators = overlayPackages && loaded.root.startsWith(overlayPackages) ? path.join(this.catalogRoot!, 'evaluators') : this.evaluatorsRoot;
+    const bundle = loadFormalEvaluatorBundle(containedPath(evaluators, definition.catalog_path), {
       requireQualified: options.requireQualified ?? false,
       expected: { evaluatorId, version: evaluatorVersion, digest: definition.digest },
     });

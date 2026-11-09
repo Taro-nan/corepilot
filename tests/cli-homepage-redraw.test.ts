@@ -51,7 +51,7 @@ function makeContext(): WorkbenchContext {
       project_root: 'D:/tmp/project',
     }),
     ensureBackend: async () => ({ url: 'http://127.0.0.1:7346', reused: false }),
-    getApi: async () => ({ listTasks: async () => ({ tasks: [] }) }),
+    getApi: async () => ({ listOptimizationWorkflows: async () => ({ workflows: [{ function_name: 'real_kernel', status: 'WAITING_APPROVAL' }] }), listTasks: async () => { throw new Error('homepage must not load generic mock tasks'); } }),
   } as unknown as WorkbenchContext;
 }
 
@@ -89,6 +89,7 @@ test('homepage is written once and the input area is redrawn on resize', async (
   assert.equal(titleCount, 1, 'welcome card is emitted once and never replayed during resize');
   assert.ok(footerCount >= 2, 'input-area footer is redrawn (live frame)');
   assert.doesNotMatch(output, /后台 http:\/\/|（复用）|（已启动）/, 'healthy backend details stay internal');
+  assert.match(output, /待审阅.*real_kernel/, 'recent activity comes from optimization workflows');
 });
 
 test('missing-config guidance stays in the live frame across terminal resize', async () => {
@@ -99,7 +100,7 @@ test('missing-config guidance stays in the live frame across terminal resize', a
     output += chunk.toString();
   });
   const context = {
-    configPath: 'D:/tmp/phyopt.yaml',
+    configPath: 'D:/tmp/corepilot.yaml',
     hasConfig: () => false,
     config: () => ({ model: null, target: null, project_root: 'D:/tmp', backend: { runner: 'workflow' as const } }),
     ensureBackend: async () => { throw new Error('must not start without config'); },
@@ -165,9 +166,9 @@ test('hides missing-config guidance while /model configuration is active', async
   let output = '';
   stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   const context = {
-    configPath: 'D:/tmp/phyopt.yaml',
-    credentialsPath: 'D:/tmp/phyopt-homepage-no-credentials-for-test.json',
-    modelSettingsPath: 'D:/tmp/phyopt-homepage-no-model-settings-for-test.json',
+    configPath: 'D:/tmp/corepilot.yaml',
+    credentialsPath: 'D:/tmp/corepilot-homepage-no-credentials-for-test.json',
+    modelSettingsPath: 'D:/tmp/corepilot-homepage-no-model-settings-for-test.json',
     hasConfig: () => false,
     config: () => ({ model: null, target: null, project_root: 'D:/tmp', backend: { runner: 'workflow' as const } }),
     ensureBackend: async () => { throw new Error('must not start without config'); },

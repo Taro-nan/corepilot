@@ -1,4 +1,5 @@
   {
-    "phyopt.serverUrl": "http://127.0.0.1:7346",
-    "phyopt.target": "mock-target"
+    "corepilot.serverUrl": "http://127.0.0.1:7346",
+    "corepilot.target": "mock-target",
+    "cmake.sourceDirectory": "D:/Projects/corepilot/fixtures/example-vector-repo"
   }

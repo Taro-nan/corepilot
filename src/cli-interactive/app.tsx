@@ -161,6 +161,7 @@ let lineSeq = 0;
 
 /** Short, honest verb for a task status — no UUID, no fabricated results. */
 const STATUS_VERB: Record<string, string> = {
+  CREATED: '已创建', GENERATING: '优化中', WAITING_APPROVAL: '待审阅', DELIVERABLE: '已交付', PERFORMANCE_THRESHOLD_NOT_MET: '未达性能目标',
   PENDING: '排队中',
   WAITING_FOR_RESOURCES: '等待资源',
   RUNNING: '执行中',
@@ -171,9 +172,9 @@ const STATUS_VERB: Record<string, string> = {
   RECOVERING: '恢复核对',
 };
 
-function activityLine(t: { status?: string; target?: { name?: string } }): string {
+function activityLine(t: { status?: string; function_name?: string }): string {
   const verb = STATUS_VERB[t.status ?? ''] ?? t.status ?? '任务';
-  const target = t.target?.name;
+  const target = t.function_name;
   return target ? `${verb} · ${target}` : verb;
 }
 
@@ -226,12 +227,14 @@ export function App({ ctx, nativeCursor = true, clipboardReader = readClipboardT
   const pendingEscapeRef = useRef(false);
   const clipboardPastePendingRef = useRef(false);
   const runningRef = useRef(false);
+  const commandAbortRef = useRef<AbortController | null>(null);
   const exitingRef = useRef(false);
   const exitPromiseRef = useRef<Promise<void> | null>(null);
 
   const requestExit = useCallback((): Promise<void> => {
     if (exitPromiseRef.current) return exitPromiseRef.current;
     exitingRef.current = true;
+    commandAbortRef.current?.abort();
     setExiting(true);
     // A command may currently be waiting on a prompt. Resolve that prompt so
     // its command promise cannot keep the CLI alive after the UI is gone.
@@ -298,6 +301,7 @@ export function App({ ctx, nativeCursor = true, clipboardReader = readClipboardT
       });
     return {
       interactive: true,
+      get signal() { return commandAbortRef.current?.signal; },
       print,
       error,
       prompt: (q, o) => ask(q, o?.secret ?? false, o?.initialValue ?? ''),
@@ -386,8 +390,8 @@ export function App({ ctx, nativeCursor = true, clipboardReader = readClipboardT
       if (hasConfig) {
         try {
           const api = await ctx.getApi();
-          const res = (await api.listTasks()) as { tasks?: { status?: string; target?: { name?: string } }[] };
-          recentActivity = (res.tasks ?? []).slice(0, 3).map(activityLine);
+          const res = await api.listOptimizationWorkflows(3);
+          recentActivity = res.workflows.map(activityLine);
         } catch {
           recentActivity = [];
         }
@@ -498,6 +502,7 @@ export function App({ ctx, nativeCursor = true, clipboardReader = readClipboardT
   async function submitCommand(commandOverride?: string): Promise<void> {
     if (runningRef.current) return;
     runningRef.current = true;
+    commandAbortRef.current = new AbortController();
     setCommandPending(true);
     const line = commandOverride ?? input;
     setEditor({ text: '', cursor: 0 });
@@ -520,6 +525,8 @@ export function App({ ctx, nativeCursor = true, clipboardReader = readClipboardT
         append(outcome.message, !outcome.ok);
       }
     } finally {
+      commandAbortRef.current = null;
+      pendingEscapeRef.current = false;
       if (ctx.hasConfig) setConfigMissing(!ctx.hasConfig());
       setCommandPending(false);
       runningRef.current = false;
@@ -635,7 +642,7 @@ export function App({ ctx, nativeCursor = true, clipboardReader = readClipboardT
     }
 
     if (commandPending) {
-      if (key.escape) pendingEscapeRef.current = true;
+      if (key.escape) { pendingEscapeRef.current = true; commandAbortRef.current?.abort(); }
       return;
     }
 

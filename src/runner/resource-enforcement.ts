@@ -11,6 +11,7 @@ export interface FormalResourceDeclaration {
   cpu_set: string;
   numa_node: number;
   threads: number;
+  omp_proc_bind?: 'close' | 'spread';
 }
 
 export interface FormalResourceContext {
@@ -19,6 +20,7 @@ export interface FormalResourceContext {
     cpu_affinity: { mechanism: 'taskset'; cpu_set: string };
     numa_policy: { mechanism: 'numactl'; policy: 'bind'; cpu_nodes: string; memory_nodes: string };
     thread_configuration: Record<'OMP_NUM_THREADS' | 'OPENBLAS_NUM_THREADS' | 'GOTO_NUM_THREADS', string>;
+    omp_proc_bind?: 'close' | 'spread';
   } | null;
   observed: {
     cpu_set: string | null;
@@ -33,6 +35,7 @@ export interface FormalResourceContext {
     thread_configuration: Record<'OMP_NUM_THREADS' | 'OPENBLAS_NUM_THREADS' | 'GOTO_NUM_THREADS', string | null>;
     max_runtime_threads: number | null;
     runtime_thread_observation: 'OBSERVED' | 'UNKNOWN';
+    omp_proc_bind?: string | null;
   };
   enforcement: {
     cpu_set: 'ENFORCED' | 'NOT_ENFORCED';
@@ -59,7 +62,8 @@ report="$1"
 expected_cpu="$2"
 expected_node="$3"
 expected_threads="$4"
-shift 4
+expected_placement="$5"
+shift 5
 cpu_set="$(awk '/^Cpus_allowed_list:/ {print $2}' /proc/self/status 2>/dev/null || true)"
 mems_allowed="$(awk '/^Mems_allowed_list:/ {print $2}' /proc/self/status 2>/dev/null || true)"
 set +e
@@ -86,6 +90,7 @@ tmp="$report.tmp.$$"
   printf 'omp_num_threads=%s\n' "$OMP_NUM_THREADS"
   printf 'openblas_num_threads=%s\n' "$OPENBLAS_NUM_THREADS"
   printf 'goto_num_threads=%s\n' "$GOTO_NUM_THREADS"
+  printf 'omp_proc_bind=%s\n' "$OMP_PROC_BIND"
 } >"$tmp"
 mv -f -- "$tmp" "$report"
 resource_error=""
@@ -96,6 +101,7 @@ fi
 if [[ "$OMP_NUM_THREADS" != "$expected_threads" || "$OPENBLAS_NUM_THREADS" != "$expected_threads" || "$GOTO_NUM_THREADS" != "$expected_threads" ]]; then
   if [[ -n "$resource_error" ]]; then resource_error="$resource_error; thread environment mismatch"; else resource_error="thread environment mismatch"; fi
 fi
+if [[ "$OMP_PROC_BIND" != "$expected_placement" ]]; then resource_error="OpenMP placement mismatch"; fi
 if [[ -n "$resource_error" ]]; then
   printf 'resource_error=%s\n' "$resource_error" >>"$report"
   exit 78
@@ -141,7 +147,7 @@ export async function runLinuxResourceConstrainedCommand(
   const cpuSet = declaredCpuSet as string;
   const node = String(declaration.numa_node);
   const threads = String(declaration.threads);
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-resource-'));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-resource-'));
   const reportPath = path.join(tempRoot, 'resource-context.env');
   const environment = {
     ...command.environment,
@@ -150,10 +156,10 @@ export async function runLinuxResourceConstrainedCommand(
     GOTO_NUM_THREADS: threads,
     OMP_DYNAMIC: 'FALSE',
     OMP_PLACES: command.environment.OMP_PLACES ?? 'cores',
-    OMP_PROC_BIND: command.environment.OMP_PROC_BIND ?? 'spread',
-    PHYOPT_DECLARED_CPU_SET: cpuSet,
-    PHYOPT_DECLARED_NUMA_NODE: node,
-    PHYOPT_RESOURCE_ENFORCEMENT: 'ENFORCED',
+    OMP_PROC_BIND: declaration.omp_proc_bind ?? command.environment.OMP_PROC_BIND ?? 'spread',
+    COREPILOT_DECLARED_CPU_SET: cpuSet,
+    COREPILOT_DECLARED_NUMA_NODE: node,
+    COREPILOT_RESOURCE_ENFORCEMENT: 'ENFORCED',
   };
   const wrapped: ValidationCommand = {
     executable: 'numactl',
@@ -161,8 +167,8 @@ export async function runLinuxResourceConstrainedCommand(
       `--cpunodebind=${node}`,
       `--membind=${node}`,
       'taskset', '--cpu-list', cpuSet,
-      'bash', '-c', RESOURCE_LAUNCHER, 'phyopt-resource-launcher',
-      reportPath, cpuSet, node, threads,
+      'bash', '-c', RESOURCE_LAUNCHER, 'corepilot-resource-launcher',
+      reportPath, cpuSet, node, threads, declaration.omp_proc_bind ?? command.environment.OMP_PROC_BIND ?? 'spread',
       command.executable, ...command.args,
     ],
     cwd: command.cwd,
@@ -277,12 +283,14 @@ function contextFromReport(
     errors.push(`observed ${maxRuntimeThreads} runtime threads exceeds declared ${declaration.threads}`);
   }
   if (report.get('resource_error')) errors.push(report.get('resource_error') as string);
+  if (declaration.omp_proc_bind && report.get('omp_proc_bind') !== declaration.omp_proc_bind) errors.push('observed OpenMP placement differs from declared policy');
   return {
     declared: { ...declaration, cpu_set: cpuSet },
     applied: {
       cpu_affinity: { mechanism: 'taskset', cpu_set: cpuSet },
       numa_policy: { mechanism: 'numactl', policy: 'bind', cpu_nodes: node, memory_nodes: node },
       thread_configuration: { OMP_NUM_THREADS: threads, OPENBLAS_NUM_THREADS: threads, GOTO_NUM_THREADS: threads },
+      ...(declaration.omp_proc_bind ? { omp_proc_bind: declaration.omp_proc_bind } : {}),
     },
     observed: {
       cpu_set: observedCpuSet,
@@ -292,6 +300,7 @@ function contextFromReport(
       thread_configuration: threadConfiguration,
       max_runtime_threads: maxRuntimeThreads,
       runtime_thread_observation: maxRuntimeThreads === null ? 'UNKNOWN' : 'OBSERVED',
+      ...(declaration.omp_proc_bind ? { omp_proc_bind: nullable(report.get('omp_proc_bind')) } : {}),
     },
     enforcement: {
       cpu_set: errors.some((item) => item.includes('CPU set')) ? 'NOT_ENFORCED' : 'ENFORCED',

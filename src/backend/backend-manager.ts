@@ -32,6 +32,8 @@ export class BackendError extends Error {
 }
 
 export interface ServeSpec {
+  web?: boolean;
+  dataDir?: string;
   host: string;
   port: number;
   dbPath: string;
@@ -77,6 +79,8 @@ export interface BackendManagerOptions {
 }
 
 export interface ManagedState {
+  web?: boolean;
+  data_dir?: string;
   pid: number | null;
   host: string;
   port: number;
@@ -158,7 +162,7 @@ export class BackendManager {
     if (first.kind === 'unknown-service') {
       throw new BackendError(
         'PORT_IN_USE',
-        `port ${this.options.spec.port} is held by a non-PhyOpt service; refusing to reuse or stop it`,
+        `port ${this.options.spec.port} is held by a non-CorePilot service; refusing to reuse or stop it`,
         `${first.detail}. Free the port or change backend.port / --port, then retry.`,
       );
     }
@@ -168,7 +172,7 @@ export class BackendManager {
       throw new BackendError('MODE_MISMATCH', `unexpected healthy probe state at ${this.options.url}`);
     }
     if (!this.options.allowSpawn) {
-      throw new BackendError('UNREACHABLE', `no PhyOpt backend at ${this.options.url}`, first.detail);
+      throw new BackendError('UNREACHABLE', `no CorePilot backend at ${this.options.url}`, first.detail);
     }
 
     log(`backend not found at ${this.options.url}; starting a managed local host...`);
@@ -216,6 +220,8 @@ export class BackendManager {
           api_version: result.health.api_version,
           started_at: new Date().toISOString(),
           shutdown_token: shutdownToken,
+          web: this.options.spec.web,
+          data_dir: this.options.spec.dataDir,
         });
         log(`backend ready at ${this.options.url} (pid ${child.pid ?? '?'})`);
         return { url: this.options.url, reused: false, started: true, health: result.health };
@@ -284,7 +290,7 @@ export interface ServeInvocation {
  * correct in tests, in the dev CLI and in the packaged tarball.
  */
 export function resolveServeInvocation(moduleUrl: string = import.meta.url): ServeInvocation {
-  const override = process.env.PHYOPT_SERVE_CMD;
+  const override = process.env.COREPILOT_SERVE_CMD;
   if (override && override.trim().length > 0) {
     const trimmed = override.trim();
     if (trimmed.startsWith('[')) {
@@ -313,6 +319,8 @@ export function resolveServeInvocation(moduleUrl: string = import.meta.url): Ser
 
 export function serveArgsToArgv(spec: ServeSpec): string[] {
   const argv = ['backend', 'serve', '--transport', spec.transport, '--host', spec.host, '--port', String(spec.port), '--db', spec.dbPath];
+  if (spec.web) argv.push('--web');
+  if (spec.dataDir) argv.push('--data-dir', spec.dataDir);
   if (spec.sshAlias) {
     argv.push('--ssh-alias', spec.sshAlias);
   } else if (spec.sshHost && spec.sshUsername) {
@@ -333,7 +341,8 @@ async function requestManagedShutdown(url: string, token: string): Promise<boole
   try {
     const response = await fetch(`${url.replace(/\/$/, '')}${MANAGED_SHUTDOWN_PATH}`, {
       method: 'POST',
-      headers: { [MANAGED_SHUTDOWN_TOKEN_HEADER]: token },
+      headers: { [MANAGED_SHUTDOWN_TOKEN_HEADER]: token,
+        ...(process.env.COREPILOT_SERVER_TOKEN ? { authorization: `Bearer ${process.env.COREPILOT_SERVER_TOKEN}` } : {}) },
       signal: controller.signal,
     });
     // Consume the response before returning so the backend can close its
@@ -349,7 +358,7 @@ async function requestManagedShutdown(url: string, token: string): Promise<boole
 
 /**
  * Stop a previously managed backend, using its persisted record. Refuses to
- * touch a port held by a non-PhyOpt service; clears a stale record instead of
+ * touch a port held by a non-CorePilot service; clears a stale record instead of
  * killing an unrelated pid.
  */
 export async function stopManagedBackend(options: {
@@ -369,7 +378,7 @@ export async function stopManagedBackend(options: {
   const result = await probe(options.url);
 
   if (result.kind === 'unknown-service') {
-    return { stopped: false, reason: `refusing to stop: ${options.url} is held by a non-PhyOpt service` };
+    return { stopped: false, reason: `refusing to stop: ${options.url} is held by a non-CorePilot service` };
   }
   if (result.kind === 'ok' || result.kind === 'incompatible') {
     if (!state.shutdown_token) return { stopped: false, reason: 'managed backend state has no shutdown token; state retained' };

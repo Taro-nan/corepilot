@@ -1,7 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { measurementPayload } from '../evaluator/measurement-protocol.js';
 import fs from 'node:fs';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import type { ValidationCommand, ValidationTestpack } from '../contracts/validation-testpack.js';
 import type { CommandExecution } from '../contracts/optimization-domain.js';
 import type { ExperimentExecutionStep, ExperimentStatusResponse } from '../contracts/runner-rpc.js';
@@ -10,6 +12,7 @@ import type { WorkspaceToolResult } from '../agent/workspace-tools.js';
 import { exportCandidateSourceArchive, refreshValidationWorkspace, type CandidateWorkspaceState } from './candidate-workspace.js';
 import { evaluatorBundleSha256 } from '../evaluator/formal-evaluator.js';
 import { validationCaseParameters } from '../testpack/validation-parameters.js';
+import { evaluateStatisticalPerformance } from '../evaluator/performance-statistics.js';
 
 export interface CommandRunResult {
   command_execution_id?: string;
@@ -64,6 +67,7 @@ export interface RemoteValidationTransport {
   readonly transport_type?: 'ssh' | 'mock';
   runRemote(argv: string[]): { command: string; argv: string[]; stdout: string; stderr: string; exit_code: number } | Promise<{ command: string; argv: string[]; stdout: string; stderr: string; exit_code: number }>;
   uploadFile?(localPath: string, remotePath: string): { exit_code: number; stderr: string } | Promise<{ exit_code: number; stderr: string }>;
+  downloadFile?(remotePath: string, localPath: string): { exit_code: number; stderr: string } | Promise<{ exit_code: number; stderr: string }>;
 }
 
 export interface RemoteValidationSession {
@@ -81,6 +85,8 @@ export interface StagedRemoteEvaluator {
 export interface StagedRemoteBaseline {
   remote_artifact: string;
   digest: string;
+  library_paths?: string[];
+  dependencies?: Array<{ path: string; sha256: string }>;
 }
 
 export interface RevalidationCycleResult {
@@ -96,6 +102,8 @@ export interface PerformanceCaseMeasurement {
   comparison_time?: number;
   candidate_samples?: number[];
   baseline_samples?: number[];
+  /** Preserved from structured Runner samples; gaps and duplicates must not become paired observations. */
+  sample_indices?: { baseline: number[]; candidate: number[] };
   current_time?: number;
   /** 可选的候选/基线比值置信区间下限；没有时由 ratio 本身保守估计。 */
   ci_lower?: number;
@@ -111,16 +119,21 @@ export interface PerformanceWorkloadResult {
   critical: boolean;
   regression: boolean;
   ci_lower?: number;
+  ci_upper?: number;
+  conclusion?: 'IMPROVED' | 'REGRESSED' | 'INCONCLUSIVE';
 }
 
 export interface PerformanceGateResult {
+  gate_version?: 2 | 3;
   passed: boolean;
   weighted_geomean: number;
-  overall_ci_lower: number;
-  key_case_ci_lower: number;
+  overall_ci_lower: number | null;
+  /** null when the frozen inventory declares no critical workloads. */
+  key_case_ci_lower: number | null;
   case_ratios: Record<string, number>;
   workloads: PerformanceWorkloadResult[];
   reason: string;
+  statistics?: import('../contracts/performance-statistics.js').PerformanceStatistics;
 }
 
 const MAX_OUTPUT = 2 * 1024 * 1024;
@@ -208,7 +221,8 @@ async function runRemoteValidationCommand(command: ValidationCommand, session: R
 }
 
 /** 在指定 worktree 执行一个有超时、可取消且截断输出的命令。 */
-export function runValidationCommand(command: ValidationCommand, workspace: string, options: { testpackDir?: string; sourceRoot?: string; signal?: AbortSignal; remote?: RemoteValidationSession } = {}): Promise<CommandRunResult> {
+export function runValidationCommand(command: ValidationCommand, workspace: string, options: { testpackDir?: string; sourceRoot?: string; signal?: AbortSignal; remote?: RemoteValidationSession;
+  onStdout?: (chunk: Buffer | string) => void; onStderr?: (chunk: Buffer | string) => void } = {}): Promise<CommandRunResult> {
   if (options.remote) return runRemoteValidationCommand(command, options.remote, options.signal);
   const cwd = commandCwd(command, workspace, options.testpackDir, options.sourceRoot);
   return new Promise((resolve) => {
@@ -245,8 +259,8 @@ export function runValidationCommand(command: ValidationCommand, workspace: stri
       child.kill();
     }, command.timeout_ms);
     options.signal?.addEventListener('abort', onAbort, { once: true });
-    child.stdout.on('data', (chunk: Buffer) => { stdout = appendBounded(stdout, chunk); });
-    child.stderr.on('data', (chunk: Buffer) => { stderr = appendBounded(stderr, chunk); });
+    child.stdout.on('data', (chunk: Buffer) => { stdout = appendBounded(stdout, chunk); options.onStdout?.(chunk); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr = appendBounded(stderr, chunk); options.onStderr?.(chunk); });
     child.on('error', (error) => {
       stderr = appendBounded(stderr, error.message);
       finish(commandResult(command, cwd, startedAt, started, { ok: false, exit_code: null, timed_out: timedOut, cancelled, stdout, stderr }));
@@ -275,7 +289,7 @@ function parseStructuredCorrectness(
     values.push(...(Array.isArray(parsed) ? parsed : [parsed]));
   } catch {
     for (const line of stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
-      const payload = line.startsWith('PHYOPT_MEASUREMENT ') ? line.slice('PHYOPT_MEASUREMENT '.length) : line;
+      const payload = measurementPayload(line) ?? line;
       try { values.push(JSON.parse(payload) as unknown); } catch { /* raw output remains on the command record */ }
     }
   }
@@ -508,7 +522,7 @@ export async function stageRemoteCandidate(input: {
   signal?: AbortSignal;
 }): Promise<RemoteValidationSession> {
   input.signal?.throwIfAborted();
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-source-'));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-source-'));
   const archive = path.join(tempRoot, 'candidate.tar');
   try {
     const exported = exportCandidateSourceArchive(input.workspace, archive);
@@ -549,7 +563,7 @@ export async function stageRemoteEvaluator(input: {
   if (!remoteWorkspace.startsWith('/')) throw new Error('remote evaluator workspace must be absolute');
   if (!input.transport.uploadFile) throw new Error('validation transport does not support evaluator upload');
 
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-evaluator-'));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-evaluator-'));
   const archive = path.join(tempRoot, 'evaluator.tar');
   try {
     const packed = spawnSync('tar', ['-cf', archive, '-C', evaluatorRoot, '.'], { encoding: 'utf8', windowsHide: true });
@@ -574,6 +588,8 @@ export async function stageRemoteEvaluator(input: {
  */
 export async function stageRemoteBaseline(input: {
   sourceArtifact: string;
+  /** Package baselines are readable on Control and uploaded to Runner; legacy callers use a Runner path. */
+  sourceLocation?: 'control' | 'runner';
   expectedDigest: string;
   transport: RemoteValidationTransport;
   remoteWorkspace: string;
@@ -583,7 +599,7 @@ export async function stageRemoteBaseline(input: {
   const sourceArtifact = input.sourceArtifact.replace(/\\/g, '/');
   const remoteWorkspace = input.remoteWorkspace.replace(/\\/g, '/').replace(/\/+$/, '');
   const expectedDigest = input.expectedDigest.toLowerCase();
-  if (!sourceArtifact.startsWith('/')) throw new Error('remote baseline source artifact must be absolute');
+  if (input.sourceLocation !== 'control' && !sourceArtifact.startsWith('/')) throw new Error('remote baseline source artifact must be absolute');
   if (!remoteWorkspace.startsWith('/')) throw new Error('remote baseline workspace must be absolute');
   if (!/^[0-9a-f]{64}$/.test(expectedDigest)) throw new Error('remote baseline digest must be a SHA-256 identity');
 
@@ -596,7 +612,13 @@ export async function stageRemoteBaseline(input: {
     return digest;
   };
 
-  const sourceDigest = await remoteSha256(sourceArtifact, 'remote baseline source artifact');
+  let sourceDigest: string;
+  if (input.sourceLocation === 'control') {
+    if (!fs.statSync(input.sourceArtifact).isFile()) throw new Error('Control baseline source must be a regular file');
+    const hash = createHash('sha256');
+    for await (const chunk of fs.createReadStream(input.sourceArtifact)) hash.update(chunk);
+    sourceDigest = hash.digest('hex');
+  } else sourceDigest = await remoteSha256(sourceArtifact, 'remote baseline source artifact');
   if (sourceDigest !== expectedDigest) {
     throw new Error(`baseline source digest mismatch (expected ${expectedDigest}, observed ${sourceDigest})`);
   }
@@ -604,14 +626,21 @@ export async function stageRemoteBaseline(input: {
   input.signal?.throwIfAborted();
   const remoteArtifact = `${remoteWorkspace}/artifact.so`;
   const temporaryArtifact = `${remoteArtifact}.tmp`;
-  if (sourceArtifact === remoteArtifact || sourceArtifact.startsWith(`${remoteWorkspace}/`)) {
+  if (input.sourceLocation !== 'control' && (sourceArtifact === remoteArtifact || sourceArtifact.startsWith(`${remoteWorkspace}/`))) {
     throw new Error('remote baseline source artifact must be outside its staging workspace');
   }
-  const staged = await Promise.resolve(input.transport.runRemote([
-    'bash',
-    '-lc',
-    `mkdir -p -- ${shellQuote(remoteWorkspace)} && rm -f -- ${shellQuote(temporaryArtifact)} ${shellQuote(remoteArtifact)} && cp -- ${shellQuote(sourceArtifact)} ${shellQuote(temporaryArtifact)} && mv -f -- ${shellQuote(temporaryArtifact)} ${shellQuote(remoteArtifact)}`,
-  ]));
+  if (input.sourceLocation === 'control') {
+    const prepared = await Promise.resolve(input.transport.runRemote(['bash', '-lc',
+      `mkdir -p -- ${shellQuote(remoteWorkspace)} && rm -f -- ${shellQuote(temporaryArtifact)} ${shellQuote(remoteArtifact)}`]));
+    if (prepared.exit_code !== 0) throw new Error(prepared.stderr || 'cannot prepare remote baseline workspace');
+  }
+  if (input.sourceLocation === 'control') {
+    if (!input.transport.uploadFile) throw new Error('validation transport does not support baseline upload');
+    const uploaded = await Promise.resolve(input.transport.uploadFile(input.sourceArtifact, temporaryArtifact));
+    if (uploaded.exit_code !== 0) throw new Error(uploaded.stderr || 'baseline upload failed');
+  }
+  const staged = await Promise.resolve(input.transport.runRemote(['bash', '-lc',
+    `${input.sourceLocation === 'control' ? '' : `mkdir -p -- ${shellQuote(remoteWorkspace)} && rm -f -- ${shellQuote(temporaryArtifact)} ${shellQuote(remoteArtifact)} && cp -- ${shellQuote(sourceArtifact)} ${shellQuote(temporaryArtifact)} && `}mv -f -- ${shellQuote(temporaryArtifact)} ${shellQuote(remoteArtifact)}`]));
   if (staged.exit_code !== 0) throw new Error(staged.stderr || 'cannot stage remote baseline artifact');
   const stagedDigest = await remoteSha256(remoteArtifact, 'staged baseline artifact');
   if (stagedDigest !== expectedDigest) {
@@ -658,7 +687,7 @@ export function parsePerformanceMeasurements(stdout: string): PerformanceCaseMea
   try { candidates.push(JSON.parse(stdout)); } catch { /* try line-delimited JSON */ }
   if (candidates.length === 0) {
     for (const line of stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
-      const payload = line.startsWith('PHYOPT_MEASUREMENT ') ? line.slice('PHYOPT_MEASUREMENT '.length) : line;
+      const payload = measurementPayload(line) ?? line;
       try { candidates.push(JSON.parse(payload)); } catch { /* raw output remains on the command fact */ }
     }
   }
@@ -679,6 +708,7 @@ export function parsePerformanceMeasurements(stdout: string): PerformanceCaseMea
       case_id,
       baseline_samples: samples.baseline.sort((left, right) => left.index - right.index).map((item) => item.value),
       candidate_samples: samples.candidate.sort((left, right) => left.index - right.index).map((item) => item.value),
+      sample_indices: { baseline: samples.baseline.map(item => item.index), candidate: samples.candidate.map(item => item.index) },
     }));
   }
   return values.filter((value): value is PerformanceCaseMeasurement => {
@@ -708,21 +738,31 @@ function median(values: readonly number[]): number {
 
 /** 计算性能停止线；候选必须同时满足整体和关键测例的下限。 */
 export function evaluatePerformanceGate(testpack: ValidationTestpack, measurements: readonly PerformanceCaseMeasurement[]): PerformanceGateResult {
+  if (testpack.performance.statistics) return evaluateStatisticalPerformance(testpack, measurements);
   const ratios: Record<string, number> = {};
   const weighted: Array<{ ratio: number; weight: number }> = [];
   const workloads: PerformanceWorkloadResult[] = [];
+  const declaredCases = new Map(testpack.performance.cases.map(item => [item.case_id, item]));
+  const seen = new Set<string>();
+  const problems: string[] = [];
   for (const measurement of measurements) {
-    const candidateSamples = measurement.candidate_samples?.filter((value) => Number.isFinite(value) && value > 0) ?? (typeof measurement.candidate_time === 'number' ? [measurement.candidate_time] : []);
-    const baselineSamples = measurement.baseline_samples?.filter((value) => Number.isFinite(value) && value > 0) ?? (typeof measurement.comparison_time === 'number' ? [measurement.comparison_time] : []);
+    const declared = declaredCases.get(measurement.case_id);
+    if (!declared || seen.has(measurement.case_id)) { problems.push(`undeclared or duplicate workload: ${measurement.case_id}`); continue; }
+    seen.add(measurement.case_id);
+    const candidateSamples = measurement.candidate_samples ?? (typeof measurement.candidate_time === 'number' ? [measurement.candidate_time] : []);
+    const baselineSamples = measurement.baseline_samples ?? (typeof measurement.comparison_time === 'number' ? [measurement.comparison_time] : []);
+    if (!candidateSamples.length || !baselineSamples.length || [...candidateSamples, ...baselineSamples].some(value => !Number.isFinite(value) || value <= 0)
+      || measurement.ci_lower !== undefined && (!Number.isFinite(measurement.ci_lower) || measurement.ci_lower < 0)) {
+      problems.push(`invalid samples or lower bound: ${measurement.case_id}`); continue;
+    }
     const candidateMedian = median(candidateSamples);
     const baselineMedian = median(baselineSamples);
     if (!(candidateMedian > 0) || !(baselineMedian > 0)) continue;
     const ratio = baselineMedian / candidateMedian;
     ratios[measurement.case_id] = ratio;
-    const declared = testpack.performance.cases.find((item) => item.case_id === measurement.case_id);
-    const weight = declared?.weight ?? 0;
+    const weight = declared.weight;
     if (weight > 0) weighted.push({ ratio, weight });
-    const critical = declared?.critical ?? testpack.performance.key_cases.includes(measurement.case_id);
+    const critical = declared.critical || testpack.performance.key_cases.includes(measurement.case_id);
     workloads.push({
       case_id: measurement.case_id,
       baseline_samples: [...baselineSamples],
@@ -737,20 +777,30 @@ export function evaluatePerformanceGate(testpack: ValidationTestpack, measuremen
   }
   const weightTotal = weighted.reduce((sum, item) => sum + item.weight, 0);
   const weightedGeomean = weightTotal > 0 ? Math.exp(weighted.reduce((sum, item) => sum + item.weight * Math.log(item.ratio), 0) / weightTotal) : 0;
-  const lowerBounds = measurements.map((item) => item.ci_lower ?? ratios[item.case_id] ?? 0).filter((value) => value > 0);
+  const missing = [...declaredCases.keys()].filter(id => !Object.hasOwn(ratios, id));
+  if (missing.length) problems.push(`missing valid workloads: ${missing.join(', ')}`);
+  const lowerBound = (id: string) => {
+    const reported = measurements.find(item => item.case_id === id)?.ci_lower;
+    return reported !== undefined && Number.isFinite(reported) && reported >= 0 ? reported : ratios[id] ?? 0;
+  };
+  const lowerBounds = [...declaredCases.keys()].map(lowerBound);
   const overall = lowerBounds.length > 0 ? Math.min(...lowerBounds) : 0;
-  const key = testpack.performance.key_cases.map((id) => measurements.find((item) => item.case_id === id)?.ci_lower ?? ratios[id] ?? 0);
-  const keyLower = key.length > 0 ? Math.min(...key) : 0;
+  const key = testpack.performance.key_cases.map(lowerBound);
+  const keyLower = key.length > 0 ? Math.min(...key) : null;
   const thresholds = testpack.performance.thresholds;
-  const passed = weightedGeomean >= thresholds.weighted_geomean_min && overall >= thresholds.overall_ci_lower_min && keyLower >= thresholds.key_case_ci_lower_min;
+  const passed = problems.length === 0 && weightedGeomean >= thresholds.weighted_geomean_min && overall >= thresholds.overall_ci_lower_min
+    && (keyLower === null || keyLower >= thresholds.key_case_ci_lower_min);
   return {
+    gate_version: 2,
     passed,
     weighted_geomean: weightedGeomean,
     overall_ci_lower: overall,
     key_case_ci_lower: keyLower,
     case_ratios: ratios,
     workloads,
-    reason: passed ? 'performance thresholds satisfied' : `performance thresholds not satisfied (weighted=${weightedGeomean}, overall=${overall}, key=${keyLower})`,
+    reason: problems.length ? `performance data incomplete or invalid: ${problems.join('; ')}` : passed
+      ? `performance thresholds satisfied${keyLower === null ? ' (no critical workloads declared; critical-workload gate not applicable)' : ''}`
+      : `performance thresholds not satisfied (weighted=${weightedGeomean}, overall=${overall}, key=${keyLower ?? 'not applicable'})`,
   };
 }
 

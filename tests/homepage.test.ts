@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BANNER_LINES, bannerText } from '../src/cli-interactive/banner.js';
 import {
   buildLogo,
   displayWidth,
@@ -50,12 +49,6 @@ test('buildLogo returns 5 equal-width block rows spelling CorePilot', () => {
   assert.ok(logo.every((row) => row.includes('█')));
   // CorePilot block glyphs are present and distinct.
   assert.ok(logo[2].includes('███'), 'middle row has the crossbars');
-});
-
-test('startup banner shares the CorePilot homepage wordmark', () => {
-  assert.deepEqual(BANNER_LINES.slice(1, -1), buildLogo().map(row => `  ${row}`));
-  assert.ok(bannerText().includes(`CorePilot v${VERSION}`));
-  assert.doesNotMatch(bannerText(), /phyopt|pyhopt/i);
 });
 
 test('truncatePath keeps the tail directory and never exceeds max', () => {

@@ -6,11 +6,11 @@
 
 | 保留材料 | 历史内容 | 当前读取方式 |
 | --- | --- | --- |
-| [旧配置指南](../guides/configuration.md) | `phyopt config init`、旧 schema、backend/ResourceGrant/exploration 字段 | 历史兼容与迁移参考；当前 public schema 以 [optimization-config](../../src/config/optimization-config.ts) 为准 |
-| [旧多候选指南](../guides/multi-candidate-optimize.md) | positional source、patch gate、多候选优选、workflow export | 不是当前标准入口；当前为有界 Hypothesis/反馈迭代，不据旧示例声明 Search 能力 |
-| [旧知识检索指南](../guides/knowledge-retrieval.md) | 本地知识检索、候选生成上下文与打包流程 | 保留历史说明，不作为当前 Onboarding/优化闭环的前置条件或本轮交付能力 |
-| [V2-0 design](../architecture/v2-0-design.md) | 特定历史提交的实现审计和设计 | 按原始基线阅读，不把其命令、状态和待办视为今天的事实 |
-| [2026-09-23 审计](../CURRENT-STATE.md) | 指定日期、指定提交的 As-Is 内容 | 不是新的 Approved Result 状态页 |
+| [旧配置指南](guides/configuration.md) | `phyopt config init`、旧 schema、backend/ResourceGrant/exploration 字段 | 历史兼容与迁移参考；当前 public schema 以 [optimization-config](../../src/config/optimization-config.ts) 为准 |
+| [旧多候选指南](guides/multi-candidate-optimize.md) | positional source、patch gate、多候选优选、workflow export | 不是当前标准入口；当前为有界 Hypothesis/反馈迭代，不据旧示例声明 Search 能力 |
+| [旧知识检索指南](guides/knowledge-retrieval.md) | 本地知识检索、候选生成上下文与打包流程 | 保留历史说明，不作为当前 Onboarding/优化闭环的前置条件或本轮交付能力 |
+| [V2-0 design](design/v2-0-design.md) | 特定历史提交的实现审计和设计 | 按原始基线阅读，不把其命令、状态和待办视为今天的事实 |
+| [2026-09-23 审计](assessments/CURRENT-STATE.md) | 指定日期、指定提交的 As-Is 内容 | 不是新的 Approved Result 状态页 |
 
 原优化工作流指南里的 `candidate generate/diff`、`test`、`benchmark`、`workflow export`、ResourceGrant、默认 mock 与旧配置语法已经从当前生命周期说明中移除。这里只保留其名称以解释历史资料；不提供为 C002 重放这些步骤的指令。
 
@@ -29,6 +29,6 @@ HMiPPI/HMPP、KML runtime、CPU compatibility policy 与 symbol closure 是已�
 | [Historical compatibility runtime](../../packages/ippi-ft/0.1.0/qualification/historical-compatibility-runtime-2026-10-08.json) | 历史兼容性恢复方法、binary identity 与 owner-review 要求 |
 | [当前 self-baseline definition](../../packages/ippi-ft/0.1.0/baselines/self-baseline.json) | 与历史外部 bundle 区分的 IPPI-FT self baseline |
 
-Schema/Loader 可读取 binary bundle 的描述，不代表正式 bundle staging 已支持。[Package Task 映射](../../src/library-package/task-definition.ts)当前明确拒绝将 `binary_bundle` 转成正式执行 testpack。本文不补齐该能力，也不重评历史 vendor runtime 或兼容性 policy。
+以上是 2026-10-15 的外部库调查与当时的能力边界。后续外部库上传、依赖检查及 Runner staging 的实际实现见[当前库接入指南](../guides/library-setup.md)和 [Package Task 映射](../../src/library-package/task-definition.ts)；不能用本页旧调查结论判断今天的能力，也不能把当前支持追溯为旧资产已取得资格。
 
 这些历史记录的冻结 snapshot 同时保留在 C002 原 Evidence inventory 内。[证据索引](../../examples/ippi-dilate3x3-success-case/evidence-index.md)列出已经核验的冻结文件 SHA；原始 vendor 资产和远端 runtime 路径本轮未重新访问，不能用调查摘要替代其字节核验。

@@ -1,0 +1,10 @@
+# Add to an existing HTTPS server block with your certificate configuration.
+# Serve CorePilot at the origin root; path-prefix hosting is not supported in V1.
+location / {
+    proxy_pass http://127.0.0.1:4317;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 180s;
+    proxy_buffering off;
+}

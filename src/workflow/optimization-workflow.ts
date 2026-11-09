@@ -4,6 +4,7 @@ import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 export interface OptimizationWorkflowStore {
   save(record: OptimizationWorkflowRecord): void;
   get(workflowId: string): OptimizationWorkflowRecord | null;
+  list(limit?: number): OptimizationWorkflowRecord[];
 }
 
 /** SQLite 持久化适配器；工作流 JSON 是唯一需要保存的运行状态。 */
@@ -18,6 +19,11 @@ export class SqliteOptimizationWorkflowStore implements OptimizationWorkflowStor
     const json = this.taskStore.getOptimizationWorkflowJson(workflowId);
     if (!json) return null;
     return JSON.parse(json) as OptimizationWorkflowRecord;
+  }
+
+  list(limit = 50): OptimizationWorkflowRecord[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('limit must be an integer in 1..200');
+    return this.taskStore.listOptimizationWorkflowJson(limit).map(json => JSON.parse(json) as OptimizationWorkflowRecord);
   }
 }
 

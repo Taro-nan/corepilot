@@ -7,7 +7,12 @@ import type {
   RunnerHealth,
   RunnerMachineInfo,
   SubmitExperimentResponse,
+  StagedSourceArchive,
+  RunnerExecutionOutput,
 } from '../contracts/runner-rpc.js';
+import { RUNNER_PROTOCOL_VERSION } from '../contracts/runner-rpc.js';
+import type { RunnerToolchain } from '../contracts/build-planning.js';
+import type { RunnerBundleInspection, RunnerBundleInspectionRequest } from '../contracts/baseline-bundle.js';
 
 interface RunnerErrorBody {
   error?: { code?: string; message?: string };
@@ -52,6 +57,24 @@ export class RunnerClient {
   machine(signal?: AbortSignal): Promise<RunnerMachineInfo> {
     return this.request('GET', '/machine', undefined, signal);
   }
+  toolchain(signal?: AbortSignal): Promise<RunnerToolchain> {
+    return this.request('GET', '/toolchain', undefined, signal);
+  }
+
+  /** Read-only connectivity and protocol check, independent of an optimization task. */
+  async probe(signal?: AbortSignal): Promise<{ health: RunnerHealth; machine: RunnerMachineInfo }> {
+    const health = await this.health(signal);
+    if (!health || health.status !== 'READY' || health.protocol_version !== RUNNER_PROTOCOL_VERSION || typeof health.runner_id !== 'string'
+      || !['REQUIRED', 'DISABLED'].includes(health.resource_enforcement)) {
+      throw new RunnerClientError(null, 'PROTOCOL_MISMATCH', 'Runner 未就绪或协议版本不兼容，请检查 RPC 地址与 Runner 版本。');
+    }
+    const machine = await this.machine(signal);
+    if (!machine || typeof machine.hostname !== 'string' || typeof machine.architecture !== 'string'
+      || !Number.isInteger(machine.cpu_count) || machine.cpu_count < 1 || typeof machine.machine_identity_sha256 !== 'string') {
+      throw new RunnerClientError(null, 'INVALID_MACHINE_INFO', 'Runner 返回的机器信息不完整，请检查 Runner 版本。');
+    }
+    return { health, machine };
+  }
 
   submitExperiment(plan: ExperimentExecutionPlan, signal?: AbortSignal): Promise<SubmitExperimentResponse> {
     return this.request('POST', '/experiments', plan, signal);
@@ -65,12 +88,40 @@ export class RunnerClient {
     return this.request('POST', `/experiments/${encodeURIComponent(experimentId)}/cancel`, {}, signal);
   }
 
+  confirmExperimentStopped(experimentId: string, reviewer: string, reason: string): Promise<ExperimentStatusResponse> {
+    return this.request('POST', `/experiments/${encodeURIComponent(experimentId)}/confirm-stopped`, { confirmed_stopped: true, reviewer, reason });
+  }
+
   getMeasurements(experimentId: string, signal?: AbortSignal): Promise<ExperimentMeasurementsResponse> {
     return this.request('GET', `/experiments/${encodeURIComponent(experimentId)}/measurements`, undefined, signal);
   }
 
   getCommandExecutions(experimentId: string, signal?: AbortSignal): Promise<ExperimentCommandsResponse> {
     return this.request('GET', `/experiments/${encodeURIComponent(experimentId)}/commands`, undefined, signal);
+  }
+
+  getExecutionOutput(experimentId: string): Promise<RunnerExecutionOutput | null> {
+    return this.request('GET', `/experiments/${encodeURIComponent(experimentId)}/output`);
+  }
+
+  async uploadSourceArchive(input: { filename: string; sha256: string; workspacePath: string }, signal?: AbortSignal): Promise<StagedSourceArchive> {
+    const { createReadStream } = await import('node:fs');
+    const stream = createReadStream(input.filename);
+    const query = new URLSearchParams({ sha256: input.sha256, workspace_path: input.workspacePath });
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/source-archives?${query}`, { method: 'PUT',
+        headers: { authorization: `Bearer ${this.options.token}`, 'content-type': 'application/gzip' },
+        body: stream as unknown as RequestInit['body'], duplex: 'half',
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(900_000)]) : AbortSignal.timeout(900_000),
+      } as RequestInit);
+      const result = await response.json() as StagedSourceArchive & RunnerErrorBody;
+      if (!response.ok) throw new RunnerClientError(response.status, result.error?.code ?? 'SOURCE_UPLOAD_FAILED', result.error?.message ?? `HTTP ${response.status}`);
+      return result;
+    } finally { stream.destroy(); }
+  }
+
+  inspectBaselineBundle(input: RunnerBundleInspectionRequest, signal?: AbortSignal): Promise<RunnerBundleInspection> {
+    return this.request('POST', '/baseline-bundles/inspect', input, signal);
   }
 
   private async request<T>(method: string, pathname: string, body?: unknown, signal?: AbortSignal): Promise<T> {

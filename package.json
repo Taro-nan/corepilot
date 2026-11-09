@@ -9,31 +9,37 @@
   },
   "bin": {
     "corepilot": "./dist/entry.js",
-    "corepilot-runner": "./dist/runner-entry.js",
-    "phyopt": "./dist/entry.js",
-    "phyopt-runner": "./dist/runner-entry.js"
+    "corepilot-runner": "./dist/runner-entry.js"
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc && node scripts/prune-dist.mjs && vite build --config web/vite.config.ts",
+    "check:repo": "node scripts/check-repository.mjs",
+    "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json",
     "dev": "tsx src/entry.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "test:web": "playwright test --config web/playwright.config.ts",
     "test": "node --import tsx --test --test-concurrency=1 \"tests/*.test.ts\"",
     "postinstall": "node scripts/apply-ink-patch.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/vscode": "^1.136.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "3.9.2",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vite": "^7.3.7"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-session-backend-sqlite-node": "0.85.1",
     "ink": "^7.1.1",
     "react": "^19.3.0",
+    "react-dom": "^19.3.1",
     "typebox": "1.3.7",
     "undici": "^7.29.1",
     "yaml": "^2.9.1"

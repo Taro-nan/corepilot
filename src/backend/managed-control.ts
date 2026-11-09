@@ -4,6 +4,6 @@
  * passed through the environment, and persisted only in the user's backend
  * state file.
  */
-export const MANAGED_BACKEND_TOKEN_ENV = 'PHYOPT_MANAGED_BACKEND_TOKEN';
+export const MANAGED_BACKEND_TOKEN_ENV = 'COREPILOT_MANAGED_BACKEND_TOKEN';
 export const MANAGED_SHUTDOWN_PATH = '/v1/admin/shutdown';
-export const MANAGED_SHUTDOWN_TOKEN_HEADER = 'x-phyopt-shutdown-token';
+export const MANAGED_SHUTDOWN_TOKEN_HEADER = 'x-corepilot-shutdown-token';

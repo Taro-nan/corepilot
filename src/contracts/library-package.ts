@@ -39,7 +39,7 @@ export const BinaryBundleBaselineDefinitionSchema = Type.Object({
   state: Type.Union([Type.Literal('DRAFT'), Type.Literal('VERIFIED'), Type.Literal('INVALID')]),
   digest_algorithm: Type.Literal('sha256-file-identities-v1'),
   sha256: digest,
-  headers: Type.Array(Type.Object({ path: relativePath, sha256: digest }, { additionalProperties: false }), { minItems: 1 }),
+  headers: Type.Array(Type.Object({ path: relativePath, sha256: digest }, { additionalProperties: false })),
   libraries: Type.Array(Type.Object({
     path: relativePath,
     role: Type.Union([Type.Literal('ENTRY'), Type.Literal('BUNDLED_DEPENDENCY'), Type.Literal('OTHER')]),
@@ -78,7 +78,7 @@ export const LibraryPackageManifestSchema = Type.Object({
     target_compatibility: strings,
   }, { additionalProperties: false }),
   qualification: Type.Object({
-    state: Type.Union((['DRAFT', 'REVIEWED', 'QUALIFIED', 'REJECTED', 'SUPERSEDED'] as const).map((state) => Type.Literal(state))),
+    state: Type.Union([Type.Literal('DRAFT'), Type.Literal('REVIEWED'), Type.Literal('QUALIFIED'), Type.Literal('REJECTED'), Type.Literal('SUPERSEDED')]),
     reviewer: Type.Union([text, Type.Null()]),
     reviewed_at: Type.Union([text, Type.Null()]),
   }, { additionalProperties: false }),

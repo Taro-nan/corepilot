@@ -6,6 +6,11 @@ import { runPiAgentRuntime } from '../agent/pi-agent-runtime.js';
 import { writeOnboardingDraft, type OnboardingEvidence } from './draft-writer.js';
 import { RepositoryInspector, type RepositoryInspection } from './repository-inspector.js';
 
+export const MAX_ONBOARDING_TARGETS = 50;
+export class InvalidTargetSelectionError extends Error {
+  constructor(message: string) { super(message); this.name = 'InvalidTargetSelectionError'; }
+}
+
 export interface OnboardingDecision {
   selected_symbol: string | null;
   build_kind: string | null;
@@ -13,12 +18,14 @@ export interface OnboardingDecision {
 }
 
 export interface OnboardingOptions {
+  buildDefinition?: import('../contracts/library-package.js').PackageBuildDefinition;
   repositoryRoot: string;
   packagesRoot: string;
   evaluatorsRoot: string;
   packageId?: string;
   version?: string;
   targetSymbol?: string;
+  targetSymbols?: string[];
   pi?: { model: Model<any>; streamFn: StreamFn };
   runAgent?: (tools: readonly AgentTool[], inspection: RepositoryInspection) => Promise<OnboardingDecision>;
 }
@@ -158,8 +165,14 @@ export class OnboardingToolset {
 }
 
 export async function onboardLibraryRepository(options: OnboardingOptions): Promise<{
-  packagePath: string; evaluatorPath: string; evidence: OnboardingEvidence; inspection: RepositoryInspection;
+  packagePath: string; evaluatorPath: string; evaluatorPaths: string[];
+  targets: Array<{ symbol: string | null; targetId: string; evaluatorPath: string }>;
+  evidence: OnboardingEvidence; inspection: RepositoryInspection;
 }> {
+  if (options.targetSymbol !== undefined && options.targetSymbols !== undefined) throw new InvalidTargetSelectionError('specify targetSymbol or targetSymbols, not both');
+  const requestedSymbols = options.targetSymbols ?? (options.targetSymbol ? [options.targetSymbol] : []);
+  if (requestedSymbols.length > MAX_ONBOARDING_TARGETS) throw new InvalidTargetSelectionError(`select at most ${MAX_ONBOARDING_TARGETS} target symbols per draft`);
+  if (requestedSymbols.some(symbol => !symbol.trim()) || new Set(requestedSymbols).size !== requestedSymbols.length) throw new InvalidTargetSelectionError('target symbols must be non-empty and unique');
   const inspector = new RepositoryInspector(options.repositoryRoot);
   const inspection = inspector.inspect();
   const tools = new OnboardingToolset(inspector, inspection);
@@ -169,8 +182,8 @@ export async function onboardLibraryRepository(options: OnboardingOptions): Prom
     decision = await options.runAgent(tools.asAgentTools(), inspection);
     agent = { runtime: 'pi-agent-core', model_id: 'injected-test-runtime', completed: true, error: null, observations: decision.observations };
   } else if (options.pi) {
-    const targetInstruction = options.targetSymbol
-      ? `The owner requested target symbol '${options.targetSymbol}'. Select it only if public API evidence confirms it.`
+    const targetInstruction = requestedSymbols.length
+      ? `The owner selected these target symbols: ${JSON.stringify(requestedSymbols)}. Check their public API evidence; submit one observed selected_symbol or null. The system will retain the owner's complete selection.`
       : 'The owner has not selected a target. Keep selected_symbol null and use observations to identify 3-5 promising evidence-backed target candidates for human choice.';
     const runtime = await runPiAgentRuntime(
       `Inspect this repository using only the provided read-only tools. ${targetInstruction} Select a build kind only when supported by evidence. Submit findings once. Repository summary: ${JSON.stringify({ name: inspection.repository.name, files: inspection.files.slice(0, 200), builds: inspection.build_candidates, functions: inspection.functions.slice(0, 100), unknowns: inspection.unknowns })}`,
@@ -195,17 +208,19 @@ export async function onboardLibraryRepository(options: OnboardingOptions): Prom
   if (decision) {
     if (decision.selected_symbol !== null && !inspection.functions.some((item) => item.symbol === decision.selected_symbol)) throw new Error('agent selected an undiscovered symbol');
     if (decision.build_kind !== null && !inspection.build_candidates.some((item) => item.kind === decision.build_kind)) throw new Error('agent selected an undiscovered build path');
-    if (!options.targetSymbol && decision.selected_symbol !== null) throw new Error('agent selected a target before owner confirmation');
+    if (decision.selected_symbol !== null && !requestedSymbols.includes(decision.selected_symbol)) throw new Error('agent selected a target before owner confirmation');
   }
-  const symbol = options.targetSymbol ?? decision?.selected_symbol ?? undefined;
-  const target = symbol ? inspection.functions.find((item) => item.symbol === symbol) : undefined;
-  if (symbol && !target) throw new Error(`target symbol is not confirmed by public API evidence: ${symbol}`);
+  const targets = requestedSymbols.map(symbol => {
+    const target = inspection.functions.find(item => item.symbol === symbol);
+    if (!target) throw new InvalidTargetSelectionError(`target symbol is not confirmed by public API evidence: ${symbol}`);
+    return target;
+  });
   const packageId = options.packageId ?? slug(path.basename(inspector.root));
   inspector.assertUnchanged();
   const draft = writeOnboardingDraft({ ...inspection, inspected_files: inspector.inspectedFiles() }, {
     packagesRoot: path.resolve(options.packagesRoot), evaluatorsRoot: path.resolve(options.evaluatorsRoot),
-    packageId, version: options.version ?? '0.1.0', target: target ?? null,
-    buildKind: decision ? decision.build_kind : undefined, agent,
+    packageId, version: options.version ?? '0.1.0', targets,
+    buildKind: decision ? decision.build_kind : undefined, agent, buildDefinition: options.buildDefinition,
   });
   return { ...draft, inspection };
 }

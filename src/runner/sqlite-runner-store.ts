@@ -60,6 +60,8 @@ export class SqliteRunnerStore implements RunnerStore {
       );
       CREATE INDEX IF NOT EXISTS runner_measurements_experiment
         ON runner_measurements(experiment_id, kind, subject_id, role, sample_index);
+      INSERT OR IGNORE INTO runner_metadata(key, value)
+        SELECT 'queue_sequence', CAST(COALESCE(MAX(json_extract(record_json, '$.queue.sequence')), 0) AS TEXT) FROM runner_executions;
     `);
   }
 
@@ -96,6 +98,11 @@ export class SqliteRunnerStore implements RunnerStore {
     );
   }
 
+  allocateQueueSequence(): number {
+    const row = this.db.prepare("UPDATE runner_metadata SET value = CAST(value AS INTEGER) + 1 WHERE key = 'queue_sequence' RETURNING value").get() as { value: string };
+    return Number(row.value);
+  }
+
   saveExecution(record: ExecutionStateRecord): void {
     const result = this.db.prepare(`
       UPDATE runner_executions
@@ -118,14 +125,22 @@ export class SqliteRunnerStore implements RunnerStore {
   }
 
   listExecutions(statuses: readonly ExperimentStatus[] = []): ExecutionStateRecord[] {
-    const rows = this.db.prepare('SELECT record_json FROM runner_executions ORDER BY created_at, experiment_id').all() as unknown as JsonRow[];
-    const records = rows.map((row) => JSON.parse(row.record_json) as ExecutionStateRecord);
-    return statuses.length === 0 ? records : records.filter((record) => statuses.includes(record.experiment.status));
+    const rows = this.db.prepare(`SELECT record_json FROM runner_executions ${statuses.length ? `WHERE status IN (${statuses.map(() => '?').join(',')})` : ''} ORDER BY created_at, experiment_id`).all(...statuses) as unknown as JsonRow[];
+    return rows.map((row) => JSON.parse(row.record_json) as ExecutionStateRecord);
   }
 
   recoverInterruptedExecutions(timestamp: string): number {
+    // Upgrading a pre-queue Runner must also preserve already-UNKNOWN ownership.
+    for (const record of this.listExecutions(['UNKNOWN'])) {
+      if (record.queue) continue;
+      record.queue = { policy: 'runner-exclusive-fifo-v1', sequence: 0, enqueued_at: record.experiment.created_at,
+        acquired_at: record.experiment.started_at ?? record.experiment.created_at, released_at: null, wait_ms: null };
+      this.saveExecution(record);
+    }
     const interrupted = this.listExecutions(['RUNNING']);
     for (const record of interrupted) {
+      record.queue ??= { policy: 'runner-exclusive-fifo-v1', sequence: 0, enqueued_at: record.experiment.created_at,
+        acquired_at: record.experiment.started_at ?? record.experiment.created_at, released_at: null, wait_ms: null };
       record.experiment = {
         ...record.experiment,
         status: 'UNKNOWN',

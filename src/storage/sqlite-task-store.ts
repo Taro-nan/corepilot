@@ -13,6 +13,8 @@ import type {
 import type { LeaseRecord, TaskStore } from './task-store.js';
 import type { HypothesisOutcome, OptimizationHypothesis } from '../contracts/optimization-hypothesis.js';
 import type { OptimizationApprovalRecord } from '../contracts/optimization-approval.js';
+import type { ProjectRecord } from '../contracts/project.js';
+import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
 
 interface TaskRow {
   task_id: string; request_id: string; status: string; target_json: string; schema_version: number; is_mock: number;
@@ -48,6 +50,12 @@ export class SqliteTaskStore implements TaskStore {
   init(): void {
     this.db.exec(`
       PRAGMA foreign_keys = ON;
+      CREATE TABLE IF NOT EXISTS projects (
+        project_id TEXT PRIMARY KEY, repository_root TEXT NOT NULL UNIQUE, record_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS execution_machines (
+        machine_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record_json TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS tasks (
         task_id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL,
         target_json TEXT NOT NULL, schema_version INTEGER NOT NULL, is_mock INTEGER NOT NULL,
@@ -78,6 +86,10 @@ export class SqliteTaskStore implements TaskStore {
       CREATE TABLE IF NOT EXISTS optimization_workflows (
         workflow_id TEXT PRIMARY KEY, workflow_json TEXT NOT NULL, updated_at TEXT NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS optimization_workflows_request
+        ON optimization_workflows(json_extract(workflow_json, '$.request_id'));
+      CREATE INDEX IF NOT EXISTS optimization_workflows_delivery_state
+        ON optimization_workflows(json_extract(workflow_json, '$.delivery_operation.status'));
       CREATE TABLE IF NOT EXISTS optimization_tasks (
         task_id TEXT PRIMARY KEY, workflow_id TEXT UNIQUE, status TEXT NOT NULL,
         record_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -265,9 +277,85 @@ export class SqliteTaskStore implements TaskStore {
     this.db.prepare('INSERT INTO optimization_workflows (workflow_id, workflow_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(workflow_id) DO UPDATE SET workflow_json=excluded.workflow_json, updated_at=excluded.updated_at').run(workflowId, workflowJson, new Date().toISOString());
   }
 
+  saveCompletedDelivery(workflowId: string, workflowJson: string, task: OptimizationTask | null): void {
+    this.transaction(() => {
+      if (task) {
+        if (task.workflow_id !== workflowId || task.status !== 'COMPLETED') throw new Error('delivery task identity or status mismatch');
+        this.saveOptimizationTask(task);
+      }
+      this.saveOptimizationWorkflowJson(workflowId, workflowJson);
+    });
+  }
+
   getOptimizationWorkflowJson(workflowId: string): string | null {
     const row = this.db.prepare('SELECT workflow_json FROM optimization_workflows WHERE workflow_id = ?').get(workflowId) as { workflow_json: string } | undefined;
     return row?.workflow_json ?? null;
+  }
+
+  listOptimizationWorkflowJson(limit: number): string[] {
+    const rows = this.db.prepare('SELECT workflow_json FROM optimization_workflows ORDER BY updated_at DESC, workflow_id DESC LIMIT ?').all(limit) as Array<{ workflow_json: string }>;
+    return rows.map(row => row.workflow_json);
+  }
+
+  listPendingDeliveryWorkflowIds(): string[] {
+    const rows = this.db.prepare(`SELECT workflow_id FROM optimization_workflows
+      WHERE json_extract(workflow_json, '$.delivery_operation.status') IN ('PREPARING', 'PREPARED', 'APPLYING', 'WAITING', 'NEEDS_ATTENTION')
+         OR (json_extract(workflow_json, '$.delivery_operation.status') = 'COMPLETED'
+             AND json_extract(workflow_json, '$.delivery_operation.cleanup') = 'PENDING')
+      ORDER BY updated_at, workflow_id`).all() as Array<{ workflow_id: string }>;
+    return rows.map(row => row.workflow_id);
+  }
+
+  getOptimizationWorkflowByRequestId(requestId: string): string | null {
+    const row = this.db.prepare("SELECT workflow_json FROM optimization_workflows WHERE json_extract(workflow_json, '$.request_id') = ? LIMIT 1").get(requestId) as { workflow_json: string } | undefined;
+    return row?.workflow_json ?? null;
+  }
+
+  listProjects(): ProjectRecord[] {
+    const rows = this.db.prepare('SELECT record_json FROM projects ORDER BY project_id').all() as unknown as JsonRecordRow[];
+    return rows.map(row => JSON.parse(row.record_json) as ProjectRecord);
+  }
+
+  getProject(projectId: string): ProjectRecord | null {
+    return this.readJsonRecord<ProjectRecord>('SELECT record_json FROM projects WHERE project_id = ?', projectId);
+  }
+
+  saveProject(project: ProjectRecord): void {
+    this.db.prepare('INSERT INTO projects (project_id, repository_root, record_json) VALUES (?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET repository_root=excluded.repository_root, record_json=excluded.record_json')
+      .run(project.project_id, project.repository_root, JSON.stringify(project));
+  }
+
+  /** Relocate configuration references without changing frozen requests or evidence. */
+  migrateProjectConfigPath(projectId: string, previousPath: string, nextPath: string): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const project = this.getProject(projectId);
+      if (!project || project.config_path !== previousPath) throw new Error('Project configuration changed during migration');
+      this.saveProject({ ...project, config_path: nextPath });
+      this.db.prepare("UPDATE optimization_workflows SET workflow_json = json_set(workflow_json, '$.config_path', ?) WHERE json_extract(workflow_json, '$.config_path') = ?")
+        .run(nextPath, previousPath);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  listExecutionMachines(): ExecutionMachineRecord[] {
+    return (this.db.prepare('SELECT record_json FROM execution_machines ORDER BY machine_id').all() as unknown as JsonRecordRow[]).map(row => JSON.parse(row.record_json) as ExecutionMachineRecord);
+  }
+
+  getExecutionMachine(machineId: string): ExecutionMachineRecord | null {
+    return this.readJsonRecord<ExecutionMachineRecord>('SELECT record_json FROM execution_machines WHERE machine_id = ?', machineId);
+  }
+
+  saveExecutionMachine(machine: ExecutionMachineRecord, expectedRevision?: number): boolean {
+    if (expectedRevision === undefined) {
+      this.db.prepare('INSERT INTO execution_machines (machine_id, revision, record_json) VALUES (?, ?, ?)').run(machine.machine_id, machine.revision, JSON.stringify(machine));
+      return true;
+    }
+    return this.db.prepare('UPDATE execution_machines SET revision = ?, record_json = ? WHERE machine_id = ? AND revision = ?')
+      .run(machine.revision, JSON.stringify(machine), machine.machine_id, expectedRevision).changes === 1;
   }
 
   saveOptimizationTask(task: OptimizationTask): void {
@@ -403,7 +491,7 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   listExperiments(taskId: string): Experiment[] {
-    return this.readJsonRecords<Experiment>('SELECT record_json FROM optimization_experiments WHERE task_id = ? ORDER BY created_at, experiment_id', taskId);
+    return this.readJsonRecords<Experiment>('SELECT record_json FROM optimization_experiments WHERE task_id = ? ORDER BY rowid', taskId);
   }
 
   appendCommandExecution(execution: CommandExecution): void {
@@ -416,6 +504,18 @@ export class SqliteTaskStore implements TaskStore {
 
   listCommandExecutions(experimentId: string): CommandExecution[] {
     return this.readJsonRecords<CommandExecution>('SELECT record_json FROM optimization_experiment_commands WHERE experiment_id = ? ORDER BY sequence', experimentId);
+  }
+  latestBuildForRepository(repository: string): import('../contracts/build-planning.js').StoredBuildFact | null {
+    const row = this.db.prepare(`
+      SELECT w.workflow_json AS workflow, t.record_json AS task, c.record_json AS execution
+      FROM optimization_workflows w
+      JOIN optimization_tasks t ON t.workflow_id = w.workflow_id
+      JOIN optimization_experiments e ON e.task_id = t.task_id
+      JOIN optimization_experiment_commands c ON c.experiment_id = e.experiment_id
+      WHERE c.step = 'BUILD' AND json_extract(w.workflow_json, '$.repository_root') = ?
+      ORDER BY json_extract(c.record_json, '$.end_time') DESC, c.sequence DESC LIMIT 1
+    `).get(repository) as { workflow: string; task: string; execution: string } | undefined;
+    return row ? { workflow: JSON.parse(row.workflow), task: JSON.parse(row.task), execution: JSON.parse(row.execution) } : null;
   }
 
   appendMeasurement(measurement: Measurement): void {

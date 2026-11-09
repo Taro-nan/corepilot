@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { hasCandidateRoot } from '../config/runtime-path.js';
 import { createHash } from 'node:crypto';
 import { parse as parseYaml } from 'yaml';
 import type {
@@ -15,6 +16,7 @@ import type {
 } from '../contracts/validation-testpack.js';
 import { VALIDATION_TESTPACK_SCHEMA_VERSION } from '../contracts/validation-testpack.js';
 import { evaluatorBundleSha256 } from '../evaluator/formal-evaluator.js';
+import { parseStatisticsPolicy } from '../evaluator/performance-statistics.js';
 
 export class ValidationTestpackError extends Error {
   constructor(public readonly problems: string[]) {
@@ -169,7 +171,7 @@ function baseline(value: unknown, field: string, configDir: string, problems: st
   const pathRaw = stringValue(raw, 'path', field, problems);
   const sha = stringValue(raw, 'sha256', field, problems);
   if (sha && !/^[0-9a-f]{64}$/i.test(sha)) problems.push(`${field}.sha256 must be a 64-character hexadecimal digest`);
-  const preserveRuntimePath = pathRaw.includes('${PHYOPT_CANDIDATE_ROOT}');
+  const preserveRuntimePath = hasCandidateRoot(pathRaw);
   return {
     id: stringValue(raw, 'id', field, problems),
     library: stringValue(raw, 'library', field, problems),
@@ -242,7 +244,7 @@ export function parseValidationTestpack(value: unknown, configDir = process.cwd(
   const correctness = mapping(root.correctness, 'correctness', problems);
   unknownKeys(correctness, ['command', 'cases', 'pass_required'], 'correctness', problems);
   const performance = mapping(root.performance, 'performance', problems);
-  unknownKeys(performance, ['command', 'cases', 'sampling', 'baselines', 'thresholds', 'key_cases'], 'performance', problems);
+  unknownKeys(performance, ['command', 'cases', 'sampling', 'baselines', 'thresholds', 'key_cases', 'statistics'], 'performance', problems);
   const baselines = mapping(performance.baselines, 'performance.baselines', problems);
   unknownKeys(baselines, ['current', 'comparison'], 'performance.baselines', problems);
   const revalidationValue = mapping(root.revalidation, 'revalidation', problems);
@@ -292,6 +294,7 @@ export function parseValidationTestpack(value: unknown, configDir = process.cwd(
       },
       thresholds: thresholds(performance.thresholds, 'performance.thresholds', problems),
       key_cases: keyCases,
+      ...(performance.statistics === undefined ? {} : { statistics: parseStatisticsPolicy(performance.statistics) }),
     },
     revalidation: {
       formal: revalidation(revalidationValue.formal, 'revalidation.formal', configDir, problems),
@@ -303,11 +306,17 @@ export function parseValidationTestpack(value: unknown, configDir = process.cwd(
 }
 
 export function loadValidationTestpack(testpackPath: string): LoadedValidationTestpack {
+  if (!testpackPath.trim()) throw new ValidationTestpackError([
+    '尚未配置测试方案。请在「构建与验证」选择函数并生成本库接入草稿，或继续本项目已有草稿，随后补齐正确性测试、性能负载和比较基线。已有方案也可选择匹配的 Library Package，或通过高级入口导入 testpack 文件。',
+  ]);
   const absolutePath = path.resolve(testpackPath);
   let raw: string;
   try {
     raw = fs.readFileSync(absolutePath, 'utf8');
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new ValidationTestpackError([
+      `测试方案文件不存在：${absolutePath}。请前往「构建与验证」修正文件路径，或选择与优化函数匹配的 Library Package。`,
+    ]);
     throw new ValidationTestpackError([`cannot read testpack ${absolutePath}: ${(error as Error).message}`]);
   }
   let parsed: unknown;

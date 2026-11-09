@@ -18,6 +18,8 @@ export interface FormalEvaluatorFixtureOptions {
   correctnessExitCode?: number;
   correctnessHang?: boolean;
   omitCorrectnessValue?: boolean;
+  pythonImportExecutable?: string;
+  measurementNamespace?: string;
 }
 
 export function createFormalEvaluatorFixture(root: string, options: FormalEvaluatorFixtureOptions = {}) {
@@ -67,17 +69,23 @@ export function createFormalEvaluatorFixture(root: string, options: FormalEvalua
   writeJson(path.join(root, 'benchmark/policy.json'), { schema_version: 1, argument_contract: performanceArguments });
   writeJson(path.join(root, 'benchmark/output-schema.json'), {
     schema_version: 1,
-    line_prefix: 'PHYOPT_MEASUREMENT',
+    line_prefix: 'COREPILOT_MEASUREMENT',
     required_fields: ['kind', 'role', 'subject_id', 'sample_index', 'value', 'unit', 'validity', 'domain_payload'],
   });
   fs.writeFileSync(path.join(root, 'oracle.txt'), 'fixture oracle\n');
+  const pythonImport = options.pythonImportExecutable
+    ? `const imported=require('node:child_process').spawnSync(${JSON.stringify(options.pythonImportExecutable)},['-c',${JSON.stringify(`import sys; sys.path.insert(0, ${JSON.stringify(root)}); import fixture_import`)}],{encoding:'utf8',windowsHide:true});if(imported.status!==0)throw new Error(imported.stderr||'Python import failed');`
+    : '';
+  if (options.pythonImportExecutable) fs.writeFileSync(path.join(root, 'fixture_import.py'), 'VALUE = 17\n');
 
   fs.writeFileSync(path.join(root, 'scripts/build-evaluator.sh'), `#!/usr/bin/env node
 require('node:fs').mkdirSync(process.argv[2],{recursive:true});
+${pythonImport}
 `);
   fs.writeFileSync(path.join(root, 'scripts/run-correctness.sh'), `#!/usr/bin/env node
-// PHYOPT_ARGUMENT_CONTRACT: ${correctnessArguments.join(',')}
+// COREPILOT_ARGUMENT_CONTRACT: ${correctnessArguments.join(',')}
 const fs=require('node:fs');const path=require('node:path');const crypto=require('node:crypto');
+${pythonImport}
 ${options.correctnessHang ? 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0);' : ''}
 ${options.correctnessExitCode !== undefined ? `process.stderr.write('fixture evaluator execution failed');process.exit(${options.correctnessExitCode});` : ''}
 ${options.tamperOnCorrectness ? "fs.writeFileSync(path.join(__dirname,'tampered.txt'),'tampered');" : "fs.readFileSync(path.join(__dirname,'..','oracle.txt'));"}
@@ -85,12 +93,13 @@ const a=process.argv.slice(2);${correctnessParameterSource}const artifactSha=cry
 ${options.omitThreads === 'CORRECTNESS' ? 'delete p.threads;' : ''}
 ${options.omitParameter?.phase === 'CORRECTNESS' ? `delete p[${JSON.stringify(options.omitParameter.name)}];` : ''}
 ${options.reportedThreads?.phase === 'CORRECTNESS' ? `p.threads=${options.reportedThreads.value};` : ''}
-console.log('PHYOPT_MEASUREMENT '+JSON.stringify({kind:'CORRECTNESS_CASE',role:'EVALUATOR',subject_id:${JSON.stringify(options.reportedCaseId ?? null)}??a[0],sample_index:null,value:${options.omitCorrectnessValue ? 'undefined' : JSON.stringify(options.correctnessValue ?? 'PASS')},unit:null,validity:'VALID',domain_payload:{parameters:p,error_reason:null,observed_summary:{max_abs_error:0},reference_summary:{implementation:'fixture'},artifact_identity:{input_path:a[1],sha256:artifactSha,${resolvedPathField}:a[1]},evaluator_binary_identity:{sha256:'${'b'.repeat(64)}'}}}));
+console.log('COREPILOT_MEASUREMENT '+JSON.stringify({kind:'CORRECTNESS_CASE',role:'EVALUATOR',subject_id:${JSON.stringify(options.reportedCaseId ?? null)}??a[0],sample_index:null,value:${options.omitCorrectnessValue ? 'undefined' : JSON.stringify(options.correctnessValue ?? 'PASS')},unit:null,validity:'VALID',domain_payload:{parameters:p,error_reason:null,observed_summary:{max_abs_error:0},reference_summary:{implementation:'fixture'},artifact_identity:{input_path:a[1],sha256:artifactSha,${resolvedPathField}:a[1]},evaluator_binary_identity:{sha256:'${'b'.repeat(64)}'}}}));
 `);
   fs.writeFileSync(path.join(root, 'scripts/run-performance.sh'), `#!/usr/bin/env node
-// PHYOPT_ARGUMENT_CONTRACT: ${performanceArguments.join(',')}
+${pythonImport}
+// COREPILOT_ARGUMENT_CONTRACT: ${performanceArguments.join(',')}
 const fs=require('node:fs'),crypto=require('node:crypto');const a=process.argv.slice(2);const phase=a[0],role=a[1],index=+a[${performanceIndex}];
-if(phase==='sample'){const values=role==='BASELINE'?[9,3,6,12,15,18,21]:[4,2,8,10,12,14,16];${performanceParameterSource}${options.omitThreads === 'PERFORMANCE' ? 'delete p.threads;' : ''}${options.omitParameter?.phase === 'PERFORMANCE' ? `delete p[${JSON.stringify(options.omitParameter.name)}];` : ''}${options.reportedThreads?.phase === 'PERFORMANCE' ? `p.threads=${options.reportedThreads.value};` : ''}const artifactSha=crypto.createHash('sha256').update(fs.readFileSync(a[3])).digest('hex');console.log('PHYOPT_MEASUREMENT '+JSON.stringify({kind:'PERFORMANCE_SAMPLE',role,subject_id:a[2],sample_index:index,value:values[index]??index+1,unit:'seconds',validity:'VALID',domain_payload:{parameters:p,elapsed_seconds:values[index]??index+1,latency_seconds:values[index]??index+1,gflops:1,artifact_identity:{input_path:a[3],sha256:artifactSha,${resolvedPathField}:a[3]},benchmark_identity:{sha256:'${'e'.repeat(64)}'}}}));}
+if(phase==='sample'){const values=role==='BASELINE'?[9,3,6,12,15,18,21]:[4,2,8,10,12,14,16];${performanceParameterSource}${options.omitThreads === 'PERFORMANCE' ? 'delete p.threads;' : ''}${options.omitParameter?.phase === 'PERFORMANCE' ? `delete p[${JSON.stringify(options.omitParameter.name)}];` : ''}${options.reportedThreads?.phase === 'PERFORMANCE' ? `p.threads=${options.reportedThreads.value};` : ''}const artifactSha=crypto.createHash('sha256').update(fs.readFileSync(a[3])).digest('hex');console.log('COREPILOT_MEASUREMENT '+JSON.stringify({kind:'PERFORMANCE_SAMPLE',role,subject_id:a[2],sample_index:index,value:values[index]??index+1,unit:'seconds',validity:'VALID',domain_payload:{parameters:p,elapsed_seconds:values[index]??index+1,latency_seconds:values[index]??index+1,gflops:1,artifact_identity:{input_path:a[3],sha256:artifactSha,${resolvedPathField}:a[3]},benchmark_identity:{sha256:'${'e'.repeat(64)}'}}}));}
 `);
 
   writeJson(path.join(root, 'qualification.json'), {});
@@ -104,18 +113,18 @@ if(phase==='sample'){const values=role==='BASELINE'?[9,3,6,12,15,18,21]:[4,2,8,1
       ? { name: 'SAXPY', api, layout: 'strided-vectors', operation: 'y=alpha*x+y', datatype: 'float32' }
       : { name: 'SGEMV-N', api, layout: 'column-major', operation: 'NoTrans', datatype: 'float32' },
     target: { platform: 'S5000C', build_target: 'FT2000', compatibility_scope: 'test fixture' },
-    digest_algorithm: 'phyopt-evaluator-content-sha256-v1',
+    digest_algorithm: 'corepilot-evaluator-content-sha256-v1',
     digest: '0'.repeat(64),
     qualification: { record: 'qualification.json', requires_target_qualification: true, requires_owner_approval: true },
     correctness: {
       definition: 'fixture correctness', inventory: 'correctness/cases.json', case_ids: ['case-1'],
-      command: { executable: process.execPath, script: 'scripts/run-correctness.sh', arguments: correctnessArguments, measurement_prefix: 'PHYOPT_MEASUREMENT' },
+      command: { executable: process.execPath, script: 'scripts/run-correctness.sh', arguments: correctnessArguments, measurement_prefix: 'COREPILOT_MEASUREMENT' },
       reference: { implementation: 'oracle.txt', accumulation: 'float64', qualification_required: true },
       tolerance: { rule: 'fixture exact', absolute: 0, relative: 0, qualification_required: true },
     },
     performance: {
       definition: 'fixture live symmetric benchmark', inventory: 'benchmark/workloads.json', workload_ids: ['workload-1'],
-      command: { executable: process.execPath, script: 'scripts/run-performance.sh', arguments: performanceArguments, measurement_prefix: 'PHYOPT_MEASUREMENT' },
+      command: { executable: process.execPath, script: 'scripts/run-performance.sh', arguments: performanceArguments, measurement_prefix: 'COREPILOT_MEASUREMENT' },
       sampling: { warmup_count: warmupCount, sample_count: sampleCount, statistic: 'median', process_model: 'one-process-per-sample' },
       measurement: { unit: 'seconds', value: 'latency_seconds', derived: ['median'], raw_samples_retained: true, output_schema: 'benchmark/output-schema.json' },
     },
@@ -129,6 +138,16 @@ if(phase==='sample'){const values=role==='BASELINE'?[9,3,6,12,15,18,21]:[4,2,8,1
       mutable_dependencies: 'explicit-artifact-inputs-only',
     },
   };
+  if (options.measurementNamespace) {
+    const namespace = options.measurementNamespace;
+    manifest.digest_algorithm = `${namespace.toLowerCase()}-evaluator-content-sha256-v1`;
+    manifest.correctness.command.measurement_prefix = `${namespace}_MEASUREMENT`;
+    manifest.performance.command.measurement_prefix = `${namespace}_MEASUREMENT`;
+    for (const relative of ['scripts/run-correctness.sh', 'scripts/run-performance.sh', 'benchmark/output-schema.json']) {
+      const filename = path.join(root, relative);
+      fs.writeFileSync(filename, fs.readFileSync(filename, 'utf8').replaceAll('COREPILOT_', `${namespace}_`));
+    }
+  }
   writeJson(path.join(root, 'manifest.json'), manifest);
   manifest.digest = evaluatorContentSha256(root);
   writeJson(path.join(root, 'manifest.json'), manifest);

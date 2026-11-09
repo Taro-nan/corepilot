@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
@@ -37,7 +38,7 @@ export class SshTransport implements RemoteTransport {
       buildSshCommandArgs(this.target, argv),
       // Builds can emit several MB of compile output; the 1MB default would kill
       // the ssh process (status null -> exit -1), so allow a large buffer.
-      { encoding: 'utf8', shell: false, maxBuffer: 64 * 1024 * 1024 },
+      { encoding: 'utf8', shell: false, windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
     );
     return {
       command: argv[0] ?? '',
@@ -57,10 +58,38 @@ export class SshTransport implements RemoteTransport {
     const res = spawnSync(
       'scp',
       buildScpCommandArgs(this.target, localPath, remotePath),
-      { encoding: 'utf8', shell: false, maxBuffer: 64 * 1024 * 1024 },
+      { encoding: 'utf8', shell: false, windowsHide: true, maxBuffer: 64 * 1024 * 1024 },
     );
     return { exit_code: res.status ?? -1, stderr: res.stderr ?? '' };
   }
+
+  /** Retrieve a Runner-built artifact for Control-side identity freezing. */
+  downloadFile(remotePath: string, localPath: string): { exit_code: number; stderr: string } {
+    this.ssh_calls += 1;
+    const res = spawnSync('scp', buildScpDownloadArgs(this.target, remotePath, localPath),
+      { encoding: 'utf8', shell: false, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    return { exit_code: res.status ?? -1, stderr: res.stderr ?? '' };
+  }
+}
+
+/** Async staging for web requests, so a large transfer does not block other API calls. */
+export class AsyncSshTransport {
+  readonly transport_type = 'ssh' as const;
+  constructor(private readonly target: SshTarget) {}
+  private async execute(command: string, args: string[]) {
+    try {
+      const result = await promisify(execFile)(command, args, { timeout: 600_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      return { stdout: result.stdout, stderr: result.stderr, exit_code: 0 };
+    } catch (error) {
+      const result = error as Error & { stdout?: string; stderr?: string; code?: number };
+      return { stdout: result.stdout ?? '', stderr: result.stderr || result.message, exit_code: typeof result.code === 'number' ? result.code : -1 };
+    }
+  }
+  async runRemote(argv: string[]): Promise<CommandResult> {
+    return { command: argv[0] ?? '', argv, ...await this.execute('ssh', buildSshCommandArgs(this.target, argv)) };
+  }
+  uploadFile(local: string, remote: string) { return this.execute('scp', buildScpCommandArgs(this.target, local, remote)); }
+  downloadFile(remote: string, local: string) { return this.execute('scp', buildScpDownloadArgs(this.target, remote, local)); }
 }
 
 export interface MockCommand {
@@ -103,27 +132,36 @@ export interface SshTargetCheck {
  * 在保存目标配置前执行一次最小免交互检查。
  * 不关闭主机密钥校验，也不接受密码输入；密码不会进入 YAML 或命令参数。
  */
-export function checkSshTarget(target: TargetConfig): SshTargetCheck {
+export async function checkSshTarget(target: TargetConfig): Promise<SshTargetCheck> {
   if (!('ssh_alias' in target) && target.identity_file) {
     const identityFile = expandIdentityFile(target.identity_file);
     if (!fs.existsSync(identityFile)) return { ok: false, message: `找不到私钥文件：${target.identity_file}` };
     if (!fs.statSync(identityFile).isFile()) return { ok: false, message: `私钥路径不是文件：${target.identity_file}` };
   }
-  const transport = new SshTransport(target);
-  const architecture = transport.runRemote(['uname', '-m']);
+  const execute = promisify(execFile);
+  const run = async (argv: string[]) => {
+    try {
+      const result = await execute('ssh', buildSshCommandArgs(target, argv), { timeout: 25_000, windowsHide: true, maxBuffer: 1024 * 1024 });
+      return { stdout: result.stdout, stderr: result.stderr, exit_code: 0 };
+    } catch (error) {
+      const result = error as Error & { stdout?: string; stderr?: string };
+      return { stdout: result.stdout ?? '', stderr: result.stderr || result.message, exit_code: -1 };
+    }
+  };
+  const architecture = await run(['uname', '-m']);
   if (architecture.exit_code !== 0) {
     return { ok: false, message: sshFailureMessage(architecture.stderr) };
   }
-  const username = transport.runRemote(['id', '-un']);
+  const username = await run(['id', '-un']);
   if (username.exit_code !== 0) {
     return { ok: false, message: sshFailureMessage(username.stderr) };
   }
-  const probePath = `${target.workspace_root.replace(/\/$/, '')}/.phyopt-connection-${randomUUID()}`;
-  const created = transport.runRemote(['mkdir', '-p', probePath]);
+  const probePath = `${target.workspace_root.replace(/\/$/, '')}/.corepilot-connection-${randomUUID()}`;
+  const created = await run(['mkdir', '-p', probePath]);
   if (created.exit_code !== 0) {
     return { ok: false, message: created.stderr.trim() || `远端工作目录不可写：${target.workspace_root}` };
   }
-  const removed = transport.runRemote(['rmdir', probePath]);
+  const removed = await run(['rmdir', probePath]);
   if (removed.exit_code !== 0) {
     return { ok: false, message: removed.stderr.trim() || `无法清理远端测试目录：${probePath}` };
   }
@@ -191,4 +229,10 @@ export function serializeRemoteArgv(argv: readonly string[]): string {
 export function buildScpCommandArgs(target: SshTarget, localPath: string, remotePath: string): string[] {
   const connection = sshConnection(target);
   return ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', '-o', 'LogLevel=ERROR', ...connection.scpOptions, localPath, `${connection.destination}:${remotePath}`];
+}
+
+export function buildScpDownloadArgs(target: SshTarget, remotePath: string, localPath: string): string[] {
+  const connection = sshConnection(target);
+  return ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', '-o', 'LogLevel=ERROR', ...connection.scpOptions,
+    `${connection.destination}:${remotePath}`, localPath];
 }

@@ -2,6 +2,7 @@ import type { CandidateEvaluationFeedback } from '../contracts/candidate-evaluat
 import type { DevelopmentGateResult } from '../contracts/development-investigation.js';
 import type { PerformanceGateResult, ValidationCycleResult } from './validation-runner.js';
 import { classifyExperimentFailure } from '../contracts/experiment-failure.js';
+import { withRunnerValidationStatus } from './validation-outcome.js';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -14,9 +15,9 @@ function boundedRecord(value: Record<string, unknown>): Record<string, unknown> 
 
 function diagnosticObservation(stdout: string, caseId: string): Record<string, unknown> | null {
   for (const line of stdout.split(/\r?\n/)) {
-    if (!line.startsWith('PHYOPT_MEASUREMENT ') || line.length > 65_536) continue;
+    if (!line.startsWith('COREPILOT_MEASUREMENT ') || line.length > 65_536) continue;
     try {
-      const observation = record(JSON.parse(line.slice('PHYOPT_MEASUREMENT '.length)));
+      const observation = record(JSON.parse(line.slice('COREPILOT_MEASUREMENT '.length)));
       if (observation?.kind === 'CORRECTNESS_CASE' && observation.subject_id === caseId) return boundedRecord(observation);
     } catch {
       continue;
@@ -32,12 +33,10 @@ export function candidateEvaluationFeedback(input: {
   performance?: PerformanceGateResult | null;
   developmentGate?: DevelopmentGateResult | null;
 }): CandidateEvaluationFeedback {
-  const { validation, performance } = input;
+  const { performance } = input;
+  const validation = withRunnerValidationStatus(input.validation);
   const status = validation.runner_status;
-  const runnerClassification = status ? classifyExperimentFailure(status) : null;
-  const caseResults = validation.correctness_cases.map(item => status?.failure?.step === 'CORRECTNESS' && item.command?.command_execution_id === status.failure.command_execution_id
-    ? { ...item, status: runnerClassification?.failure_origin === 'CANDIDATE' && runnerClassification.evaluation_status === 'FAIL' ? 'FAILED' as const : 'INVALID' as const, error: status.failure.message }
-    : item);
+  const caseResults = validation.correctness_cases;
   const failedCases = caseResults.filter(item => item.status === 'FAILED' || item.status === 'INVALID');
   const failed = failedCases.some(item => item.status === 'FAILED');
   const correctnessStatus = !validation.correctness ? 'NOT_EXECUTED'
@@ -49,10 +48,11 @@ export function candidateEvaluationFeedback(input: {
     ?? validation.correctness?.resource_context ?? validation.performance?.resource_context ?? null;
   const validity = resourcePolicy?.validity;
   const resourceValidity = validity === 'VALID' || validity === 'INVALID' || validity === 'NOT_ENFORCED' ? validity : 'UNKNOWN';
-  const failureCategory = status?.failure_category ?? (!validation.build.ok ? 'BUILD_FAILURE' : correctnessStatus === 'FAILED' ? 'CORRECTNESS_FAILURE' : performance?.passed === false ? 'PERFORMANCE_TARGET_NOT_MET' : null);
+  const uncertain = performance?.statistics?.verdict === 'INCONCLUSIVE' || performance?.statistics?.verdict === 'INVALID';
+  const failureCategory = status?.failure_category ?? (!validation.build.ok ? 'BUILD_FAILURE' : correctnessStatus === 'FAILED' ? 'CORRECTNESS_FAILURE' : performance?.passed === false && !uncertain ? 'PERFORMANCE_TARGET_NOT_MET' : null);
   const failureClassification = status ? classifyExperimentFailure({ ...status, failure_category: failureCategory }) : null;
   if (failureClassification?.evaluation_status === 'PASS' &&
-      (correctnessStatus !== 'PASSED' || !validation.correctness_coverage.complete || (validation.performance && !performance))) {
+      (uncertain || correctnessStatus !== 'PASSED' || !validation.correctness_coverage.complete || (validation.performance && !performance))) {
     failureClassification.evaluation_status = 'UNKNOWN';
   }
   const areas: CandidateEvaluationFeedback['recommended_investigation_area'] = [];
@@ -60,19 +60,14 @@ export function candidateEvaluationFeedback(input: {
   if (correctnessStatus === 'FAILED' || failedCases.some(item => diagnosticObservation(item.command?.stdout ?? '', item.case_id)?.value === 'FAIL')) areas.push('SOURCE_SEMANTICS', 'CASE_BOUNDARIES');
   if (status?.failure_category === 'EVALUATOR_FAILURE' || correctnessStatus === 'INVALID' || failureClassification?.failure_origin === 'CONTRACT') areas.push('EVALUATOR_OUTPUT_CONTRACT');
   if (resourceValidity !== 'VALID' || status?.failure?.code === 'MISSING_RESOURCE_CONTEXT') areas.push('RESOURCE_CONFIGURATION');
-  if (validation.performance && (!validation.performance.ok || performance?.passed === false)) areas.push('PERFORMANCE_HOTPATH');
+  if (validation.performance && (!validation.performance.ok || performance?.passed === false && !uncertain)) areas.push('PERFORMANCE_HOTPATH');
   return {
     schema_version: 1,
     candidate_id: input.candidateId ?? status?.candidate_id ?? null,
     experiment_id: input.experimentId ?? status?.experiment_id ?? null,
     experiment_validity: status?.validity ?? 'UNKNOWN',
     correctness_status: correctnessStatus,
-    correctness_coverage: {
-      ...validation.correctness_coverage,
-      passed: caseResults.filter(item => item.status === 'PASSED').length,
-      failed: caseResults.filter(item => item.status === 'FAILED').length,
-      complete: validation.correctness_coverage.complete && !caseResults.some(item => item.status === 'INVALID'),
-    },
+    correctness_coverage: { ...validation.correctness_coverage },
     failed_cases: failedCases.map(item => ({
       case_id: item.case_id,
       status: item.status as 'FAILED' | 'INVALID',
@@ -91,7 +86,7 @@ export function candidateEvaluationFeedback(input: {
     failure: status?.failure ? structuredClone(status.failure) : null,
     failure_classification: failureClassification,
     performance_summary: {
-      status: !validation.performance ? 'NOT_EXECUTED' : status?.validity === 'INVALID' ? 'INVALID' : !validation.performance.ok ? 'FAILED' : !performance ? 'NOT_EVALUATED' : performance.passed ? 'PASSED' : 'FAILED',
+      status: !validation.performance ? 'NOT_EXECUTED' : status?.validity === 'INVALID' || performance?.statistics?.verdict === 'INVALID' ? 'INVALID' : !validation.performance.ok ? 'FAILED' : !performance ? 'NOT_EVALUATED' : performance.passed ? 'PASSED' : uncertain ? 'INCONCLUSIVE' : 'FAILED',
       classification: !status ? 'DEVELOPMENT_ONLY' : status.validity === 'VALID' ? 'FORMAL' : 'DIAGNOSTIC_ONLY',
       weighted_geomean: performance?.weighted_geomean ?? null,
       overall_ci_lower: performance?.overall_ci_lower ?? null,

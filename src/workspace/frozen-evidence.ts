@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import type { FrozenEvidenceArtifactIdentity } from '../contracts/optimization-approval.js';
 
 function sha256(bytes: Buffer | string): string {
@@ -12,7 +13,9 @@ export function verifyFrozenEvidenceArtifact(identity: FrozenEvidenceArtifactIde
     throw new Error('invalid frozen Evidence identity');
   }
   if (!path.isAbsolute(identity.archive_path) || !path.isAbsolute(identity.manifest_path)) throw new Error('Evidence paths must be absolute');
-  if (sha256(fs.readFileSync(identity.archive_path)) !== identity.archive_sha256) throw new Error('Evidence archive SHA-256 mismatch');
+  const archiveBytes = fs.readFileSync(identity.archive_path);
+  if (sha256(archiveBytes) !== identity.archive_sha256) throw new Error('Evidence archive SHA-256 mismatch');
+  if (identity.archive_format !== undefined && identity.archive_format !== 'COREPILOT_EVIDENCE_JSON_GZIP_V1') throw new Error('unsupported Evidence archive format');
   const manifest = JSON.parse(fs.readFileSync(identity.manifest_path, 'utf8')) as {
     digest_algorithm: string;
     digest: string;
@@ -40,6 +43,21 @@ export function verifyFrozenEvidenceArtifact(identity: FrozenEvidenceArtifactIde
     if (bytes.length !== file.size_bytes || sha256(bytes) !== file.sha256) throw new Error(`Evidence file identity mismatch: ${file.relative_path}`);
   }
   if (!seen.has('evidence.json')) throw new Error('Evidence inventory is missing evidence.json');
+  if (identity.archive_format === 'COREPILOT_EVIDENCE_JSON_GZIP_V1') {
+    const archive = JSON.parse(gunzipSync(archiveBytes).toString('utf8')) as {
+      format: string; manifest: typeof manifest; files: Array<{ relative_path: string; base64: string }>;
+    };
+    if (archive.format !== identity.archive_format || JSON.stringify(archive.manifest) !== JSON.stringify(manifest)
+      || !Array.isArray(archive.files) || archive.files.length !== manifest.files.length) throw new Error('Evidence archive inventory mismatch');
+    for (let i = 0; i < manifest.files.length; i++) {
+      const expected = manifest.files[i], archived = archive.files[i];
+      if (!archived || archived.relative_path !== expected.relative_path || typeof archived.base64 !== 'string') throw new Error('Evidence archive file mismatch');
+      const bytes = Buffer.from(archived.base64, 'base64');
+      if (bytes.toString('base64') !== archived.base64 || bytes.length !== expected.size_bytes || sha256(bytes) !== expected.sha256) {
+        throw new Error(`Evidence archive file identity mismatch: ${expected.relative_path}`);
+      }
+    }
+  }
   const evidence = JSON.parse(fs.readFileSync(path.join(root, 'evidence.json'), 'utf8')) as Record<string, unknown>;
   if (!evidence || Array.isArray(evidence) || evidence.record_type !== 'OPTIMIZATION_EVIDENCE_FREEZE') throw new Error('Evidence is not a frozen optimization artifact');
   return evidence;

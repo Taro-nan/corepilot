@@ -4,13 +4,19 @@ import { ApiError } from '../core/api-error.js';
 import { RUNNER_PROTOCOL_VERSION, type RunnerHealth } from '../contracts/runner-rpc.js';
 import { DuplicateExperimentError, ExperimentExecutor, RunnerPlanError } from './experiment-executor.js';
 import { probeRunnerMachine } from './machine-probe.js';
+import { probeRunnerToolchain } from './toolchain-probe.js';
+import type { RunnerToolchain } from '../contracts/build-planning.js';
+import type { RunnerBundleInspectionRequest } from '../contracts/baseline-bundle.js';
+import { inspectRunnerBaselineBundle } from './baseline-bundle-inspector.js';
 import { SqliteRunnerStore } from './sqlite-runner-store.js';
 import type { FormalResourceCommandRunner, ResourceEnforcementMode } from './resource-enforcement.js';
+import { stageRunnerSourceArchive } from './source-archive.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
-export const PHYOPT_RUNNER_VERSION = '0.4.0';
+export const COREPILOT_RUNNER_VERSION = '0.4.0';
 
 export interface RunnerHttpServerOptions {
+  toolchainProbe?: () => Promise<RunnerToolchain>;
   host: string;
   port: number;
   token: string;
@@ -48,7 +54,7 @@ export async function startRunnerHttpServer(options: RunnerHttpServerOptions): P
     throw error;
   }
   const server = http.createServer((req, res) => {
-    void handle(req, res, options.token, executor).catch((error: unknown) => {
+    void handle(req, res, options.token, executor, options.workspaceRoot, options.toolchainProbe).catch((error: unknown) => {
       const apiError = toApiError(error);
       if (!res.headersSent) {
         if (apiError.statusCode === 401) res.setHeader('www-authenticate', 'Bearer');
@@ -58,6 +64,7 @@ export async function startRunnerHttpServer(options: RunnerHttpServerOptions): P
       }
     });
   });
+  server.requestTimeout = 900_000;
 
   try {
     await listen(server, options.host, options.port);
@@ -89,25 +96,39 @@ async function handle(
   res: http.ServerResponse,
   token: string,
   executor: ExperimentExecutor,
+  workspaceRoot: string,
+  toolchainProbe?: () => Promise<RunnerToolchain>,
 ): Promise<void> {
   if (!authorized(req.headers.authorization, token)) throw new ApiError(401, 'UNAUTHORIZED', 'valid bearer token required');
   const url = new URL(req.url ?? '/', 'http://runner.local');
   const method = req.method ?? 'GET';
   const pathname = url.pathname;
+  if (method === 'GET' && pathname === '/toolchain') {
+    sendJson(res, 200, await (toolchainProbe ? toolchainProbe() : probeRunnerToolchain(executor.runnerId))); return;
+  }
 
   if (method === 'GET' && pathname === '/health') {
     const response: RunnerHealth = {
       runner_id: executor.runnerId,
-      version: PHYOPT_RUNNER_VERSION,
+      version: COREPILOT_RUNNER_VERSION,
       protocol_version: RUNNER_PROTOCOL_VERSION,
       status: 'READY',
       resource_enforcement: executor.resourceEnforcementMode,
+      capabilities: { controlled_validation: 1, source_archive_upload: 1, execution_logs: 1, resource_matrix: 1, exclusive_queue: 1 },
     };
     sendJson(res, 200, response);
     return;
   }
   if (method === 'GET' && pathname === '/machine') {
     sendJson(res, 200, probeRunnerMachine());
+    return;
+  }
+  if (method === 'PUT' && pathname === '/source-archives') {
+    sendJson(res, 201, await stageRunnerSourceArchive(req as AsyncIterable<Buffer>, workspaceRoot,
+      url.searchParams.get('workspace_path') ?? '', url.searchParams.get('sha256') ?? '')); return;
+  }
+  if (method === 'POST' && pathname === '/baseline-bundles/inspect') {
+    sendJson(res, 200, await inspectRunnerBaselineBundle(await readJson(req) as RunnerBundleInspectionRequest, workspaceRoot));
     return;
   }
   if (method === 'POST' && pathname === '/experiments') {
@@ -132,6 +153,10 @@ async function handle(
     sendJson(res, result.status === 'RUNNING' || result.status === 'UNKNOWN' ? 202 : 200, result);
     return;
   }
+  const stoppedMatch = pathname.match(/^\/experiments\/([^/]+)\/confirm-stopped$/);
+  if (method === 'POST' && stoppedMatch) {
+    sendJson(res, 200, executor.confirmStopped(decodeId(stoppedMatch[1]), await readJson(req) as Record<string, unknown>)); return;
+  }
   const measurementMatch = pathname.match(/^\/experiments\/([^/]+)\/measurements$/);
   if (method === 'GET' && measurementMatch) {
     const experimentId = decodeId(measurementMatch[1]);
@@ -147,6 +172,12 @@ async function handle(
     if (!result) throw new ApiError(404, 'EXPERIMENT_NOT_FOUND', 'experiment not found');
     sendJson(res, 200, result);
     return;
+  }
+  const outputMatch = pathname.match(/^\/experiments\/([^/]+)\/output$/);
+  if (method === 'GET' && outputMatch) {
+    const experimentId = decodeId(outputMatch[1]);
+    if (!executor.getExperiment(experimentId)) throw new ApiError(404, 'EXPERIMENT_NOT_FOUND', 'experiment not found');
+    sendJson(res, 200, executor.getExecutionOutput(experimentId)); return;
   }
 
   throw new ApiError(404, 'NOT_FOUND', `no route for ${method} ${pathname}`);

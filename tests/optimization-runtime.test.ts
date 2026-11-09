@@ -72,7 +72,7 @@ function performance(): PerformanceGateResult {
 }
 
 test('persists multiple candidates, experiments, command facts, and raw samples across reopen', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-runtime-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-runtime-'));
   const dbPath = path.join(root, 'runtime.sqlite');
   let store = new SqliteTaskStore(dbPath);
   store.init();
@@ -161,12 +161,12 @@ test('persists multiple candidates, experiments, command facts, and raw samples 
 });
 
 test('the public optimization workflow appends candidate and experiment facts on every round', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-public-runtime-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-public-runtime-'));
   const repository = path.join(root, 'repository');
   fs.mkdirSync(repository);
   assert.equal(spawnSync('git', ['-C', repository, 'init', '--initial-branch=main'], { encoding: 'utf8' }).status, 0);
   assert.equal(spawnSync('git', ['-C', repository, 'config', 'user.email', 'test@example.invalid'], { encoding: 'utf8' }).status, 0);
-  assert.equal(spawnSync('git', ['-C', repository, 'config', 'user.name', 'PhyOpt Test'], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync('git', ['-C', repository, 'config', 'user.name', 'CorePilot Test'], { encoding: 'utf8' }).status, 0);
   fs.writeFileSync(path.join(repository, 'kernel.c'), 'int example(void) { return 0; }\n');
   assert.equal(spawnSync('git', ['-C', repository, 'add', '.'], { encoding: 'utf8' }).status, 0);
   assert.equal(spawnSync('git', ['-C', repository, 'commit', '-m', 'baseline'], { encoding: 'utf8' }).status, 0);
@@ -174,17 +174,17 @@ test('the public optimization workflow appends candidate and experiment facts on
   const testpack = publicLoopTestpack(repository);
   const config = {
     model: { model_id: 'test-model', api_key: 'not-used', endpoint: 'https://example.invalid/v1', timeout_ms: 10_000 },
-    target: { ssh_alias: 'test-target', workspace_root: '/tmp/phyopt' },
+    target: { ssh_alias: 'test-target', workspace_root: '/tmp/corepilot' },
     build: { executable: process.execPath, args: ['-e', 'process.exit(0)'], cwd: '.', environment: {}, timeout_ms: 10_000 },
     validation: { testpack: path.join(root, 'testpack.yaml') },
     output_dir: path.join(root, 'output'),
   } as const;
   const preflight: PublicOptimizationPreflight = {
-    request: { function_name: 'example', entry_file: 'kernel.c', config_path: path.join(root, 'phyopt.yaml'), repository_root: repository },
-    config: { config, configPath: path.join(root, 'phyopt.yaml'), configDir: root, rawSha256: 'config-digest' },
+    request: { function_name: 'example', entry_file: 'kernel.c', config_path: path.join(root, 'corepilot.yaml'), repository_root: repository },
+    config: { config, configPath: path.join(root, 'corepilot.yaml'), configDir: root, rawSha256: 'config-digest' },
     testpack: { testpack, testpackPath: path.join(root, 'testpack.yaml'), testpackDir: root, rawSha256: 'evaluator-digest' },
     credential: { apiKey: 'not-used', source: 'cli' },
-    audit: { function_name: 'example', entry_file: 'kernel.c', config_path: path.join(root, 'phyopt.yaml'), repository_root: repository, config_sha256: 'config-digest', config, testpack: {} },
+    audit: { function_name: 'example', entry_file: 'kernel.c', config_path: path.join(root, 'corepilot.yaml'), repository_root: repository, config_sha256: 'config-digest', config, testpack: {} },
   };
 
   const store = new SqliteTaskStore(path.join(root, 'runtime.sqlite'));

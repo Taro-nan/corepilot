@@ -3,12 +3,14 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { EVALUATOR_EXECUTION_ENVIRONMENT } from '../evaluator/execution-environment.js';
 import type {
   DevelopmentBenchmarkSummary,
   DevelopmentGateResult,
   DevelopmentPerfStatSummary,
   DevelopmentToolResult,
   PerfCounterSet,
+  DevelopmentExecutionFailure,
 } from '../contracts/development-investigation.js';
 import { DEVELOPMENT_ONLY } from '../contracts/development-investigation.js';
 import type { DomainIdentity, Experiment, Measurement } from '../contracts/optimization-domain.js';
@@ -26,11 +28,18 @@ import type { ExperimentExecutionBackend } from './experiment-execution-backend.
 import type { RemoteValidationTransport } from '../workspace/validation-runner.js';
 import { evaluatorContentSha256 } from '../evaluator/formal-evaluator.js';
 import { expandEvaluatorArguments, formalWorkloadParameters } from '../evaluator/formal-arguments.js';
+import { remoteWorkspaceBuild } from '../workspace/remote-build.js';
+import type { ValidationTestPlan } from '../contracts/validation-assets.js';
+import { classifyExperimentFailure } from '../contracts/experiment-failure.js';
+import { RemoteExperimentUnknownError } from './rpc-experiment-transition-adapter.js';
+import { RunnerClientError } from '../client/runner-client.js';
 
 const PERF_EVENTS = ['cycles', 'instructions', 'branches', 'branch-misses', 'cache-references', 'cache-misses'] as const;
 const TERMINAL = new Set<ExperimentStatusResponse['status']>(['SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN']);
 
 export interface PreparedDevelopmentWorkspace {
+  buildReady?: boolean;
+  evaluatorReady?: boolean;
   candidate: StagedCandidateIdentity;
   /** A mutable copy containing development harness sources, never a trusted evaluator path. */
   assetsRoot: string;
@@ -42,7 +51,8 @@ export interface RunnerDevelopmentInvestigationOptions {
   buildCommand: ValidationCommand;
   buildCwdRelative?: string;
   candidateArtifactRelativePath: string;
-  baseline: DomainIdentity & { details: { path: string } };
+  baseline: DomainIdentity & { details: { path: string; libraryPaths?: string[]; dependencies?: Array<{ path: string; sha256: string }> } };
+  testPlan?: ValidationTestPlan;
   resources: { cpuSet: string; numaNode: number };
   workloads: readonly FormalWorkloadDefinition[];
   evaluatorSetup: { executable: string; script: string };
@@ -51,6 +61,8 @@ export interface RunnerDevelopmentInvestigationOptions {
   prepareWorkspace(input: { requestId: string; tool: string; signal?: AbortSignal }): Promise<PreparedDevelopmentWorkspace>;
   pollIntervalMs?: number;
   idFactory?: () => string;
+  onPlan?: (plan: ExperimentExecutionPlan) => void | Promise<void>;
+  onCompleted?: (experimentId: string) => void | Promise<void>;
 }
 
 interface ExecutedDevelopmentPlan {
@@ -58,6 +70,13 @@ interface ExecutedDevelopmentPlan {
   status: ExperimentStatusResponse;
   commands: Awaited<ReturnType<ExperimentExecutionBackend['getCommandExecutions']>>['command_executions'];
   measurements: Measurement[];
+}
+
+export class DevelopmentExecutionError extends Error {
+  constructor(readonly failure: DevelopmentExecutionFailure) {
+    super(`development ${failure.tool} failed (${failure.code ?? failure.status}): ${failure.message}\nRunner experiment: ${failure.experiment_id}`);
+    this.name = 'DevelopmentExecutionError';
+  }
 }
 
 /**
@@ -69,6 +88,7 @@ export class RunnerDevelopmentInvestigation {
   private readonly pollIntervalMs: number;
   private readonly idFactory: () => string;
   private readonly benchmarkCache = new Map<string, DevelopmentBenchmarkSummary>();
+  private pendingExperimentId: string | null = null;
 
   constructor(private readonly options: RunnerDevelopmentInvestigationOptions) {
     this.pollIntervalMs = options.pollIntervalMs ?? 250;
@@ -96,7 +116,7 @@ export class RunnerDevelopmentInvestigation {
   async inspectBinary(input: { symbol?: string }, signal?: AbortSignal): Promise<DevelopmentToolResult<{ output: string }>> {
     if (input.symbol !== undefined) assertSymbol(input.symbol);
     const prepared = await this.prepare('inspect_binary', signal);
-    const library = candidateArtifact(prepared, this.options.candidateArtifactRelativePath);
+    const library = this.preparedBuild(prepared).artifactPath;
     const symbols = input.symbol ? [input.symbol] : [...new Set(this.options.inspectionSymbols ?? [])];
     const symbolFilter = symbols.length > 0
       ? symbols.map((symbol) => `printf '\n== symbol ${shellQuoteForDisplay(symbol)} ==\n'; readelf -Ws "$lib" | grep -F -- ${shellQuote(symbol)} || true; nm -D --defined-only "$lib" | grep -F -- ${shellQuote(symbol)} || true`).join('; ')
@@ -114,7 +134,7 @@ export class RunnerDevelopmentInvestigation {
       symbolFilter,
     ].join('; ');
     const executed = await this.execute(prepared, 'inspect_binary', [
-      this.buildStep(prepared),
+      ...this.buildSteps(prepared),
       candidateStep('EVALUATOR_SETUP', { executable: 'bash', args: ['-lc', script], cwd: prepared.candidate.workspace_path, environment: {}, timeout_ms: 120_000 }),
     ], signal);
     const output = commandOutput(executed.commands.at(-1));
@@ -124,9 +144,9 @@ export class RunnerDevelopmentInvestigation {
   async disassemble(input: { symbol: string }, signal?: AbortSignal): Promise<DevelopmentToolResult<{ symbol: string; output: string }>> {
     assertSymbol(input.symbol);
     const prepared = await this.prepare('disassemble', signal);
-    const library = candidateArtifact(prepared, this.options.candidateArtifactRelativePath);
+    const library = this.preparedBuild(prepared).artifactPath;
     const executed = await this.execute(prepared, 'disassemble', [
-      this.buildStep(prepared),
+      ...this.buildSteps(prepared),
       candidateStep('EVALUATOR_SETUP', {
         executable: 'objdump',
         args: ['-d', '--no-show-raw-insn', `--disassemble=${input.symbol}`, library],
@@ -149,13 +169,13 @@ export class RunnerDevelopmentInvestigation {
     if (!Number.isInteger(input.samples) || input.samples < 1 || input.samples > 5) throw new Error('development sample count must be in 1..5');
     const prepared = await this.prepare('run_dev_benchmark', signal);
     const runtimeRoot = developmentRuntimeRoot(prepared);
-    const candidate = candidateArtifact(prepared, this.options.candidateArtifactRelativePath);
+    const candidate = this.preparedBuild(prepared).artifactPath;
     const baseline = this.options.baseline.details.path;
     const script = benchmarkScript(this.options.performanceCommand, prepared, runtimeRoot, workload, baseline, candidate, input.samples);
     const executed = await this.execute(prepared, 'run_dev_benchmark', [
-      this.buildStep(prepared),
-      this.evaluatorBuildStep(prepared, runtimeRoot),
-      candidateStep('PERFORMANCE', constrainedCommand(script, prepared.candidate.workspace_path, workload.threads, this.options.resources, 300_000), true),
+      ...this.buildSteps(prepared),
+      ...(prepared.evaluatorReady ? [] : [this.evaluatorBuildStep(prepared, runtimeRoot)]),
+      this.performanceStep(prepared, workload, script),
     ], signal);
     const baselineSamples = performanceSamples(executed.measurements, workload.workload_id, 'BASELINE');
     const candidateSamples = performanceSamples(executed.measurements, workload.workload_id, 'CANDIDATE');
@@ -184,7 +204,15 @@ export class RunnerDevelopmentInvestigation {
     const output: DevelopmentGateResult['workloads'] = [];
     for (const workloadId of unique) {
       const before = this.benchmarkCache.get(workloadId) ?? null;
-      const afterResult = await this.runDevBenchmark({ workloadId, samples: before?.sample_count_per_role ?? 3 }, signal);
+      let afterResult: DevelopmentToolResult<DevelopmentBenchmarkSummary>;
+      try {
+        afterResult = await this.runDevBenchmark({ workloadId, samples: before?.sample_count_per_role ?? 3 }, signal);
+      } catch (error) {
+        if (!(error instanceof DevelopmentExecutionError) || error.failure.failure_origin !== 'CANDIDATE') throw error;
+        return { classification: DEVELOPMENT_ONLY, passed: false,
+          reason: `Candidate development ${error.failure.step ?? 'execution'} failed: ${error.failure.message}`,
+          workloads: output, failure: error.failure };
+      }
       const after = afterResult.data;
       // This is only an early rejection heuristic, not an acceptance threshold:
       // call a result obviously worse only when every new sample is slower than
@@ -219,12 +247,12 @@ export class RunnerDevelopmentInvestigation {
     if (!Number.isInteger(input.repeats) || input.repeats < 1 || input.repeats > 3) throw new Error('perf stat repeats must be in 1..3');
     const prepared = await this.prepare('profile_perf_stat', signal);
     const runtimeRoot = developmentRuntimeRoot(prepared);
-    const candidate = candidateArtifact(prepared, this.options.candidateArtifactRelativePath);
+    const candidate = this.preparedBuild(prepared).artifactPath;
     const script = perfStatScript(this.options.performanceCommand, prepared, runtimeRoot, workload, this.options.baseline.details.path, candidate, input.repeats);
     const executed = await this.execute(prepared, 'profile_perf_stat', [
-      this.buildStep(prepared),
-      this.evaluatorBuildStep(prepared, runtimeRoot),
-      candidateStep('PERFORMANCE', constrainedCommand(script, prepared.candidate.workspace_path, workload.threads, this.options.resources, 300_000), true),
+      ...this.buildSteps(prepared),
+      ...(prepared.evaluatorReady ? [] : [this.evaluatorBuildStep(prepared, runtimeRoot)]),
+      this.performanceStep(prepared, workload, script),
     ], signal);
     const raw = commandOutput(executed.commands.at(-1));
     const parsed = parsePerfStatOutput(raw, workload.workload_id, workload.threads, this.options.resources);
@@ -251,9 +279,22 @@ export class RunnerDevelopmentInvestigation {
     return workload;
   }
 
-  private buildStep(prepared: PreparedDevelopmentWorkspace): ExperimentExecutionStep {
-    const cwd = resolveRemoteRelative(prepared.candidate.workspace_path, this.options.buildCwdRelative ?? '.');
-    return candidateStep('BUILD', { ...this.options.buildCommand, cwd, args: [...this.options.buildCommand.args], environment: { ...this.options.buildCommand.environment } });
+  private buildSteps(prepared: PreparedDevelopmentWorkspace): ExperimentExecutionStep[] {
+    return prepared.buildReady ? [] : [candidateStep('BUILD', this.preparedBuild(prepared).command)];
+  }
+
+  private preparedBuild(prepared: PreparedDevelopmentWorkspace) {
+    return remoteWorkspaceBuild({ build: this.options.buildCommand, cwdRelative: this.options.buildCwdRelative ?? '.',
+      sourceRoot: prepared.candidate.workspace_path, buildRoot: `${prepared.candidate.workspace_path}.build`,
+      artifactPath: candidateArtifact(prepared, this.options.candidateArtifactRelativePath) });
+  }
+
+  private evaluatorEnvironment(prepared: PreparedDevelopmentWorkspace): Record<string, string> {
+    return { ...EVALUATOR_EXECUTION_ENVIRONMENT, COREPILOT_TEST_ASSETS_ROOT: prepared.assetsRoot, COREPILOT_CANDIDATE_SOURCE_ROOT: prepared.candidate.workspace_path,
+      COREPILOT_CANDIDATE_ARTIFACT: this.preparedBuild(prepared).artifactPath, COREPILOT_BASELINE_ARTIFACT: this.options.baseline.details.path,
+      ...(this.options.testPlan ? { COREPILOT_TEST_SEED: String(this.options.testPlan.seed),
+        COREPILOT_INNER_ITERATIONS: String(this.options.testPlan.inner_iterations), COREPILOT_TIMING_SCOPE: this.options.testPlan.timing_scope } : {}),
+      ...(this.options.baseline.details.libraryPaths?.length ? { LD_LIBRARY_PATH: this.options.baseline.details.libraryPaths.join(':') } : {}) };
   }
 
   private evaluatorBuildStep(prepared: PreparedDevelopmentWorkspace, runtimeRoot: string): ExperimentExecutionStep {
@@ -262,9 +303,14 @@ export class RunnerDevelopmentInvestigation {
       executable: this.options.evaluatorSetup.executable,
       args: [script, runtimeRoot],
       cwd: prepared.candidate.workspace_path,
-      environment: {},
+      environment: this.evaluatorEnvironment(prepared),
       timeout_ms: 120_000,
     });
+  }
+
+  private performanceStep(prepared: PreparedDevelopmentWorkspace, workload: FormalWorkloadDefinition, script: string): ExperimentExecutionStep {
+    const command = constrainedCommand(script, prepared.candidate.workspace_path, workload.threads, this.options.resources, 300_000);
+    return candidateStep('PERFORMANCE', { ...command, environment: { ...command.environment, ...this.evaluatorEnvironment(prepared) } }, true);
   }
 
   private async execute(
@@ -273,6 +319,7 @@ export class RunnerDevelopmentInvestigation {
     steps: ExperimentExecutionStep[],
     signal?: AbortSignal,
   ): Promise<ExecutedDevelopmentPlan> {
+    if (this.pendingExperimentId) throw new RemoteExperimentUnknownError(this.pendingExperimentId, 'An earlier development execution must be reconciled before starting another.');
     const experimentId = `development:${this.idFactory()}`;
     const now = new Date().toISOString();
     const experiment: Experiment = {
@@ -301,11 +348,21 @@ export class RunnerDevelopmentInvestigation {
       created_at: now,
       updated_at: now,
     };
-    const plan: ExperimentExecutionPlan = { experiment, candidate: prepared.candidate, steps };
-    await this.options.backend.submitExperiment(plan, signal);
+    const plan: ExperimentExecutionPlan = { experiment, candidate: prepared.candidate, steps, build_directory: `${prepared.candidate.workspace_path}.build` };
+    this.pendingExperimentId = experimentId;
+    await this.options.onPlan?.(plan);
+    try { await this.options.backend.submitExperiment(plan, signal); }
+    catch (error) {
+      if (error instanceof RunnerClientError && error.status !== null && error.status !== 409) {
+        this.pendingExperimentId = null;
+        await this.options.onCompleted?.(experimentId);
+      }
+      throw error;
+    }
     let cancelRequested = false;
     let status: ExperimentStatusResponse;
     while (true) {
+      if (signal?.aborted && signal.reason === 'backend shutting down') throw new RemoteExperimentUnknownError(experimentId, 'Control stopped observing this development experiment; reconcile it before another measurement.');
       if (signal?.aborted && !cancelRequested) {
         cancelRequested = true;
         await this.options.backend.cancelExperiment(experimentId).catch(() => undefined);
@@ -318,9 +375,19 @@ export class RunnerDevelopmentInvestigation {
       this.options.backend.getCommandExecutions(experimentId),
       this.options.backend.getMeasurements(experimentId),
     ]);
+    if (commands.command_executions.some(command => command.step === 'BUILD' && command.exit_code === 0 && !command.timed_out && !command.cancelled)) prepared.buildReady = true;
+    const evaluatorScript = path.posix.join(prepared.assetsRoot, ...this.options.evaluatorSetup.script.split('/'));
+    if (commands.command_executions.some(command => command.step === 'EVALUATOR_SETUP' && command.args.includes(evaluatorScript) && command.exit_code === 0 && !command.timed_out && !command.cancelled)) prepared.evaluatorReady = true;
+    await this.options.onCompleted?.(experimentId);
+    this.pendingExperimentId = null;
     if (status.status !== 'SUCCEEDED') {
       const last = commands.command_executions.at(-1);
-      throw new Error(`development ${tool} failed (${status.failure?.code ?? status.status}): ${status.failure?.message ?? commandOutput(last).slice(-4096)}`);
+      const classification = status.failure_classification ?? classifyExperimentFailure(status);
+      throw new DevelopmentExecutionError({ experiment_id: experimentId, tool: tool as DevelopmentExecutionFailure['tool'],
+        status: status.status, step: status.failure?.step ?? last?.step ?? null, code: status.failure?.code ?? null,
+        message: (status.failure?.message ?? commandOutput(last)).slice(-8192), failure_origin: classification?.failure_origin ?? null,
+        raw_command_execution_ids: commands.command_executions.map(command => command.command_execution_id),
+        command_output: commandOutput(last).slice(-8192) });
     }
     return { experimentId, status, commands: commands.command_executions, measurements: measurements.measurements };
   }
@@ -340,7 +407,7 @@ export async function stageRemoteDevelopmentAssets(input: {
     throw new Error('development asset workspace must be an absolute path under a development directory');
   }
   const digest = evaluatorContentSha256(evaluatorRoot);
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-development-assets-'));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-development-assets-'));
   const archive = path.join(tempRoot, 'assets.tar');
   try {
     const packed = spawnSync('tar', ['-cf', archive, '-C', evaluatorRoot, '.'], { encoding: 'utf8', windowsHide: true });
@@ -426,9 +493,9 @@ function perfStatScript(
     'supported=()',
     'unavailable=()',
     `for event in ${PERF_EVENTS.join(' ')}; do probe=$(perf stat -x ';' -e "$event" -- true 2>&1); probe_status=$?; if (( probe_status == 0 )) && ! grep -Eqi '<not supported>|<not counted>|no permission|not available|unknown event' <<<"$probe"; then supported+=("$event"); else unavailable+=("$event"); fi; done`,
-    'printf "PHYOPT_PERF_SUPPORTED %s\\n" "${supported[*]}"',
-    'printf "PHYOPT_PERF_UNAVAILABLE %s\\n" "${unavailable[*]}"',
-    'if (( ${#supported[@]} == 0 )); then printf "PHYOPT_PERF_WARNING no permitted requested PMU events\\n"; exit 0; fi',
+    'printf "COREPILOT_PERF_SUPPORTED %s\\n" "${supported[*]}"',
+    'printf "COREPILOT_PERF_UNAVAILABLE %s\\n" "${unavailable[*]}"',
+    'if (( ${#supported[@]} == 0 )); then printf "COREPILOT_PERF_WARNING no permitted requested PMU events\\n"; exit 0; fi',
     'events=$(IFS=,; echo "${supported[*]}")',
     performanceInvocation(contract, prepared, runtimeRoot, workload, 'warmup', 'BASELINE', baseline, 0),
     performanceInvocation(contract, prepared, runtimeRoot, workload, 'warmup', 'CANDIDATE', candidate, 0),
@@ -436,7 +503,7 @@ function perfStatScript(
   for (let index = 0; index < repeats; index += 1) {
     for (const [role, artifact] of [['BASELINE', baseline], ['CANDIDATE', candidate]] as const) {
       const invocation = performanceInvocation(contract, prepared, runtimeRoot, workload, 'sample', role, artifact, index);
-      commands.push(`printf "PHYOPT_PERF_BEGIN ${role} ${index}\\n"; perf stat -x ';' -e "$events" -- ${invocation} 2>&1; status=$?; printf "PHYOPT_PERF_END ${role} ${index} %s\\n" "$status"`);
+      commands.push(`printf "COREPILOT_PERF_BEGIN ${role} ${index}\\n"; perf stat -x ';' -e "$events" -- ${invocation} 2>&1; status=$?; printf "COREPILOT_PERF_END ${role} ${index} %s\\n" "$status"`);
     }
   }
   return commands.join('; ');
@@ -471,15 +538,15 @@ export function parsePerfStatOutput(
   threads: number,
   resources: RunnerDevelopmentInvestigationOptions['resources'],
 ): DevelopmentPerfStatSummary {
-  const supported = markerWords(raw, 'PHYOPT_PERF_SUPPORTED');
-  const unavailable = markerWords(raw, 'PHYOPT_PERF_UNAVAILABLE');
+  const supported = markerWords(raw, 'COREPILOT_PERF_SUPPORTED');
+  const unavailable = markerWords(raw, 'COREPILOT_PERF_UNAVAILABLE');
   const values: Record<'BASELINE' | 'CANDIDATE', Record<string, number[]>> = { BASELINE: {}, CANDIDATE: {} };
-  const warnings = raw.split(/\r?\n/).filter((line) => line.startsWith('PHYOPT_PERF_WARNING ')).map((line) => line.slice('PHYOPT_PERF_WARNING '.length));
+  const warnings = raw.split(/\r?\n/).filter((line) => line.startsWith('COREPILOT_PERF_WARNING ')).map((line) => line.slice('COREPILOT_PERF_WARNING '.length));
   let role: 'BASELINE' | 'CANDIDATE' | null = null;
   for (const line of raw.split(/\r?\n/)) {
-    const begin = line.match(/^PHYOPT_PERF_BEGIN (BASELINE|CANDIDATE) \d+$/);
+    const begin = line.match(/^COREPILOT_PERF_BEGIN (BASELINE|CANDIDATE) \d+$/);
     if (begin) { role = begin[1] as 'BASELINE' | 'CANDIDATE'; continue; }
-    if (line.startsWith('PHYOPT_PERF_END ')) { role = null; continue; }
+    if (line.startsWith('COREPILOT_PERF_END ')) { role = null; continue; }
     if (!role || !line.includes(';')) continue;
     const fields = line.split(';').map((item) => item.trim());
     const event = supported.find((item) => fields.some((field) => normalizePerfEvent(field) === item));
@@ -541,7 +608,7 @@ function candidateArtifact(prepared: PreparedDevelopmentWorkspace, relative: str
 }
 
 function developmentRuntimeRoot(prepared: PreparedDevelopmentWorkspace): string {
-  return path.posix.join(prepared.candidate.workspace_path, '.phyopt-development', 'evaluator-runtime');
+  return path.posix.join(`${prepared.candidate.workspace_path}.build`, '.corepilot-development', 'evaluator-runtime');
 }
 
 function resolveRemoteRelative(root: string, relative: string): string {

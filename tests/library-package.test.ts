@@ -28,7 +28,7 @@ const evaluatorDigest = 'e1d2effa606f2ef4f028a490ffef8dc7a9b2968fc15128250a281a2
 const qualificationDigest = '06c50b60eb7de07861c39c87b4ab46030b881a9b2dcea352293df4c6a5656eab';
 
 function temporaryRoot(context: test.TestContext): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-library-package-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-library-package-'));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
@@ -294,9 +294,9 @@ test('package candidate scope is enforced while Agent reads remain unrestricted'
   assert.equal((await tools.execute('write_file', { path: 'fixtures/vector.c', content: 'candidate' }, signal)).isError, false);
 });
 
-test('package config materializes the existing formal workflow and persists a package-backed task', (context) => {
+test('package config materializes the existing formal workflow and persists a package-backed task', async (context) => {
   const root = temporaryRoot(context);
-  const configPath = path.join(root, 'phyopt.yaml');
+  const configPath = path.join(root, 'corepilot.yaml');
   fs.writeFileSync(configPath, JSON.stringify(configValue()));
   const request = { function_name: 'cblas_sgemv', entry_file: null, config_path: configPath, repository_root: root };
   const preflight = loadPublicOptimizationPreflight(request, { env: {} });
@@ -306,8 +306,9 @@ test('package config materializes the existing formal workflow and persists a pa
   assert.doesNotMatch(JSON.stringify(preflight.audit), /package-test-secret|test-runner-secret/);
   const store = new SqliteTaskStore(path.join(root, 'workflow.sqlite'));
   store.init();
+  let service: OptimizationWorkflowService | undefined;
   try {
-    const service = new OptimizationWorkflowService({ store, transportFactory: () => { throw new Error('intake must not execute'); } });
+    service = new OptimizationWorkflowService({ store, transportFactory: () => { throw new Error('intake must not execute'); } });
     const submitted = service.submitPublic(request);
     const task = store.getOptimizationTaskByWorkflowId(submitted.workflowId)!;
     assert.equal(task.library_package?.package_id, 'ftblas');
@@ -315,7 +316,7 @@ test('package config materializes the existing formal workflow and persists a pa
     assert.equal(task.evaluator.digest, evaluatorDigest);
     assert.equal(task.target.scope.domain_payload !== undefined, true);
     assert.equal(task.performance_baseline?.details?.path, '/runtime/baseline.so');
-  } finally { store.close(); }
+  } finally { await service?.stop(); store.close(); }
   const withLegacy = { ...configValue(), validation: { ...configValue().validation, testpack: 'legacy.yaml' } };
   assert.throws(() => parseOptimizationConfig(withLegacy, root), /mutually exclusive/);
   assert.throws(() => parseOptimizationConfig({ ...configValue(), build: { executable: 'evil', args: [] } }, root), /owned by the selected library package/);
@@ -358,12 +359,13 @@ test('OptimizationRuntime rejects out-of-domain candidate checkpoints before per
 
 test('existing interactive optimize accepts package-owned build without a new build wizard', async (context) => {
   const root = temporaryRoot(context);
-  const configPath = path.join(root, 'phyopt.yaml');
+  const configPath = path.join(root, 'corepilot.yaml');
   fs.writeFileSync(configPath, JSON.stringify(configValue()));
   let submittedFunction: string | undefined;
   const workbench = {
     configPath,
     hasConfig: () => true,
+    setCurrentWorkflow: () => {},
     getApi: async () => ({ submitOptimizationWorkflow: async (request: { function_name: string }) => {
       submittedFunction = request.function_name;
       return { workflow_id: 'package-workflow' };

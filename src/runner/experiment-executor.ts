@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import { observeMeasurementEnvironment } from './measurement-environment.js';
 import path from 'node:path';
 import {
   OPTIMIZATION_DOMAIN_SCHEMA_VERSION,
@@ -25,8 +26,14 @@ import type {
 } from '../contracts/runner-rpc.js';
 import type { LoadedFormalEvaluatorBundle } from '../contracts/formal-evaluator.js';
 import { classifyExperimentFailure, type ViolationReason } from '../contracts/experiment-failure.js';
-import { sourceTreeSha256 } from '../core/source-identity.js';
+import { sourceTreeSha256Async } from '../core/source-identity.js';
+import { containedRunnerPath } from './source-archive.js';
+import { executionOutput, openExecutionOutput } from './execution-output.js';
+import { buildArtifactRoots, inventoryBuildRoots, captureBuildArtifacts } from './build-artifacts.js';
 import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
+import type { ValidationTestPlan } from '../contracts/validation-assets.js';
+import { readValidationTestPlan, performanceRoles } from '../evaluator/validation-test-plan.js';
+import { entryResources } from '../evaluator/execution-matrix.js';
 import {
   evaluatorCommandArgumentIndex,
   expandEvaluatorArguments,
@@ -45,7 +52,7 @@ import {
   type ResourceEnforcementMode,
 } from './resource-enforcement.js';
 
-const MEASUREMENT_PREFIX = 'PHYOPT_MEASUREMENT ';
+import { MEASUREMENT_PREFIX, evaluatorCommandEnvironment } from '../evaluator/measurement-protocol.js';
 const TERMINAL_STATUSES = new Set<Experiment['status']>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
 const EXPERIMENT_TYPES = new Set<Experiment['type']>(['FORMAL_EVALUATION', 'REVALIDATION', 'DEVELOPMENT_FEEDBACK']);
 const EXPERIMENT_STEPS = new Set<ExperimentStep>(['BUILD', 'EVALUATOR_SETUP', 'CORRECTNESS', 'PERFORMANCE', 'REVALIDATION']);
@@ -115,7 +122,15 @@ export class ExperimentExecutor {
     this.runnerIdentity = this.store.resolveRunnerIdentity(this.options.runnerId);
     const recoveredUnknown = this.store.recoverInterruptedExecutions(this.timestamp());
     this.initialized = true;
-    for (const record of this.store.listExecutions(['PENDING'])) this.schedule(record.experiment.experiment_id);
+    const pending = this.store.listExecutions(['PENDING']);
+    for (const record of pending) {
+      if (!record.queue) {
+        record.queue = { policy: 'runner-exclusive-fifo-v1', sequence: this.store.allocateQueueSequence(), enqueued_at: record.experiment.created_at,
+          acquired_at: null, released_at: null, wait_ms: null };
+        this.saveExecution(record);
+      }
+    }
+    this.dispatch();
     return { runnerId: this.runnerIdentity, recoveredUnknown };
   }
 
@@ -135,9 +150,13 @@ export class ExperimentExecutor {
     const experiment = structuredClone(plan.experiment);
     this.store.createExecution({
       experiment,
+      queue: { policy: 'runner-exclusive-fifo-v1', sequence: this.store.allocateQueueSequence(),
+        enqueued_at: this.timestamp(), acquired_at: null, released_at: null, wait_ms: null },
       ...(plan.candidate ? { candidate: structuredClone(plan.candidate) } : {}),
       ...(plan.evaluator ? { evaluator: structuredClone(plan.evaluator) } : {}),
       steps: structuredClone(plan.steps),
+      ...(plan.output_directory ? { output_directory: plan.output_directory } : {}),
+      ...(plan.build_directory ? { build_directory: plan.build_directory } : {}),
       current_step: null,
       cancel_requested: false,
       failure: null,
@@ -149,7 +168,33 @@ export class ExperimentExecutor {
   getExperiment(experimentId: string): ExperimentStatusResponse | null {
     this.requireInitialized();
     const record = this.store.getExecution(experimentId);
-    return record ? statusResponse(record) : null;
+    if (!record) return null;
+    const response = statusResponse(record);
+    if (record.queue) {
+      const records = this.store.listExecutions(['PENDING', 'RUNNING', 'UNKNOWN']);
+      const owner = records.find(item => item.queue?.acquired_at && !item.queue.released_at);
+      const waiting = records.filter(item => item.experiment.status === 'PENDING').sort((a, b) => (a.queue?.sequence ?? 0) - (b.queue?.sequence ?? 0));
+      response.queue = { ...record.queue, position: record.experiment.status === 'PENDING' ? waiting.findIndex(item => item.experiment.experiment_id === experimentId) + 1 : 0,
+        waiting_for: owner?.experiment.experiment_id === experimentId ? null : owner?.experiment.experiment_id ?? null,
+        reason: record.experiment.status !== 'PENDING' ? null : owner?.experiment.status === 'UNKNOWN'
+          ? '原执行进程状态未知；维护者确认停止后释放机器资源' : owner ? '等待当前作业释放独占执行机器（包含构建、试跑和性能采样）' : '等待 Runner 调度' };
+    }
+    return response;
+  }
+
+  /** An explicit maintenance receipt releases resources, without reinterpreting old experiment facts. */
+  confirmStopped(experimentId: string, input: { confirmed_stopped?: unknown; reviewer?: unknown; reason?: unknown }): ExperimentStatusResponse {
+    this.requireReady();
+    const record = this.store.getExecution(experimentId);
+    if (!record || record.experiment.status !== 'UNKNOWN' || this.active.has(experimentId)) throw new RunnerPlanError('Only an UNKNOWN execution without a live local process handle can be reconciled');
+    if (input.confirmed_stopped !== true || typeof input.reviewer !== 'string' || !input.reviewer.trim() || typeof input.reason !== 'string' || !input.reason.trim()
+      || input.reviewer.length > 160 || input.reason.length > 2000) throw new RunnerPlanError('Confirm process termination and provide reviewer and reason');
+    if (record.queue && !record.queue.released_at) {
+      record.queue.released_at = this.timestamp();
+      record.queue.stop_confirmation = { reviewer: input.reviewer.trim(), reason: input.reason.trim(), confirmed_at: this.timestamp() };
+      this.saveExecution(record); this.dispatch();
+    }
+    return this.getExperiment(experimentId)!;
   }
 
   getMeasurements(experimentId: string): ExperimentMeasurementsResponse | null {
@@ -179,12 +224,13 @@ export class ExperimentExecutor {
       record.experiment = terminalExperiment(record.experiment, 'CANCELLED', 'CANCELLED', this.timestamp());
       record.current_step = null;
       record.failure = null;
-      this.store.saveExecution(record);
+      this.saveExecution(record);
       active?.controller.abort();
+      if (!active) this.dispatch();
       return cancelResponse(record);
     }
     if (record.experiment.status === 'RUNNING' && active) {
-      this.store.saveExecution(record);
+      this.saveExecution(record);
       active.controller.abort();
       active.cancelConfirmationTimer ??= setTimeout(() => {
         const latest = this.store.getExecution(experimentId);
@@ -224,7 +270,7 @@ export class ExperimentExecutor {
       step: null,
       command_execution_id: null,
     };
-    this.store.saveExecution(record);
+    this.saveExecution(record);
     return cancelResponse(record);
   }
 
@@ -250,7 +296,7 @@ export class ExperimentExecutor {
           step: null,
           command_execution_id: null,
         };
-        this.store.saveExecution(record);
+        this.saveExecution(record);
       }
       active.controller.abort();
     }
@@ -263,6 +309,21 @@ export class ExperimentExecutor {
 
   private schedule(experimentId: string): void {
     if (this.shuttingDown || this.active.has(experimentId)) return;
+    this.dispatch();
+  }
+
+  private dispatch(): void {
+    if (this.shuttingDown || this.active.size > 0) return;
+    const records = this.store.listExecutions(['PENDING', 'RUNNING', 'UNKNOWN']);
+    if (records.some(item => item.queue?.acquired_at && !item.queue.released_at)) return;
+    const next = records.filter(item => item.experiment.status === 'PENDING').sort((a, b) => (a.queue?.sequence ?? 0) - (b.queue?.sequence ?? 0))[0];
+    if (!next) return;
+    const experimentId = next.experiment.experiment_id;
+    const acquired = this.timestamp();
+    next.queue ??= { policy: 'runner-exclusive-fifo-v1', sequence: 0, enqueued_at: next.experiment.created_at, acquired_at: null, released_at: null, wait_ms: null };
+    next.queue.acquired_at = acquired;
+    next.queue.wait_ms = Math.max(0, Date.parse(acquired) - Date.parse(next.queue.enqueued_at));
+    this.saveExecution(next);
     const controller = new AbortController();
     const promise = new Promise<void>((resolve) => {
       setImmediate(() => { void this.execute(experimentId, controller.signal).then(resolve, resolve); });
@@ -270,6 +331,12 @@ export class ExperimentExecutor {
       const active = this.active.get(experimentId);
       if (active?.cancelConfirmationTimer) clearTimeout(active.cancelConfirmationTimer);
       this.active.delete(experimentId);
+      const record = this.store.getExecution(experimentId);
+      if (record?.queue && record.experiment.status !== 'UNKNOWN') {
+        record.queue.released_at = this.timestamp();
+        this.saveExecution(record);
+      }
+      this.dispatch();
     });
     this.active.set(experimentId, { controller, promise });
   }
@@ -297,7 +364,7 @@ export class ExperimentExecutor {
       return loaded;
     };
     try {
-      if (record.candidate) this.verifyCandidate(record.candidate);
+      if (record.candidate) await this.verifyCandidate(record.candidate);
       if (record.evaluator) formalBundle = verifyPinnedEvaluator(record.evaluator);
       if (record.candidate && record.evaluator) this.verifyDomainSeparation(record.candidate, record.evaluator);
     } catch (error) {
@@ -322,6 +389,7 @@ export class ExperimentExecutor {
         ...(record.experiment.observed_context ?? {}),
         runner_id: this.runnerIdentity,
         machine: probeRunnerMachine(),
+        measurement_environment: { before: observeMeasurementEnvironment(), after: null },
         ...(record.evaluator ? {
           evaluator: {
             id: record.evaluator.evaluator_id,
@@ -335,6 +403,7 @@ export class ExperimentExecutor {
               cpu_set: formalBundle.manifest.resource_requirements.cpu_set,
               numa_node: formalBundle.manifest.resource_requirements.numa_node,
               thread_counts: formalBundle.manifest.resource_requirements.thread_counts,
+              ...(readValidationTestPlan(formalBundle.root, formalBundle.manifest).execution_matrix ? { execution_matrix: readValidationTestPlan(formalBundle.root, formalBundle.manifest).execution_matrix } : {}),
             },
             mode: this.resourceEnforcement,
             applied: null,
@@ -351,7 +420,7 @@ export class ExperimentExecutor {
         } : {}),
       },
     };
-    this.store.saveExecution(record);
+    this.saveExecution(record);
 
     try {
       for (const step of record.steps) {
@@ -365,29 +434,45 @@ export class ExperimentExecutor {
 
         record.current_step = step.step;
         record.experiment.updated_at = this.timestamp();
-        this.store.saveExecution(record);
+        this.saveExecution(record);
         let formalArtifactDigest: string | null = null;
         if (record.evaluator) {
           try {
             formalBundle = verifyPinnedEvaluator(record.evaluator);
-            if (step.formal_context) formalArtifactDigest = verifyFormalArtifact(step.formal_context, artifactPins);
           } catch (error) {
             this.failEvaluatorIdentity(record, error as Error, null);
             return;
           }
         }
-        const command = applyDeclaredResources(step, this.resourceEnforcement);
+        if (step.formal_context) {
+          try { formalArtifactDigest = verifyFormalArtifact(step.formal_context, artifactPins); }
+          catch (error) { this.failEvaluatorIdentity(record, error as Error, null); return; }
+        }
+        const measurementPrefix = formalBundle
+          ? (step.step === 'PERFORMANCE' ? formalBundle.manifest.performance : formalBundle.manifest.correctness).command.measurement_prefix
+          : MEASUREMENT_PREFIX;
+        const command = evaluatorCommandEnvironment(applyDeclaredResources(step, this.resourceEnforcement), measurementPrefix);
         let resourceContext: FormalResourceContext | null = null;
         let result: CommandRunResult;
-        if (step.formal_context && this.resourceEnforcement === 'REQUIRED') {
+        const roots = record.candidate ? buildArtifactRoots(record.candidate.workspace_path, record.build_directory,
+          record.output_directory ? path.join(path.dirname(record.output_directory), 'artifacts') : undefined) : [];
+        if (step.step === 'BUILD' && record.build_directory) fs.mkdirSync(record.build_directory, { recursive: true });
+        if (step.step === 'BUILD') for (const root of roots) if (root.exported) fs.mkdirSync(root.root, { recursive: true });
+        const beforeBuild = step.step === 'BUILD' && record.output_directory && record.candidate ? inventoryBuildRoots(roots) : null;
+        const output = record.output_directory ? openExecutionOutput(record.output_directory, `${new Date().toISOString()} ${step.step} · ${command.executable} ${command.args.join(' ')}`) : null;
+        try { if (step.formal_context && this.resourceEnforcement === 'REQUIRED') {
           const constrained = await this.formalResourceCommandRunner(command, step.formal_context.resources, signal);
           result = constrained.result;
           resourceContext = constrained.resourceContext;
+          output?.onStdout(result.stdout); output?.onStderr(result.stderr);
         } else {
-          result = await runValidationCommand(command, command.cwd, { signal });
+          result = await runValidationCommand(command, command.cwd, { signal, ...(output ? { onStdout: output.onStdout, onStderr: output.onStderr } : {}) });
           if (step.formal_context) resourceContext = unenforcedResourceContext(step.formal_context.resources);
+        } } finally { output?.close(); }
+        const execution = this.persistCommand(experimentId, step.step, result, resourceContext, step.diagnostic_probe);
+        if (result.ok && beforeBuild && record.output_directory && record.candidate) {
+          await captureBuildArtifacts(roots, record.output_directory, beforeBuild);
         }
-        const execution = this.persistCommand(experimentId, step.step, result, resourceContext);
 
         record = this.store.getExecution(experimentId);
         if (!record || record.experiment.status === 'UNKNOWN' || this.shuttingDown) return;
@@ -420,7 +505,7 @@ export class ExperimentExecutor {
         }
         if (resourceContext) {
           mergeResourceContext(record, resourceContext);
-          this.store.saveExecution(record);
+          this.saveExecution(record);
           if (this.resourceEnforcement === 'REQUIRED' && resourceContext.validity !== 'VALID') {
             this.fail(record, 'RESOURCE_UNAVAILABLE', {
               code: 'RESOURCE_CONSTRAINT_UNSATISFIED',
@@ -434,13 +519,16 @@ export class ExperimentExecutor {
         if (record.evaluator) {
           try {
             formalBundle = verifyPinnedEvaluator(record.evaluator);
-            if (step.formal_context) formalArtifactDigest = verifyFormalArtifact(step.formal_context, artifactPins);
           } catch (error) {
             this.failEvaluatorIdentity(record, error as Error, execution.command_execution_id);
             return;
           }
         }
-        if (!result.ok && step.formal_context && !result.stdout.includes(MEASUREMENT_PREFIX)) {
+        if (step.formal_context) {
+          try { formalArtifactDigest = verifyFormalArtifact(step.formal_context, artifactPins); }
+          catch (error) { this.failEvaluatorIdentity(record, error as Error, execution.command_execution_id); return; }
+        }
+        if (!result.ok && step.formal_context && !result.stdout.includes(measurementPrefix + ' ')) {
           this.fail(record, 'EVALUATOR_FAILURE', {
             code: 'COMMAND_FAILED',
             message: commandFailureMessage(result),
@@ -451,14 +539,18 @@ export class ExperimentExecutor {
         }
         if (step.measurements_from_stdout || step.formal_context) {
           try {
-            const observations = parseMeasurementOutput(result.stdout);
-            const formalObservations = step.formal_context && formalBundle
+            const observations = parseMeasurementOutput(result.stdout, measurementPrefix + ' ');
+            const formalObservations = step.formal_context
               ? validateFormalStepOutput(step, observations, formalBundle, formalArtifactDigest as string, resourceContext)
               : observations;
             for (const observation of formalObservations) {
-              this.store.appendMeasurement(this.measurement(experimentId, observation));
+              const probe = step.diagnostic_probe;
+              this.store.appendMeasurement(this.measurement(experimentId, probe ? { ...observation,
+                kind: 'OBSERVATION', subject_id: `sensitivity:${probe.probe_id}:${observation.subject_id}`,
+                value: observation.value === 'FAIL' ? 'DETECTED' : 'MISSED',
+                domain_payload: { ...observation.domain_payload, ...probe, classification: 'TEST_SENSITIVITY', original_verdict: observation.value } } : observation));
             }
-            if (step.formal_context?.phase === 'CORRECTNESS_CASE' && formalObservations.some((item) => item.value === 'FAIL')) {
+            if (!step.diagnostic_probe && step.formal_context?.phase === 'CORRECTNESS_CASE' && formalObservations.some((item) => item.value === 'FAIL')) {
               this.fail(record, 'CORRECTNESS_FAILURE', {
                 code: 'CANDIDATE_CORRECTNESS_FAILED',
                 message: `formal correctness case '${step.formal_context.subject_id}' reported FAIL`,
@@ -479,7 +571,7 @@ export class ExperimentExecutor {
             return;
           }
         }
-        if (!result.ok) {
+        if (!result.ok && !(step.diagnostic_probe && result.exit_code === 1)) {
           this.fail(record, step.formal_context ? 'EVALUATOR_FAILURE' : failureCategory(step.step, result), {
             code: 'COMMAND_FAILED',
             message: commandFailureMessage(result),
@@ -508,7 +600,7 @@ export class ExperimentExecutor {
       record.experiment.validity = record.experiment.type === 'FORMAL_EVALUATION' ? 'VALID' : 'UNKNOWN';
       record.current_step = null;
       record.failure = null;
-      this.store.saveExecution(record);
+      this.saveExecution(record);
     } catch (error) {
       record = this.store.getExecution(experimentId);
       if (!record || record.experiment.status === 'UNKNOWN' || this.shuttingDown) return;
@@ -530,11 +622,13 @@ export class ExperimentExecutor {
     step: ExperimentStep,
     result: CommandRunResult,
     resourceContext: FormalResourceContext | null = null,
+    diagnosticProbe?: ExperimentExecutionStep['diagnostic_probe'],
   ): CommandExecution {
     const record = this.store.getExecution(experimentId);
     const execution: CommandExecution = {
       schema_version: OPTIMIZATION_DOMAIN_SCHEMA_VERSION,
       command_execution_id: `command-execution:${this.idFactory()}`,
+      ...(diagnosticProbe ? { diagnostic_probe: diagnosticProbe } : {}),
       experiment_id: experimentId,
       evaluator: record?.evaluator ? {
         id: record.evaluator.evaluator_id,
@@ -563,7 +657,7 @@ export class ExperimentExecutor {
     return execution;
   }
 
-  private verifyCandidate(candidate: StagedCandidateIdentity): void {
+  private async verifyCandidate(candidate: StagedCandidateIdentity): Promise<void> {
     if (!fs.existsSync(candidate.workspace_path)) {
       throw new CandidateIdentityError('CANDIDATE_NOT_FOUND', `staged candidate directory does not exist: ${candidate.workspace_path}`);
     }
@@ -572,7 +666,7 @@ export class ExperimentExecutor {
     if (!isInside(realCandidate, realRoot)) {
       throw new CandidateIdentityError('CANDIDATE_IDENTITY_MISMATCH', 'staged candidate resolves outside the runner workspace root');
     }
-    const observed = sourceTreeSha256(realCandidate);
+    const observed = await sourceTreeSha256Async(realCandidate);
     if (observed !== candidate.source_sha256) {
       throw new CandidateIdentityError(
         'CANDIDATE_IDENTITY_MISMATCH',
@@ -710,9 +804,7 @@ export class ExperimentExecutor {
             evaluator_identity: evaluatorIdentity(record.evaluator as StagedEvaluatorIdentity),
             resource_policy: {
               declared: {
-                threads: workload.threads,
-                cpu_set: bundle.manifest.resource_requirements.cpu_set,
-                numa_node: bundle.manifest.resource_requirements.numa_node,
+                ...entryResources(workload, readValidationTestPlan(bundle.root, bundle.manifest), bundle.manifest),
               },
               source: 'retained_raw_measurements',
               raw_resource_contexts_valid: raw.every((item) => {
@@ -733,18 +825,41 @@ export class ExperimentExecutor {
     record.experiment = terminalExperiment(record.experiment, 'CANCELLED', 'CANCELLED', this.timestamp());
     record.current_step = null;
     record.failure = null;
-    this.store.saveExecution(record);
+    this.saveExecution(record);
   }
 
   private fail(record: ExecutionStateRecord, category: FailureCategory, failure: RunnerFailure): void {
     record.experiment = terminalExperiment(record.experiment, 'FAILED', category, this.timestamp());
     record.current_step = null;
     record.failure = failure;
-    this.store.saveExecution(record);
+    this.saveExecution(record);
   }
 
   private timestamp(): string {
     return this.now().toISOString();
+  }
+
+  getExecutionOutput(experimentId: string) {
+    const record = this.store.getExecution(experimentId);
+    return record?.output_directory ? executionOutput(record.output_directory) : null;
+  }
+
+  private saveExecution(record: ExecutionStateRecord) {
+    if (record.queue) record.experiment.observed_context = { ...(record.experiment.observed_context ?? {}), runner_queue: record.queue };
+    if (TERMINAL_STATUSES.has(record.experiment.status) && record.experiment.observed_context?.measurement_environment) {
+      const environment = record.experiment.observed_context.measurement_environment as { before: unknown; after: unknown };
+      if (!environment.after) environment.after = observeMeasurementEnvironment();
+    }
+    this.store.saveExecution(record);
+    if (!record.output_directory) return;
+    fs.mkdirSync(record.output_directory, { recursive: true });
+    const manifest = path.join(path.dirname(record.output_directory), 'run.json');
+    const temporary = manifest + '.tmp';
+    fs.writeFileSync(temporary, JSON.stringify({ experiment: record.experiment, source: record.candidate,
+      current_step: record.current_step, failure: record.failure, commands: record.steps, build_directory: record.build_directory,
+      logs: { stdout: path.join(record.output_directory, 'stdout.log'), stderr: path.join(record.output_directory, 'stderr.log') },
+      artifacts: executionOutput(record.output_directory).artifacts }, null, 2) + '\n');
+    fs.renameSync(temporary, manifest);
   }
 
   private requireInitialized(): void {
@@ -792,7 +907,30 @@ function parseExecutionPlan(
   }
   const steps = input.steps.map((item, index) => parseStep(item, index, workspaceRoot, experiment, candidate, evaluator));
   if (experiment.type === 'FORMAL_EVALUATION' && formalBundle) validateFormalPlan(steps, formalBundle, evaluator as StagedEvaluatorIdentity, experiment);
-  return { experiment, ...(candidate ? { candidate } : {}), ...(evaluator ? { evaluator } : {}), steps };
+  let outputDirectory: string | undefined;
+  if (input.output_directory !== undefined) {
+    if (typeof input.output_directory !== 'string') throw new RunnerPlanError('output_directory must be a path');
+    outputDirectory = containedRunnerPath(workspaceRoot, input.output_directory);
+    if (path.basename(outputDirectory) !== 'logs') throw new RunnerPlanError('output_directory must be a run-specific logs/ directory');
+    if ([candidate?.workspace_path, evaluator?.workspace_path].some(root => root && (isInside(outputDirectory!, root) || isInside(root, outputDirectory!)))) {
+      throw new RunnerPlanError('output_directory must be disjoint from source and evaluator');
+    }
+    const artifacts = path.join(path.dirname(outputDirectory), 'artifacts');
+    if ([candidate?.workspace_path, evaluator?.workspace_path].some(root => root && (isInside(artifacts, root) || isInside(root, artifacts)))) {
+      throw new RunnerPlanError('artifact export directory must be disjoint from source and evaluator');
+    }
+  }
+  let buildDirectory: string | undefined;
+  if (input.build_directory !== undefined) {
+    if (typeof input.build_directory !== 'string') throw new RunnerPlanError('build_directory must be a path');
+    buildDirectory = containedRunnerPath(workspaceRoot, input.build_directory);
+    if ([candidate?.workspace_path, evaluator?.workspace_path, outputDirectory,
+      ...(outputDirectory ? [path.join(path.dirname(outputDirectory), 'artifacts')] : [])].some(root => root && (isInside(buildDirectory!, root) || isInside(root, buildDirectory!)))) {
+      throw new RunnerPlanError('build_directory must be disjoint from source, evaluator, logs and exported artifacts');
+    }
+  }
+  return { experiment, ...(candidate ? { candidate } : {}), ...(evaluator ? { evaluator } : {}), steps,
+    ...(outputDirectory ? { output_directory: outputDirectory } : {}), ...(buildDirectory ? { build_directory: buildDirectory } : {}) };
 }
 
 function parseCandidate(value: unknown, experiment: Experiment, workspaceRoot: string): StagedCandidateIdentity {
@@ -894,12 +1032,21 @@ function parseStep(
     throw new RunnerPlanError(`steps[${index}].measurements_from_stdout must be boolean`);
   }
   const formalContext = input.formal_context === undefined ? undefined : parseFormalContext(input.formal_context, index, workspaceRoot);
+  let probe: ExperimentExecutionStep['diagnostic_probe'];
+  if (input.diagnostic_probe !== undefined) {
+    const data = requireRecord(input.diagnostic_probe, 'diagnostic_probe');
+    if (experiment.type !== 'DEVELOPMENT_FEEDBACK' || formalContext?.phase !== 'CORRECTNESS_CASE' || input.step !== 'CORRECTNESS'
+      || typeof data.probe_id !== 'string' || !/^[A-Za-z0-9_.-]{1,80}$/.test(data.probe_id) || typeof data.defect !== 'string' || !data.defect.trim()
+      || typeof data.input_id !== 'string' || !data.input_id.trim() || !formalContext.artifact.artifact_id.startsWith('sensitivity:')) throw new RunnerPlanError('Known-bad probes are only allowed as development correctness diagnostics');
+    probe = { probe_id: data.probe_id, defect: data.defect, input_id: data.input_id };
+  }
   return {
     step: input.step as ExperimentStep,
     command,
     ...(executionDomain ? { execution_domain: executionDomain } : {}),
     ...(input.measurements_from_stdout === true ? { measurements_from_stdout: true } : {}),
     ...(formalContext ? { formal_context: formalContext } : {}),
+    ...(probe ? { diagnostic_probe: probe } : {}),
   };
 }
 
@@ -926,9 +1073,19 @@ function parseFormalContext(value: unknown, index: number, workspaceRoot: string
   if (artifact.sha256 !== null && (typeof artifact.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(artifact.sha256))) {
     throw new RunnerPlanError(`steps[${index}].formal_context.artifact.sha256 must be null or a SHA-256 digest`);
   }
+  const dependencies = artifact.dependencies === undefined ? undefined : artifact.dependencies;
+  if (dependencies !== undefined && (!Array.isArray(dependencies) || dependencies.length > 256 || dependencies.some(item =>
+    !item || typeof item.path !== 'string' || !path.isAbsolute(item.path) ||
+    typeof item.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(item.sha256)))) {
+    throw new RunnerPlanError(`steps[${index}].formal_context.artifact.dependencies must contain absolute paths and SHA-256 digests`);
+  }
+  if (dependencies && new Set(dependencies.map(item => path.resolve(item.path))).size !== dependencies.length) {
+    throw new RunnerPlanError(`steps[${index}].formal_context.artifact.dependencies contains duplicate paths`);
+  }
   if (!Number.isInteger(resources.threads) || (resources.threads as number) < 1) throw new RunnerPlanError(`steps[${index}].formal_context.resources.threads must be positive`);
   if (typeof resources.cpu_set !== 'string' || resources.cpu_set.trim() === '') throw new RunnerPlanError(`steps[${index}].formal_context.resources.cpu_set must be non-empty`);
   if (!Number.isInteger(resources.numa_node) || (resources.numa_node as number) < 0) throw new RunnerPlanError(`steps[${index}].formal_context.resources.numa_node must be non-negative`);
+  if (resources.omp_proc_bind !== undefined && !['close', 'spread'].includes(String(resources.omp_proc_bind))) throw new RunnerPlanError('invalid OpenMP thread placement');
   return {
     phase: raw.phase,
     subject_id: raw.subject_id,
@@ -939,11 +1096,13 @@ function parseFormalContext(value: unknown, index: number, workspaceRoot: string
       artifact_id: artifact.artifact_id,
       path: artifactPath,
       sha256: typeof artifact.sha256 === 'string' ? artifact.sha256.toLowerCase() : null,
+      ...(dependencies ? { dependencies: dependencies.map(item => ({ path: path.resolve(item.path), sha256: item.sha256.toLowerCase() })) } : {}),
     },
     resources: {
       threads: resources.threads as number,
       cpu_set: resources.cpu_set,
       numa_node: resources.numa_node as number,
+      ...(resources.omp_proc_bind ? { omp_proc_bind: resources.omp_proc_bind as 'close' | 'spread' } : {}),
     },
   };
 }
@@ -954,6 +1113,7 @@ function validateFormalPlan(
   evaluator: StagedEvaluatorIdentity,
   experiment: Experiment,
 ): void {
+  const testPlan = readValidationTestPlan(bundle.root, bundle.manifest);
   const correctnessSteps = steps.filter((item) => item.step === 'CORRECTNESS');
   const observedCases = correctnessSteps.map((item) => item.formal_context?.subject_id ?? '');
   if (JSON.stringify(observedCases) !== JSON.stringify(bundle.manifest.correctness.case_ids)) {
@@ -973,7 +1133,7 @@ function validateFormalPlan(
       case_id: context.subject_id,
       artifact_path: context.artifact.path,
     }, `correctness case '${context.subject_id}'`);
-    validateResources(context, declared.threads, bundle);
+    validateResources(context, declared.threads, bundle, testPlan);
     if (step.measurements_from_stdout !== true) throw new RunnerPlanError(`formal correctness case '${context.subject_id}' must parse structured measurements`);
   }
 
@@ -984,10 +1144,10 @@ function validateFormalPlan(
   const expectedKeys: string[] = [];
   for (const workload of bundle.workloads.workloads) {
     for (let iteration = 0; iteration < bundle.manifest.performance.sampling.warmup_count; iteration += 1) {
-      for (const role of ['BASELINE', 'CANDIDATE'] as const) expectedKeys.push(formalKey('PERFORMANCE_WARMUP', workload.workload_id, role, iteration));
+      for (const role of performanceRoles(testPlan.sampling.order, iteration)) expectedKeys.push(formalKey('PERFORMANCE_WARMUP', workload.workload_id, role, iteration));
     }
     for (let iteration = 0; iteration < bundle.manifest.performance.sampling.sample_count; iteration += 1) {
-      for (const role of ['BASELINE', 'CANDIDATE'] as const) expectedKeys.push(formalKey('PERFORMANCE_SAMPLE', workload.workload_id, role, iteration));
+      for (const role of performanceRoles(testPlan.sampling.order, iteration)) expectedKeys.push(formalKey('PERFORMANCE_SAMPLE', workload.workload_id, role, iteration));
     }
   }
   const observedKeys: string[] = [];
@@ -1001,7 +1161,7 @@ function validateFormalPlan(
     if (context.role !== 'BASELINE' && context.role !== 'CANDIDATE') throw new RunnerPlanError(`formal performance workload '${context.subject_id}' has invalid role`);
     if (context.iteration_index === null) throw new RunnerPlanError(`formal performance workload '${context.subject_id}' requires an iteration index`);
     if (!sameJson(context.parameters, formalWorkloadParameters(workload))) throw new RunnerPlanError(`formal performance workload '${context.subject_id}' parameters differ from inventory`);
-    validateResources(context, workload.threads, bundle);
+    validateResources(context, workload.threads, bundle, testPlan);
     validateFormalCommand(step, bundle.manifest.performance.command, evaluator.workspace_path, 'performance');
     const artifactIndex = evaluatorCommandArgumentIndex(bundle.manifest.performance.command.arguments, 'artifact_path');
     if (step.command.args[artifactIndex] !== context.artifact.path) throw new RunnerPlanError(`formal performance workload '${context.subject_id}' artifact argument differs from context`);
@@ -1041,9 +1201,11 @@ function requireFormalContext(step: ExperimentExecutionStep, phase: FormalExecut
   return step.formal_context;
 }
 
-function validateResources(context: FormalExecutionContext, threads: number, bundle: LoadedFormalEvaluatorBundle): void {
-  const declared = bundle.manifest.resource_requirements;
-  if (context.resources.threads !== threads || context.resources.cpu_set !== declared.cpu_set || context.resources.numa_node !== declared.numa_node) {
+function validateResources(context: FormalExecutionContext, threads: number, bundle: LoadedFormalEvaluatorBundle, testPlan: ValidationTestPlan): void {
+  const inventory = context.phase === 'CORRECTNESS_CASE' ? bundle.correctness.cases.find(item => item.case_id === context.subject_id)
+    : bundle.workloads.workloads.find(item => item.workload_id === context.subject_id);
+  const declared = inventory ? entryResources(inventory, testPlan, bundle.manifest) : null;
+  if (!declared || context.resources.threads !== threads || !sameJson(context.resources, declared)) {
     throw new RunnerPlanError(`formal resource declaration differs from evaluator policy for '${context.subject_id}'`);
   }
 }
@@ -1109,11 +1271,11 @@ function parseCommand(value: unknown, index: number, commandRoot: string, domain
   };
 }
 
-function parseMeasurementOutput(stdout: string): MeasurementObservation[] {
+function parseMeasurementOutput(stdout: string, prefix = MEASUREMENT_PREFIX + ' '): MeasurementObservation[] {
   const output: MeasurementObservation[] = [];
   for (const line of stdout.split(/\r?\n/)) {
-    if (!line.startsWith(MEASUREMENT_PREFIX)) continue;
-    const raw = line.slice(MEASUREMENT_PREFIX.length);
+    if (!line.startsWith(prefix)) continue;
+    const raw = line.slice(prefix.length);
     let value: unknown;
     try { value = JSON.parse(raw) as unknown; }
     catch { throw new Error('measurement output contains invalid JSON'); }
@@ -1162,10 +1324,10 @@ function applyDeclaredResources(step: ExperimentExecutionStep, mode: ResourceEnf
       GOTO_NUM_THREADS: String(context.resources.threads),
       OMP_DYNAMIC: 'FALSE',
       OMP_PLACES: step.command.environment.OMP_PLACES ?? 'cores',
-      OMP_PROC_BIND: step.command.environment.OMP_PROC_BIND ?? 'spread',
-      PHYOPT_DECLARED_CPU_SET: context.resources.cpu_set,
-      PHYOPT_DECLARED_NUMA_NODE: String(context.resources.numa_node),
-      PHYOPT_RESOURCE_ENFORCEMENT: mode === 'REQUIRED' ? 'ENFORCED' : 'NOT_ENFORCED',
+      OMP_PROC_BIND: context.resources.omp_proc_bind ?? step.command.environment.OMP_PROC_BIND ?? 'spread',
+      COREPILOT_DECLARED_CPU_SET: context.resources.cpu_set,
+      COREPILOT_DECLARED_NUMA_NODE: String(context.resources.numa_node),
+      COREPILOT_RESOURCE_ENFORCEMENT: mode === 'REQUIRED' ? 'ENFORCED' : 'NOT_ENFORCED',
     },
   };
 }
@@ -1184,13 +1346,20 @@ function verifyFormalArtifact(context: FormalExecutionContext, pins: Map<string,
     );
   }
   pins.set(key, observed);
+  for (const dependency of context.artifact.dependencies ?? []) {
+    if (!fs.existsSync(dependency.path) || !fs.statSync(dependency.path).isFile() ||
+        createHash('sha256').update(fs.readFileSync(dependency.path)).digest('hex') !== dependency.sha256) {
+      throw new EvaluatorIdentityError('FORMAL_CONTRACT_VIOLATION',
+        `formal Baseline dependency differs from frozen identity: ${dependency.path}`);
+    }
+  }
   return observed;
 }
 
 function validateFormalStepOutput(
   step: ExperimentExecutionStep,
   observations: readonly MeasurementObservation[],
-  bundle: LoadedFormalEvaluatorBundle,
+  bundle: LoadedFormalEvaluatorBundle | null,
   artifactDigest: string,
   resourceContext: FormalResourceContext | null,
 ): MeasurementObservation[] {
@@ -1248,13 +1417,13 @@ function validateFormalStepOutput(
     ...observation,
     domain_payload: {
       ...structuredClone(observation.domain_payload),
-      evaluator_identity: evaluatorIdentity({
+      ...(bundle ? { evaluator_identity: evaluatorIdentity({
         evaluator_id: bundle.manifest.evaluator_id,
         version: bundle.manifest.version,
         digest: bundle.manifest.digest,
         workspace_path: bundle.root,
-      }),
-      resource_policy: resourceEvidence(bundle, context.resources.threads, resourceContext, observation.domain_payload.resource_observation),
+      }), resource_policy: resourceEvidence(bundle, context.resources.threads, resourceContext, observation.domain_payload.resource_observation) }
+        : { development_only: true, resource_policy: resourceContext }),
     },
   }];
 }
@@ -1263,12 +1432,12 @@ function validateMeasurementArtifactIdentity(
   observation: MeasurementObservation,
   context: FormalExecutionContext,
   artifactDigest: string,
-  bundle: LoadedFormalEvaluatorBundle,
+  bundle: LoadedFormalEvaluatorBundle | null,
 ): void {
   const artifact = observation.domain_payload.artifact_identity;
   if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) throw new Error(`formal measurement '${context.subject_id}' is missing artifact identity`);
   const raw = artifact as Record<string, unknown>;
-  const apiKey = `resolved_${bundle.manifest.domain.api.replace(/[^A-Za-z0-9_]/g, '_')}_path`;
+  const apiKey = `resolved_${bundle?.manifest.domain.api.replace(/[^A-Za-z0-9_]/g, '_') ?? ''}_path`;
   const resolvedPath = raw.resolved_symbol_path ?? raw[apiKey];
   if (typeof raw.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(raw.sha256) ||
       typeof resolvedPath !== 'string' || resolvedPath.trim() === '') {
@@ -1372,7 +1541,17 @@ function mergeResourceContext(record: ExecutionStateRecord, context: FormalResou
     runtime_thread_observation: context.observed.runtime_thread_observation,
   };
   const count = typeof policy.validated_command_count === 'number' ? policy.validated_command_count : 0;
-  policy.applied = context.applied ? structuredClone(context.applied) : null;
+  // Keep a summary per actual policy; a matrix has more than one applied context.
+  const configurations = Array.isArray(policy.configurations) ? policy.configurations as Array<Record<string, unknown>> : [];
+  const key = JSON.stringify(context.declared);
+  let configuration = configurations.find(item => JSON.stringify(item.declared) === key);
+  if (!configuration) { configuration = { declared: structuredClone(context.declared), validated_command_count: 0 }; configurations.push(configuration); }
+  configuration.applied = structuredClone(context.applied);
+  configuration.observed = structuredClone(context.observed);
+  configuration.validity = configuration.validity === 'INVALID' ? 'INVALID' : context.validity;
+  configuration.validated_command_count = Number(configuration.validated_command_count) + (context.validity === 'VALID' ? 1 : 0);
+  policy.configurations = configurations;
+  policy.applied = configurations.length === 1 ? structuredClone(context.applied) : null;
   policy.observed = { cpu_sets: cpuSets, child_cpu_sets: childCpuSets, numa_policies: numaPolicies, thread_counts: threadCounts };
   policy.enforcement = structuredClone(context.enforcement);
   policy.validity = context.validity === 'INVALID' ? 'INVALID' : (policy.validity === 'INVALID' ? 'INVALID' : context.validity);

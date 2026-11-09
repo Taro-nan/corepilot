@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { RunnerClient, RunnerClientError } from '../src/client/runner-client.js';
 import { OPTIMIZATION_DOMAIN_SCHEMA_VERSION, type Experiment } from '../src/contracts/optimization-domain.js';
@@ -16,6 +17,44 @@ import { runValidationCommand } from '../src/workspace/validation-runner.js';
 import { createFormalEvaluatorFixture, type FormalEvaluatorFixtureOptions } from './formal-evaluator-fixture.js';
 
 const TOKEN = 'formal-evaluator-test-token';
+
+test('frozen evaluator namespace drives RPC measurements without changing content or qualification', async () => {
+  const harness = await createHarness();
+  try {
+    for (const correctnessValue of ['PASS', 'FAIL'] as const) {
+      const { plan, digest } = makePlan(harness.root, `producer-${correctnessValue}`, { measurementNamespace: 'ARCHIVE', correctnessValue }, true);
+      const before = fs.readFileSync(path.join(plan.evaluator!.workspace_path, 'qualification.json'));
+      await harness.client.submitExperiment(plan);
+      const result = await waitForStatus(harness.client, plan.experiment.experiment_id, [correctnessValue === 'PASS' ? 'SUCCEEDED' : 'FAILED']);
+      const measurements = (await harness.client.getMeasurements(plan.experiment.experiment_id)).measurements;
+      assert.equal(measurements[0]?.value, correctnessValue);
+      if (correctnessValue === 'PASS') assert.ok(measurements.some(row => row.kind === 'PERFORMANCE_SAMPLE'));
+      else assert.equal(result.failure_classification?.failure_origin, 'CANDIDATE');
+      assert.equal(evaluatorContentSha256(plan.evaluator!.workspace_path), digest);
+      assert.deepEqual(fs.readFileSync(path.join(plan.evaluator!.workspace_path, 'qualification.json')), before);
+      assert.equal(loadFormalEvaluatorBundle(plan.evaluator!.workspace_path).manifest.digest_algorithm, 'archive-evaluator-content-sha256-v1');
+    }
+  } finally { await harness.close(); }
+});
+
+test('Python imports during evaluator setup, correctness and performance preserve the qualified content identity', async t => {
+  const python = process.platform === 'win32' ? 'python' : 'python3';
+  if (spawnSync(python, ['--version'], { windowsHide: true }).status !== 0) return t.skip('Python is unavailable; real-target validation covers Python imports separately');
+  const h = await createHarness();
+  try {
+    const { plan, digest } = makePlan(h.root, 'python-imports', { pythonImportExecutable: python }, true);
+    const candidateRoot = plan.candidate.workspace_path;
+    plan.steps.unshift({ step: 'BUILD', execution_domain: 'CANDIDATE', command: { executable: process.execPath,
+      args: ['-e', 'process.exit(0)'], cwd: candidateRoot, environment: {}, timeout_ms: 5000 } });
+    for (const step of plan.steps.filter(step => step.execution_domain === 'EVALUATOR')) assert.equal(step.command.environment.PYTHONDONTWRITEBYTECODE, '1');
+    await h.client.submitExperiment(plan);
+    const result = await waitForStatus(h.client, plan.experiment.experiment_id, ['SUCCEEDED', 'FAILED']);
+    assert.equal(result.status, 'SUCCEEDED', JSON.stringify(result.failure));
+    assert.equal(evaluatorContentSha256(plan.evaluator!.workspace_path), digest);
+    assert.equal(fs.existsSync(path.join(plan.evaluator!.workspace_path, '__pycache__')), false);
+    assert.ok((await h.client.getMeasurements(plan.experiment.experiment_id)).measurements.some(m => m.kind === 'PERFORMANCE_SAMPLE'));
+  } finally { await h.close(); }
+});
 
 test('child CPU affinity may narrow inside but cannot escape the declared taskset envelope', () => {
   assert.equal(cpuSetIsSubset('0', '0-15'), true);
@@ -78,7 +117,7 @@ test('checked-in SAXPY onboarding bundle uses generic parameters and remains unq
 });
 
 test('qualification attestation is outside evaluator content identity and binds the exact subject digest', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-attestation-content-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-attestation-content-'));
   try {
     const fixture = createFormalEvaluatorFixture(root);
     const before = evaluatorContentSha256(root);
@@ -101,7 +140,7 @@ test('qualification attestation is outside evaluator content identity and binds 
 });
 
 test('target execution facts cannot promote an attestation without explicit owner approval', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-attestation-approval-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-attestation-approval-'));
   try {
     const fixture = createFormalEvaluatorFixture(root, {
       state: 'QUALIFICATION_PENDING',
@@ -119,7 +158,7 @@ test('target execution facts cannot promote an attestation without explicit owne
 });
 
 test('changing evaluator content invalidates the prior qualification without changing the attestation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-attestation-invalidated-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-attestation-invalidated-'));
   try {
     const fixture = createFormalEvaluatorFixture(root);
     const qualificationBefore = fs.readFileSync(path.join(root, 'qualification.json'), 'utf8');
@@ -351,7 +390,7 @@ test('missing measurement fields, evaluator errors, and timeouts stay distinct o
 });
 
 test('missing required Runner observations report the missing resource fields', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-missing-resource-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-missing-resource-'));
   const prepared = makePlan(root, 'missing-runtime-threads', {}, false);
   const server = await startRunnerHttpServer({
     host: '127.0.0.1', port: 0, token: TOKEN, dbPath: path.join(root, 'runner.sqlite'), workspaceRoot: root,
@@ -379,7 +418,7 @@ test('missing required Runner observations report the missing resource fields', 
 });
 
 test('missing thread environment in the Runner resource context is not a generic invalid result', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-missing-thread-environment-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-missing-thread-environment-'));
   const prepared = makePlan(root, 'missing-thread-environment', {}, false);
   const server = await startRunnerHttpServer({
     host: '127.0.0.1', port: 0, token: TOKEN, dbPath: path.join(root, 'runner.sqlite'), workspaceRoot: root,
@@ -405,7 +444,7 @@ test('missing thread environment in the Runner resource context is not a generic
 });
 
 test('required resource enforcement records declared/applied/observed facts and rejects mismatch before evidence', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-formal-resources-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-formal-resources-'));
   const valid = makePlan(root, 'target-validated-resources', { state: 'TARGET_VALIDATED' }, true);
   const validRunner = fakeResourceRunner(false);
   let server = await startRunnerHttpServer({
@@ -514,7 +553,7 @@ function pendingExperiment(id: string, evaluatorDigest: string): Experiment {
 }
 
 async function createHarness() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-formal-evaluator-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-formal-evaluator-'));
   const server = await startRunnerHttpServer({
     host: '127.0.0.1', port: 0, token: TOKEN, dbPath: path.join(root, 'runner.sqlite'), workspaceRoot: root,
   });

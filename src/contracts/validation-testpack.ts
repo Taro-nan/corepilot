@@ -97,6 +97,8 @@ export interface ValidationTestpack {
     };
     thresholds: PerformanceThresholds;
     key_cases: string[];
+    /** Omission keeps historical gate semantics; new qualified plans explicitly select a statistical policy. */
+    statistics?: import('./performance-statistics.js').PerformanceStatisticsPolicy;
   };
   revalidation: {
     formal: RevalidationRequirement;

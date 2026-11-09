@@ -35,13 +35,13 @@ async function main() {
   const workspace = path.join(dir, 'workspace');
   mkdirSync(workspace);
   writeFileSync(path.join(workspace, 'fixture.c'), 'int fixture;\n');
-  const dbPath = path.join(dir, 'phyopt.sqlite');
+  const dbPath = path.join(dir, 'corepilot.sqlite');
   const extDir = path.join(dir, 'extensions');
   mkdirSync(extDir);
   const userDataDir = path.join(dir, 'user-data');
   const cwd = path.resolve('.');
 
-  const vsix = path.resolve('extensions/vscode/phyopt-agent-vscode-0.2.0.vsix');
+  const vsix = path.resolve('extensions/vscode/corepilot-agent-vscode-0.2.0.vsix');
   const codePath = findCodePath();
   console.log('VSCODE', codePath);
 
@@ -50,7 +50,7 @@ async function main() {
   mkdirSync(unpackDir);
   const unzip = spawnSync('unzip', ['-q', toUnix(vsix), '-d', toUnix(unpackDir)], { encoding: 'utf8' });
   if (unzip.status !== 0) throw new Error(`vsix unpack failed: ${unzip.stderr}`);
-  const extTarget = path.join(extDir, 'phyopt.phyopt-agent-vscode-0.2.0');
+  const extTarget = path.join(extDir, 'corepilot.corepilot-agent-vscode-0.2.0');
   mkdirSync(extTarget, { recursive: true });
   for (const entry of ['package.json', 'dist', 'media']) {
     const src = path.join(unpackDir, 'extension', entry);
@@ -59,7 +59,7 @@ async function main() {
   if (!existsSync(path.join(extTarget, 'package.json'))) throw new Error('VSIX install missing package.json');
   // confirm the installed manifest identifies the extension (publisher.name)
   const manifest = JSON.parse(readFileSync(path.join(extTarget, 'package.json'), 'utf8'));
-  if (manifest.name !== 'phyopt-agent-vscode' || manifest.publisher !== 'phyopt') {
+  if (manifest.name !== 'corepilot-agent-vscode' || manifest.publisher !== 'corepilot') {
     throw new Error(`unexpected extension manifest: ${manifest.publisher}.${manifest.name}`);
   }
   console.log('INSTALL_OK', extTarget);
@@ -101,7 +101,7 @@ async function main() {
     extensionDevelopmentPath: extTarget, // the INSTALLED extension dir
     extensionTestsPath: runnerJs,
     launchArgs,
-    extensionTestsEnv: { PHYOPT_SERVER_URL: serverUrl, PHYOPT_PHASE: '1' },
+    extensionTestsEnv: { COREPILOT_SERVER_URL: serverUrl, COREPILOT_PHASE: '1' },
   });
   console.log('EDP1_RC', rc1);
   if (rc1 !== 0) throw new Error('EDP phase 1 failed (installed VSIX)');
@@ -118,7 +118,7 @@ async function main() {
     extensionDevelopmentPath: extTarget,
     extensionTestsPath: runnerJs,
     launchArgs,
-    extensionTestsEnv: { PHYOPT_SERVER_URL: serverUrl, PHYOPT_PHASE: '2' },
+    extensionTestsEnv: { COREPILOT_SERVER_URL: serverUrl, COREPILOT_PHASE: '2' },
   });
   console.log('EDP2_RC', rc2);
   if (rc2 !== 0) throw new Error('EDP phase 2 failed (installed VSIX)');

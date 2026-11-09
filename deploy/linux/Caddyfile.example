@@ -1,0 +1,4 @@
+# Replace the hostname with the server's DNS name; Caddy handles HTTPS.
+corepilot.example.com {
+    reverse_proxy 127.0.0.1:4317
+}

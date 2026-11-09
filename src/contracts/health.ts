@@ -1,4 +1,4 @@
-import { PHYOPT_API_VERSION, VERSION } from '../version.js';
+import { COREPILOT_API_VERSION, VERSION } from '../version.js';
 
 /**
  * Health envelope returned by `GET /v1/health`.
@@ -6,7 +6,7 @@ import { PHYOPT_API_VERSION, VERSION } from '../version.js';
  * 后台管理器使用 `service`、`api_version` 和 `runner` 判断是否可复用进程。
  */
 export interface BackendHealth {
-  service: 'phyopt';
+  service: 'corepilot';
   api_version: number;
   version: string;
   runner: 'workflow';
@@ -20,8 +20,8 @@ export interface BackendHealthInput {
 
 export function buildHealth(input: BackendHealthInput): BackendHealth {
   return {
-    service: 'phyopt',
-    api_version: PHYOPT_API_VERSION,
+    service: 'corepilot',
+    api_version: COREPILOT_API_VERSION,
     version: VERSION,
     runner: 'workflow',
     status: 'ok',
@@ -29,9 +29,9 @@ export function buildHealth(input: BackendHealthInput): BackendHealth {
   };
 }
 
-/** True when a parsed JSON body looks like a PhyOpt backend health envelope. */
-export function isPhyoptHealth(value: unknown): value is BackendHealth {
+/** True when a parsed JSON body looks like a CorePilot backend health envelope. */
+export function isCorePilotHealth(value: unknown): value is BackendHealth {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
-  return v.service === 'phyopt' && typeof v.api_version === 'number' && v.status === 'ok';
+  return v.service === 'corepilot' && typeof v.api_version === 'number' && v.status === 'ok';
 }

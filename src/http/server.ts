@@ -1,43 +1,33 @@
 import http from 'node:http';
+import fs from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { ApiError } from '../core/api-error.js';
 import type { TaskHost } from '../core/task-host.js';
 import type { OptimizationWorkflowService } from '../workflow/optimization-workflow-service.js';
-import { parsePublicWorkflowRequest, PublicWorkflowRequestError, PHYOPT_MODEL_API_KEY_HEADER } from '../contracts/public-workflow.js';
+import { parsePublicWorkflowRequest, PublicWorkflowRequestError, COREPILOT_MODEL_API_KEY_HEADER } from '../contracts/public-workflow.js';
 import { MOCK_SCENARIOS, type MockScenario } from '../contracts/task.js';
 import { makeTarget } from '../contracts/target.js';
 import { buildHealth } from '../contracts/health.js';
 import { MANAGED_SHUTDOWN_PATH, MANAGED_SHUTDOWN_TOKEN_HEADER } from '../backend/managed-control.js';
-
-const MAX_BODY_BYTES = 1024 * 1024;
+import { readJson, sendJson } from './json.js';
+import { ServerAccess } from './access.js';
+import { serveWeb } from './static.js';
+import { projectRoutes } from './project-routes.js';
+import { machineRoutes } from './machine-routes.js';
+import { testingRoutes } from './testing-routes.js';
+import type { TestingService } from '../application/testing-service.js';
+import type { ProjectService } from '../application/project-service.js';
+import { redactRecord, redactReportText } from '../report/optimization-report.js';
 
 export interface HttpServerOptions {
   host: string;
   port: number;
   workflowService: OptimizationWorkflowService;
+  projectService?: ProjectService;
+  testingService?: TestingService;
+  webRoot?: string;
+  accessToken?: string;
   managedShutdown?: { token: string; requestShutdown: () => void };
-}
-
-function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(payload) });
-  res.end(payload);
-}
-
-async function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += (chunk as Buffer).byteLength;
-    if (total > MAX_BODY_BYTES) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'request body too large');
-    chunks.push(chunk as Buffer);
-  }
-  if (chunks.length === 0) return {};
-  try {
-    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('body must be an object');
-    return parsed as Record<string, unknown>;
-  } catch { throw new ApiError(400, 'INVALID_JSON', 'request body is not valid JSON object'); }
 }
 
 function requireString(value: unknown, field: string): string {
@@ -54,10 +44,17 @@ function safeToken(actual: string | string[] | undefined, expected: string): boo
 
 /** 同时承载通用任务 API 和新的 public optimize workflow API。 */
 export function createHttpServer(host: TaskHost, options: HttpServerOptions): http.Server {
+  const access = new ServerAccess(options.accessToken);
   const server = http.createServer((req, res) => {
-    void handle(host, req, res, options).catch((error: unknown) => {
+    void (async () => {
+      const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+      if (await access.handle(req, res, pathname)) return;
+      if (options.webRoot && await serveWeb(req, res, options.webRoot, pathname)) return;
+      await handle(host, req, res, options);
+    })().catch((error: unknown) => {
       const err = error instanceof ApiError ? error : new ApiError(500, 'INTERNAL', (error as Error).message);
-      sendJson(res, err.statusCode, { error: { code: err.code, message: err.message } });
+      if (!res.headersSent) sendJson(res, err.statusCode, { error: { code: err.code, message: redactReportText(err.message), ...(err.details ? { details: redactRecord(err.details) } : {}) } });
+      else res.destroy();
     });
   });
   server.listen(options.port, options.host);
@@ -70,7 +67,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   const pathname = url.pathname;
 
   if (method === 'GET' && pathname === '/v1/health') {
-    sendJson(res, 200, buildHealth({ capabilities: ['workflows', 'tasks', 'events'] }));
+    sendJson(res, 200, buildHealth({ capabilities: ['workflows', 'workflow-reports', 'optimization-sessions', 'tasks', 'events', ...(options.projectService ? ['projects'] : []), ...(options.testingService ? ['testing-tasks'] : []), ...(options.webRoot ? ['web'] : [])] }));
     return;
   }
   if (method === 'POST' && pathname === MANAGED_SHUTDOWN_PATH) {
@@ -83,21 +80,100 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
 
   if (method === 'POST' && pathname === '/v1/workflows') {
     try {
-      const request = parsePublicWorkflowRequest(await readJson(req));
-      const header = req.headers[PHYOPT_MODEL_API_KEY_HEADER];
-      const submitted = options.workflowService.submitPublic(request, { ...(typeof header === 'string' ? { cliApiKey: header } : {}) });
-      sendJson(res, 202, { workflow_id: submitted.workflowId, status: 'CREATED', function_name: request.function_name, entry_file: request.entry_file, ...(request.enable_performance === undefined ? {} : { enable_performance: request.enable_performance }) });
+      const body = await readJson(req);
+      const resolved = typeof body.project_id === 'string' && options.projectService
+        ? options.projectService.request(body.project_id, body) : body;
+      const request = parsePublicWorkflowRequest(resolved);
+      const header = req.headers[COREPILOT_MODEL_API_KEY_HEADER];
+      const requestId = req.headers['idempotency-key'];
+      if (requestId && (typeof requestId !== 'string' || requestId.length > 200)) throw new Error('invalid Idempotency-Key');
+      const submitted = options.workflowService.submitPublic(request, { ...(typeof header === 'string' ? { cliApiKey: header } : {}), ...(typeof requestId === 'string' ? { requestId } : {}), packageLoader: options.projectService?.packageLoader });
+      sendJson(res, 202, { workflow_id: submitted.workflowId, status: options.workflowService.get(submitted.workflowId)?.status ?? 'CREATED', function_name: request.function_name, entry_file: request.entry_file, ...(request.enable_performance === undefined ? {} : { enable_performance: request.enable_performance }) });
     } catch (error) {
       if (error instanceof PublicWorkflowRequestError) throw new ApiError(400, 'INVALID_ARGUMENT', error.message);
       throw new ApiError(400, 'INVALID_WORKFLOW_CONFIG', (error as Error).message);
     }
     return;
   }
+  if (options.testingService && await testingRoutes(req, res, url, options.testingService)) return;
+  if (options.projectService) {
+    try {
+      if (await machineRoutes(req, res, url, options.projectService.machines)) return;
+      if (await projectRoutes(req, res, url, options.projectService, options.workflowService)) return;
+    }
+    catch (error) {
+      if (error instanceof ApiError) throw error;
+      const message = (error as Error).message;
+      throw new ApiError(message === 'project not found' ? 404 : 400, 'PROJECT_OPERATION_FAILED', message);
+    }
+  }
+  if (method === 'GET' && pathname === '/v1/workflows') {
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new ApiError(400, 'INVALID_ARGUMENT', 'limit must be an integer in 1..200');
+    sendJson(res, 200, { workflows: options.workflowService.list(limit), active_workflow_ids: options.workflowService.activeWorkflowIds() });
+    return;
+  }
+  const workflowReport = pathname.match(/^\/v1\/workflows\/([^/]+)\/report$/);
+  const workflowEvents = pathname.match(/^\/v1\/workflows\/([^/]+)\/events$/);
+  if (method === 'GET' && workflowEvents) {
+    const after = Number(url.searchParams.get('after') ?? 0);
+    const limit = Number(url.searchParams.get('limit') ?? 100);
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new ApiError(400, 'INVALID_ARGUMENT', 'invalid event cursor or limit');
+    const events = await options.workflowService.sessionEvents(decodeURIComponent(workflowEvents[1]), after, limit);
+    if (!events) throw new ApiError(404, 'WORKFLOW_NOT_FOUND', 'workflow not found');
+    sendJson(res, 200, events); return;
+  }
+  const workflowSessionAction = pathname.match(/^\/v1\/workflows\/([^/]+)\/(resume|messages|retry-validation)$/);
+  if (method === 'POST' && workflowSessionAction) {
+    const body = await readJson(req);
+    const id = decodeURIComponent(workflowSessionAction[1]);
+    if (!options.workflowService.get(id)) throw new ApiError(404, 'WORKFLOW_NOT_FOUND', 'workflow not found');
+    try {
+      if (workflowSessionAction[2] === 'retry-validation') {
+        if (Object.keys(body).some(key => key !== 'expected_candidate_id')) throw new Error('retry-validation accepts only expected_candidate_id');
+        const header = req.headers['x-corepilot-model-api-key'];
+        sendJson(res, 202, options.workflowService.retryValidationPublic(id, {
+          ...(body.expected_candidate_id === undefined ? {} : { expectedCandidateId: requireString(body.expected_candidate_id, 'expected_candidate_id') }),
+          ...(typeof header === 'string' ? { cliApiKey: header } : {}), packageLoader: options.projectService?.packageLoader,
+        }));
+      } else if (workflowSessionAction[2] === 'messages') {
+        await options.workflowService.sendMessage(id, requireString(body.message, 'message'));
+        sendJson(res, 202, { workflow_id: id, status: 'QUEUED' });
+      } else {
+        if (body.budget !== undefined && (!body.budget || typeof body.budget !== 'object' || Array.isArray(body.budget))) throw new Error('budget must be an object');
+        const budget = body.budget as import('../contracts/optimization-session.js').OptimizationSessionBudget | undefined;
+        if (budget && Object.keys(budget).some(key => !['time_limit_ms', 'max_candidates'].includes(key))) throw new Error('unknown budget field');
+        const header = req.headers['x-corepilot-model-api-key'];
+        const result = options.workflowService.resumePublic(id, { ...(body.message === undefined ? {} : { message: requireString(body.message, 'message') }),
+          ...(budget ? { budget } : {}), ...(typeof header === 'string' ? { cliApiKey: header } : {}), packageLoader: options.projectService?.packageLoader });
+        sendJson(res, 202, result);
+      }
+    } catch (error) { throw new ApiError(409, 'WORKFLOW_CONTINUATION_REJECTED', (error as Error).message); }
+    return;
+  }
+  if (method === 'GET' && workflowReport) {
+    const report = options.workflowService.report(decodeURIComponent(workflowReport[1]));
+    if (!report) throw new ApiError(404, 'WORKFLOW_NOT_FOUND', 'workflow not found');
+    sendJson(res, 200, report);
+    return;
+  }
+  const reproduction = pathname.match(/^\/v1\/workflows\/([^/]+)\/reproduction(?:\/(cancel))?$/);
+  if (reproduction && options.workflowService) {
+    const id = decodeURIComponent(reproduction[1]);
+    try {
+      if (method === 'GET' && !reproduction[2]) { sendJson(res, 200, options.workflowService.reproductions.manifest(id)); return; }
+      if (method === 'POST' && reproduction[2] === 'cancel') { await options.workflowService.reproductions.cancel(id); sendJson(res, 202, { status: 'CANCEL_REQUESTED' }); return; }
+      if (method === 'POST' && !reproduction[2]) {
+        if (options.workflowService.activeWorkflowIds().includes(id)) throw new Error('优化任务仍在运行，请等待它结束后复现冻结候选');
+        sendJson(res, 202, options.workflowService.reproductions.start(id)); return;
+      }
+    } catch (error) { throw new ApiError(409, 'REPRODUCTION_REJECTED', (error as Error).message); }
+  }
   const workflow = pathname.match(/^\/v1\/workflows\/([^/]+)$/);
   if (method === 'GET' && workflow) {
     const record = options.workflowService.get(decodeURIComponent(workflow[1]));
     if (!record) throw new ApiError(404, 'WORKFLOW_NOT_FOUND', 'workflow not found');
-    sendJson(res, 200, { workflow: record });
+    sendJson(res, 200, { workflow: record, execution_attached: options.workflowService.activeWorkflowIds().includes(record.workflow_id) });
     return;
   }
   const workflowCancel = pathname.match(/^\/v1\/workflows\/([^/]+)\/cancel$/);
@@ -107,12 +183,56 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
     sendJson(res, 200, result);
     return;
   }
+  const workflowEvidence = pathname.match(/^\/v1\/workflows\/([^/]+)\/evidence(?:\/(archive))?$/);
+  if (workflowEvidence && (method === 'GET' || method === 'POST')) {
+    const id = decodeURIComponent(workflowEvidence[1]);
+    try {
+      if (method === 'POST' && !workflowEvidence[2]) {
+        await readJson(req);
+        sendJson(res, 200, { snapshot: options.workflowService.approvals.prepare(id) }); return;
+      }
+      if (method === 'GET') {
+        const result = options.workflowService.approvals.evidence(id);
+        if (!workflowEvidence[2]) { sendJson(res, 200, result); return; }
+        res.writeHead(200, { 'Content-Type': 'application/gzip', 'Content-Disposition': 'attachment; filename="corepilot-evidence.json.gz"' });
+        fs.createReadStream(result.snapshot.artifact.archive_path).on('error', error => res.destroy(error)).pipe(res); return;
+      }
+    } catch (error) { throw new ApiError(409, 'WORKFLOW_EVIDENCE_REJECTED', (error as Error).message); }
+  }
+  const workflowHumanApproval = pathname.match(/^\/v1\/workflows\/([^/]+)\/approval$/);
+  if (method === 'POST' && workflowHumanApproval) {
+    const body = await readJson(req);
+    try {
+      const approval = options.workflowService.approvals.approve(decodeURIComponent(workflowHumanApproval[1]), {
+        expectedDigest: requireString(body.expected_evidence_digest, 'expected_evidence_digest'),
+        reviewer: requireString(body.reviewer, 'reviewer'), authorizationReference: requireString(body.authorization_reference, 'authorization_reference'),
+      });
+      sendJson(res, 200, { approval }); return;
+    } catch (error) { if (error instanceof ApiError) throw error; throw new ApiError(409, 'WORKFLOW_HUMAN_APPROVAL_REJECTED', (error as Error).message); }
+  }
+  const workflowDelivery = pathname.match(/^\/v1\/workflows\/([^/]+)\/delivery\/(reconcile|resume|withdraw|cleanup)$/);
+  if (method === 'POST' && workflowDelivery) {
+    const id = decodeURIComponent(workflowDelivery[1]);
+    const body = await readJson(req);
+    try {
+      if (workflowDelivery[2] === 'reconcile') { sendJson(res, 200, { workflow: await options.workflowService.deliveries.reconcile(id) }); return; }
+      if (workflowDelivery[2] === 'cleanup') { sendJson(res, 200, { workflow: await options.workflowService.deliveries.retryCleanup(id) }); return; }
+      if (body.confirmed_stopped !== undefined && typeof body.confirmed_stopped !== 'boolean') throw new Error('confirmed_stopped 必须是布尔值');
+      if (workflowDelivery[2] === 'withdraw') { sendJson(res, 200, { workflow: await options.workflowService.deliveries.withdraw(id, requireString(body.expected_operation_id, 'expected_operation_id'), body.confirmed_stopped === true) }); return; }
+      const result = await options.workflowService.deliveries.resume(id, body.confirmed_stopped === true);
+      if (!result.ok) throw new ApiError(409, 'WORKFLOW_DELIVERY_REJECTED', result.message, result.verification ? { verification: result.verification } : undefined);
+      sendJson(res, 200, { status: 'DELIVERABLE', commit: result.commit, tree: result.tree, ...(result.cleanup_warning ? { cleanup_warning: result.cleanup_warning } : {}) }); return;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(409, 'WORKFLOW_DELIVERY_REJECTED', (error as Error).message);
+    }
+  }
   const workflowApprove = pathname.match(/^\/v1\/workflows\/([^/]+)\/approve$/);
   if (method === 'POST' && workflowApprove) {
     const body = await readJson(req);
-    const result = options.workflowService.approvePublic(decodeURIComponent(workflowApprove[1]), { commitMessage: requireString(body.commit_message, 'commit_message'), ...(body.expected_baseline_commit === undefined ? {} : { expectedBaselineCommit: requireString(body.expected_baseline_commit, 'expected_baseline_commit') }) });
-    if (!result.ok) throw new ApiError(409, 'WORKFLOW_APPROVAL_REJECTED', result.message);
-    sendJson(res, 200, { status: 'DELIVERABLE', commit: result.commit, tree: result.tree });
+    const result = await options.workflowService.approvePublic(decodeURIComponent(workflowApprove[1]), { commitMessage: requireString(body.commit_message, 'commit_message'), ...(body.expected_baseline_commit === undefined ? {} : { expectedBaselineCommit: requireString(body.expected_baseline_commit, 'expected_baseline_commit') }) });
+    if (!result.ok) throw new ApiError(409, 'WORKFLOW_APPROVAL_REJECTED', result.message, result.verification ? { verification: result.verification } : undefined);
+    sendJson(res, 200, { status: 'DELIVERABLE', commit: result.commit, tree: result.tree, ...(result.cleanup_warning ? { cleanup_warning: result.cleanup_warning } : {}) });
     return;
   }
 

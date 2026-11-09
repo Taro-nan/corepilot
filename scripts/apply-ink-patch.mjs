@@ -1,4 +1,4 @@
-// Apply the phyopt resize-reflow patch to node_modules/ink.
+// Apply the corepilot resize-reflow patch to node_modules/ink.
 //
 // Why: when the terminal width shrinks, Windows terminals (conpty/Windows
 // Terminal) reflow — rewrap — the existing buffer, so ink's previous frame can
@@ -22,8 +22,8 @@ import path from 'node:path';
 const targetRoot = path.resolve(process.argv[2] ?? process.cwd());
 const inkFile = path.join(targetRoot, 'node_modules', 'ink', 'build', 'ink.js');
 
-const MARKER = '[phyopt-reflow-patch-v4]';
-const LEGACY_MARKERS = ['[phyopt-reflow-patch-v3]', '[phyopt-reflow-patch-v2]', '[phyopt-patch]'];
+const MARKER = '[corepilot-reflow-patch-v4]';
+const LEGACY_MARKERS = ['[corepilot-reflow-patch-v3]', '[corepilot-reflow-patch-v2]', '[corepilot-patch]'];
 const ORIGINAL_BRANCH = `        if (currentWidth < this.lastTerminalWidth) {
             // We clear the screen when decreasing terminal width to prevent duplicate overlapping re-renders.
             this.log.clear();
@@ -44,9 +44,9 @@ const PATCHED = `    resized = () => {
         // ${MARKER} Windows Terminal emits a burst of resize events for one
         // Ctrl+wheel gesture. Redrawing on every intermediate width can push
         // transient frames into scrollback, so wait until the width settles.
-        clearTimeout(this.phyoptResizeTimer);
-        this.phyoptResizeTimer = setTimeout(() => {
-            this.phyoptResizeTimer = undefined;
+        clearTimeout(this.corepilotResizeTimer);
+        this.corepilotResizeTimer = setTimeout(() => {
+            this.corepilotResizeTimer = undefined;
             if (this.isUnmounted || this.isUnmounting) {
                 return;
             }
@@ -115,14 +115,14 @@ if (source.includes(MARKER)) {
   process.exit(0);
 }
 
-// Migrate any earlier phyopt patch in-place. This keeps postinstall idempotent
+// Migrate any earlier corepilot patch in-place. This keeps postinstall idempotent
 // for developer trees that were patched before v4 was introduced.
 if (LEGACY_MARKERS.some((marker) => source.includes(marker))) {
-  const legacyHelper = /    \/\/ \[phyopt-patch\] Upper bound[\s\S]*?(?=    resized = \(\) => \{)/;
+  const legacyHelper = /    \/\/ \[corepilot-patch\] Upper bound[\s\S]*?(?=    resized = \(\) => \{)/;
   source = source.replace(legacyHelper, '');
   const legacyMethod = /    resized = \(\) => \{[\s\S]*?\n    \};(?=\n    resolveExitPromise)/;
   if (!legacyMethod.test(source)) {
-    console.error('[apply-ink-patch] cannot locate the previous phyopt resized() method.');
+    console.error('[apply-ink-patch] cannot locate the previous corepilot resized() method.');
     process.exit(1);
   }
   source = source.replace(legacyMethod, ORIGINAL);

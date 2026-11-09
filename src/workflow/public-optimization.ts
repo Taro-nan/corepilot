@@ -5,9 +5,15 @@ import type { LoadedValidationTestpack } from '../contracts/validation-testpack.
 import type { PublicWorkflowRequest } from '../contracts/public-workflow.js';
 import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
 import { packageTaskReference, packageValidationTestpack, resolveLibraryPackageTask, type ResolvedPackageTask } from '../library-package/task-definition.js';
+import { resolveSourceBranch } from '../workspace/git-repository.js';
+import { isRegisteredRunner } from '../config/runner-config.js';
+import type { ResolvedExecutionMachine, ExecutionMachineIdentity } from '../contracts/execution-machine.js';
+import type { LibraryPackageLoader } from '../library-package/loader.js';
 
 export interface PublicOptimizationPreflight {
+  executionMachine?: ExecutionMachineIdentity;
   request: PublicWorkflowRequest;
+  source?: { branch: string; commit: string };
   config: LoadedOptimizationConfig;
   testpack: LoadedValidationTestpack;
   libraryPackage?: ResolvedPackageTask;
@@ -21,6 +27,8 @@ export interface PublicOptimizationPreflight {
     entry_file: string | null;
     config_path: string;
     repository_root: string;
+    source_branch?: string;
+    source_commit?: string;
     config_sha256: string;
     config: OptimizationConfig;
     testpack: Record<string, unknown>;
@@ -30,21 +38,26 @@ export interface PublicOptimizationPreflight {
 /** 在模型调用和远端命令之前加载所有公开输入并完成严格校验。 */
 export function loadPublicOptimizationPreflight(
   request: PublicWorkflowRequest,
-  options: { cliApiKey?: string; env?: NodeJS.ProcessEnv } = {},
+  options: { cliApiKey?: string; env?: NodeJS.ProcessEnv; resolveMachine?: (id: string) => ResolvedExecutionMachine; packageLoader?: LibraryPackageLoader } = {},
 ): PublicOptimizationPreflight {
   const config = loadOptimizationConfig(request.config_path);
+  const machineId = request.machine_id ?? (isRegisteredRunner(config.config.runner) ? config.config.runner.machine_id : undefined);
+  const executionMachine = machineId ? options.resolveMachine?.(machineId) : undefined;
+  if (machineId && !executionMachine) throw new Error('请通过共享 Control 服务解析已注册的执行机器，例如 corepilot project check <项目 ID>。');
+  if (executionMachine) config.config = { ...config.config, runner: executionMachine.runner, target: executionMachine.target };
+  const source = request.source_branch === undefined ? undefined : resolveSourceBranch(request.repository_root ?? config.configDir, request.source_branch);
   const libraryPackage = config.config.validation.library_package
-    ? resolveLibraryPackageTask(config.config.validation.library_package, { requireQualified: true })
+    ? resolveLibraryPackageTask(config.config.validation.library_package, { requireQualified: true, loader: options.packageLoader })
     : undefined;
   if (libraryPackage) config.config.build = structuredClone(libraryPackage.build);
-  if (!isBuildConfigured(config.config.build)) throw new Error('请先使用 /build 配置构建命令。');
+  const testpack = libraryPackage
+    ? packageValidationTestpack(libraryPackage, config.config.validation.baseline_artifact ?? '')
+    : loadValidationTestpack(config.config.validation.testpack);
+  if (!isBuildConfigured(config.config.build)) throw new Error('尚未配置构建命令。请在「构建与验证」填写实际构建命令，CLI 用户可使用 /build 配置。');
   const credential = resolveOptimizationApiKey(config.config, options);
   const modelProxy = resolveOptimizationProxy(config.config, options)?.proxy;
   const runner = resolveRunnerConfig(config.config, { env: options.env });
   if (libraryPackage && runner.mode !== 'rpc') throw new Error('library package formal execution requires RPC runner mode');
-  const testpack = libraryPackage
-    ? packageValidationTestpack(libraryPackage, config.config.validation.baseline_artifact!)
-    : loadValidationTestpack(config.config.validation.testpack);
   if (request.function_name !== testpack.testpack.function_name) {
     throw new Error(`requested function '${request.function_name}' differs from testpack function '${testpack.testpack.function_name}'`);
   }
@@ -62,7 +75,9 @@ export function loadPublicOptimizationPreflight(
     }
   }
   return {
+    ...(executionMachine ? { executionMachine: executionMachine.identity } : {}),
     request,
+    ...(source ? { source } : {}),
     config,
     testpack,
     ...(libraryPackage ? { libraryPackage } : {}),
@@ -75,6 +90,7 @@ export function loadPublicOptimizationPreflight(
       config_path: config.configPath,
       // 直接 HTTP 调用没有 CLI 的 cwd；配置目录是唯一安全的默认根。
       repository_root: request.repository_root ?? config.configDir,
+      ...(source ? { source_branch: source.branch, source_commit: source.commit } : {}),
       config_sha256: config.rawSha256,
       config: redactOptimizationConfig(config.config),
       testpack: {

@@ -24,18 +24,18 @@ function configFile(root: string): string {
     'revalidation:', '  formal: { required: true, timeout_ms: 10000, command: { executable: node, args: [-e, "process.exit(0)"], cwd: ., environment: {}, timeout_ms: 10000 } }',
     '  independent: { required: true, timeout_ms: 10000, command: { executable: node, args: [-e, "process.exit(0)"], cwd: ., environment: {}, timeout_ms: 10000 } }',
   ].join('\n') + '\n');
-  const file = path.join(root, 'phyopt.yaml');
-  fs.writeFileSync(file, `model:\n  model_id: kimi-k2.7-code\n  api_key: sk-loop-secret\n  endpoint: https://api.moonshot.cn/v1\n  timeout_ms: 1000\ntarget:\n  ssh_alias: target\n  workspace_root: /tmp/phyopt\nbuild:\n  executable: node\n  args: [-e, \"process.exit(require('node:path').basename(process.cwd()) === 'build-dir' ? 0 : 9)\"]\n  cwd: build-dir\n  environment: {}\n  timeout_ms: 10000\nvalidation:\n  testpack: ${testpack}\noutput_dir: ./.phyopt/runs\n`);
+  const file = path.join(root, 'corepilot.yaml');
+  fs.writeFileSync(file, `model:\n  model_id: kimi-k2.7-code\n  api_key: sk-loop-secret\n  endpoint: https://api.moonshot.cn/v1\n  timeout_ms: 1000\ntarget:\n  ssh_alias: target\n  workspace_root: /tmp/corepilot\nbuild:\n  executable: node\n  args: [-e, \"process.exit(require('node:path').basename(process.cwd()) === 'build-dir' ? 0 : 9)\"]\n  cwd: build-dir\n  environment: {}\n  timeout_ms: 10000\nvalidation:\n  testpack: ${testpack}\noutput_dir: ./.corepilot/runs\n`);
   return file;
 }
 
 test('runs build and correctness in the validation tree and stops before approval', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-public-loop-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-public-loop-'));
   const repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   const init = spawnSync('git', ['-C', repo, 'init', '--initial-branch=main'], { encoding: 'utf8' });
   assert.equal(init.status, 0, init.stderr);
-  for (const args of [['config', 'user.email', 'test@example.invalid'], ['config', 'user.name', 'PhyOpt Test']]) {
+  for (const args of [['config', 'user.email', 'test@example.invalid'], ['config', 'user.name', 'CorePilot Test']]) {
     assert.equal(spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).status, 0);
   }
   fs.writeFileSync(path.join(repo, 'kernel.c'), 'int cblas_sgemv(void) { return 1; }\n');
@@ -71,11 +71,11 @@ test('runs build and correctness in the validation tree and stops before approva
 });
 
 test('stopping without another mutation after a regression is a normal threshold-not-met result', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-public-stop-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-public-stop-'));
   const repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   assert.equal(spawnSync('git', ['-C', repo, 'init', '--initial-branch=main'], { encoding: 'utf8' }).status, 0);
-  for (const args of [['config', 'user.email', 'test@example.invalid'], ['config', 'user.name', 'PhyOpt Test']]) {
+  for (const args of [['config', 'user.email', 'test@example.invalid'], ['config', 'user.name', 'CorePilot Test']]) {
     assert.equal(spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).status, 0);
   }
   fs.writeFileSync(path.join(repo, 'kernel.c'), 'int cblas_sgemv(void) { return 1; }\n');

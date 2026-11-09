@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const workspace = path.join(dir, 'workspace');
   mkdirSync(workspace);
   writeFileSync(path.join(workspace, 'fixture.c'), 'int fixture;\n');
-  const dbPath = path.join(dir, 'phyopt.sqlite');
+  const dbPath = path.join(dir, 'corepilot.sqlite');
   const cwd = path.resolve('.');
 
   // 1. start backend (independent of any extension host)
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     extensionDevelopmentPath: path.resolve('extensions/vscode'),
     extensionTestsPath: path.resolve('extensions/vscode/dist/test/runner.js'),
     launchArgs: [workspace, '--disable-updates', '--disable-workspace-trust'],
-    extensionTestsEnv: { PHYOPT_SERVER_URL: serverUrl, PHYOPT_PHASE: '1' },
+    extensionTestsEnv: { COREPILOT_SERVER_URL: serverUrl, COREPILOT_PHASE: '1' },
   });
   console.log('EDP1_RC', rc1);
   if (rc1 !== 0) throw new Error('EDP phase 1 failed');
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
     extensionDevelopmentPath: path.resolve('extensions/vscode'),
     extensionTestsPath: path.resolve('extensions/vscode/dist/test/runner.js'),
     launchArgs: [workspace, '--disable-updates', '--disable-workspace-trust'],
-    extensionTestsEnv: { PHYOPT_SERVER_URL: serverUrl, PHYOPT_PHASE: '2' },
+    extensionTestsEnv: { COREPILOT_SERVER_URL: serverUrl, COREPILOT_PHASE: '2' },
   });
   console.log('EDP2_RC', rc2);
   if (rc2 !== 0) throw new Error('EDP phase 2 failed');

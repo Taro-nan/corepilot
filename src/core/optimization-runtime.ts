@@ -93,6 +93,9 @@ export interface ApproveOptimizationCandidateInput {
   authorization: OptimizationApprovalRecord['authorization'];
 }
 
+export type InspectCandidateApprovalInput = Pick<ApproveOptimizationCandidateInput,
+  'taskId' | 'candidateId' | 'firstFormalExperimentId' | 'revalidationExperimentId' | 'evaluatorRoot'>;
+
 /**
  * The durable fact-recording part of the existing Optimization Runtime.
  *
@@ -150,16 +153,47 @@ export class OptimizationRuntime {
     if (existing) {
       if (existing.task_id !== input.taskId || existing.first_formal_experiment_id !== input.firstFormalExperimentId ||
           existing.revalidation_experiment_id !== input.revalidationExperimentId || existing.reviewer !== input.reviewer.trim() ||
+          existing.authorization.reference !== input.authorization.reference ||
           JSON.stringify(existing.evidence_artifact_identity) !== JSON.stringify(input.evidence)) {
         throw new Error('Candidate approval cannot change after recording');
       }
       return existing;
     }
+    const { task, candidate, first, repeated, firstMachine, machineDigest } = this.inspectCandidateApproval(input);
+    const evidence = verifyFrozenEvidenceArtifact(input.evidence);
+    const baseline = evidence.baseline as DomainIdentity | undefined;
+    const evaluator = evidence.evaluator as DomainIdentity | undefined;
+    const decision = evidence.acceptance_decision as Record<string, unknown> | undefined;
+    if (evidence.task_id !== task.task_id || evidence.workflow_id !== task.workflow_id || evidence.candidate_id !== candidate.candidate_id ||
+        evidence.candidate_commit !== candidate.source.commit || evidence.hypothesis_id !== candidate.hypothesis_id ||
+        evidence.first_formal_experiment_id !== first.experiment_id || evidence.revalidation_experiment_id !== repeated.experiment_id ||
+        evidence.machine_identity_sha256 !== machineDigest || baseline?.id !== task.performance_baseline!.id || baseline.version !== task.performance_baseline!.version || baseline.digest !== task.performance_baseline!.digest ||
+        evaluator?.id !== task.evaluator.id || evaluator.version !== task.evaluator.version || evaluator.digest !== task.evaluator.digest ||
+        decision?.decision !== 'PASS' || !evidence.claim_scope || typeof evidence.claim_scope !== 'object' || Array.isArray(evidence.claim_scope)) {
+      throw new Error('frozen Evidence does not bind the approved Candidate and experiments');
+    }
+    const record: OptimizationApprovalRecord = {
+      schema_version: 1, approval_id: this.id('approval'), task_id: task.task_id, workflow_id: task.workflow_id,
+      candidate_id: candidate.candidate_id, candidate_commit: candidate.source.commit, candidate_before: structuredClone(candidate),
+      source_baseline_identity: structuredClone(task.source_baseline), baseline_identity: structuredClone(task.performance_baseline!),
+      evaluator_identity: structuredClone(task.evaluator), evaluator_digest: task.evaluator.digest as string,
+      machine_identity: structuredClone(firstMachine), first_formal_experiment_id: first.experiment_id,
+      revalidation_experiment_id: repeated.experiment_id, evidence_artifact_identity: structuredClone(input.evidence),
+      evidence_sha256: input.evidence.archive_sha256, approval_status: 'APPROVED', evidence_status_before: 'FROZEN', evidence_status: 'APPROVED',
+      claim_scope: structuredClone(evidence.claim_scope as Record<string, unknown>), reviewer: input.reviewer.trim(), approved_at: this.timestamp(),
+      authorization: structuredClone(input.authorization),
+    };
+    this.store.recordCandidateApproval(record);
+    return record;
+  }
+
+  /** Validate the same domain facts before a user is asked to review Evidence. */
+  inspectCandidateApproval(input: InspectCandidateApprovalInput) {
     const task = this.getTask(input.taskId);
     const candidate = this.getCandidate(input.candidateId);
     if (candidate.task_id !== task.task_id || candidate.status === 'REJECTED' || candidate.status === 'APPROVED') throw new Error('Candidate is not eligible for approval');
     if (!task.performance_baseline || input.firstFormalExperimentId === input.revalidationExperimentId) throw new Error('approval requires an independent revalidation and frozen performance baseline');
-    loadFormalEvaluatorBundle(input.evaluatorRoot, {
+    const evaluatorBundle = loadFormalEvaluatorBundle(input.evaluatorRoot, {
       requireQualified: true,
       expected: { evaluatorId: task.evaluator.id, version: task.evaluator.version as string, digest: task.evaluator.digest as string },
     });
@@ -186,31 +220,7 @@ export class OptimizationRuntime {
     if (typeof machineDigest !== 'string' || !/^[0-9a-f]{64}$/.test(machineDigest) || machineDigest !== repeatedMachine?.machine_identity_sha256) {
       throw new Error('approval experiments do not bind one machine identity');
     }
-    const evidence = verifyFrozenEvidenceArtifact(input.evidence);
-    const baseline = evidence.baseline as DomainIdentity | undefined;
-    const evaluator = evidence.evaluator as DomainIdentity | undefined;
-    const decision = evidence.acceptance_decision as Record<string, unknown> | undefined;
-    if (evidence.task_id !== task.task_id || evidence.workflow_id !== task.workflow_id || evidence.candidate_id !== candidate.candidate_id ||
-        evidence.candidate_commit !== candidate.source.commit || evidence.hypothesis_id !== candidate.hypothesis_id ||
-        evidence.first_formal_experiment_id !== first.experiment_id || evidence.revalidation_experiment_id !== repeated.experiment_id ||
-        evidence.machine_identity_sha256 !== machineDigest || baseline?.id !== task.performance_baseline.id || baseline.version !== task.performance_baseline.version || baseline.digest !== task.performance_baseline.digest ||
-        evaluator?.id !== task.evaluator.id || evaluator.version !== task.evaluator.version || evaluator.digest !== task.evaluator.digest ||
-        decision?.decision !== 'PASS' || !evidence.claim_scope || typeof evidence.claim_scope !== 'object' || Array.isArray(evidence.claim_scope)) {
-      throw new Error('frozen Evidence does not bind the approved Candidate and experiments');
-    }
-    const record: OptimizationApprovalRecord = {
-      schema_version: 1, approval_id: this.id('approval'), task_id: task.task_id, workflow_id: task.workflow_id,
-      candidate_id: candidate.candidate_id, candidate_commit: candidate.source.commit, candidate_before: structuredClone(candidate),
-      source_baseline_identity: structuredClone(task.source_baseline), baseline_identity: structuredClone(task.performance_baseline),
-      evaluator_identity: structuredClone(task.evaluator), evaluator_digest: task.evaluator.digest as string,
-      machine_identity: structuredClone(firstMachine as Record<string, unknown>), first_formal_experiment_id: first.experiment_id,
-      revalidation_experiment_id: repeated.experiment_id, evidence_artifact_identity: structuredClone(input.evidence),
-      evidence_sha256: input.evidence.archive_sha256, approval_status: 'APPROVED', evidence_status_before: 'FROZEN', evidence_status: 'APPROVED',
-      claim_scope: structuredClone(evidence.claim_scope as Record<string, unknown>), reviewer: input.reviewer.trim(), approved_at: this.timestamp(),
-      authorization: structuredClone(input.authorization),
-    };
-    this.store.recordCandidateApproval(record);
-    return record;
+    return { task, candidate, first, repeated, firstMachine: firstMachine as Record<string, unknown>, machineDigest, evaluatorBundle };
   }
 
   getHypothesis(hypothesisId: string): OptimizationHypothesis {
@@ -269,6 +279,17 @@ export class OptimizationRuntime {
     const experiment = this.store.getExperiment(experimentId);
     if (!experiment) throw new Error(`experiment '${experimentId}' not found`);
     return experiment;
+  }
+
+  /** Keep the already-staged submission so recovery never rebuilds a live remote directory. */
+  recordRemoteExecutionPlan(experimentId: string, plan: Record<string, unknown>): void {
+    const experiment = this.getExperiment(experimentId);
+    const existing = experiment.declared_context.runner_execution_plan;
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(plan)) throw new Error('remote execution plan changed for an existing Experiment');
+      return;
+    }
+    this.store.saveExperiment({ ...experiment, declared_context: { ...experiment.declared_context, runner_execution_plan: structuredClone(plan) } });
   }
 
   updateTask(taskId: string, patch: Partial<Pick<OptimizationTask,
@@ -397,9 +418,13 @@ export class OptimizationRuntime {
     const cancelled = commands.some((item) => item.cancelled);
     const timedOut = commands.some((item) => item.timed_out);
     const cycles = [input.revalidation.formal, input.revalidation.independent].filter((item): item is ValidationCycleResult => item !== null);
-    const completeCorrectness = cycles.length > 0 && cycles.every((item) => item.formal_correctness_complete);
+    const cycleFeedback = cycles.map(validation => candidateEvaluationFeedback({ validation }));
+    const completeCorrectness = cycles.length > 0 && cycleFeedback.every(item => item.correctness_coverage.complete);
     const allBuilds = cycles.length > 0 && cycles.every((item) => item.build.ok);
-    const allCorrectness = cycles.length > 0 && cycles.every((item) => item.correctness?.ok === true);
+    const allCorrectness = cycles.length > 0 && cycles.every((item, index) => item.correctness?.ok === true
+      && cycleFeedback[index].correctness_status !== 'FAILED' && cycleFeedback[index].correctness_status !== 'INVALID');
+    const invalidCorrectness = cycleFeedback.some(item => item.correctness_status === 'INVALID');
+    const invalidPerformance = cycleFeedback.some(item => item.performance_summary.status === 'INVALID');
     const allPerformance = input.revalidation.performance_gate?.passed ?? cycles.every((item) => item.performance === null || item.performance.ok);
     const timestamp = this.timestamp();
     const executionStatus = input.factsAlreadyPersisted
@@ -410,7 +435,7 @@ export class OptimizationRuntime {
       status: executionStatus,
       validity: executionStatus === 'UNKNOWN'
         ? 'UNKNOWN'
-        : executionStatus === 'FAILED' || executionStatus === 'CANCELLED' || timedOut || !completeCorrectness || !allPerformance ? 'INVALID' : 'VALID',
+          : executionStatus === 'FAILED' || executionStatus === 'CANCELLED' || timedOut || !completeCorrectness || invalidPerformance ? 'INVALID' : 'VALID',
       failure_category: experiment.failure_category ?? (cancelled
         ? 'CANCELLED'
         : timedOut
@@ -421,20 +446,28 @@ export class OptimizationRuntime {
               ? 'CORRECTNESS_FAILURE'
             : !completeCorrectness
               ? 'INVALID_EXPERIMENT'
-              : !allPerformance
+              : !allPerformance && input.revalidation.performance_gate?.statistics?.verdict !== 'INCONCLUSIVE'
                 ? 'PERFORMANCE_REGRESSION'
               : null),
       observed_context: input.observedContext ?? experiment.observed_context,
       evaluation: {
         build: allBuilds ? 'PASSED' : 'FAILED',
-        correctness: !allCorrectness ? 'FAILED' : completeCorrectness ? 'PASSED' : 'INCOMPLETE',
+        correctness: invalidCorrectness ? 'INVALID' : !allCorrectness ? 'FAILED' : completeCorrectness ? 'PASSED' : 'INCOMPLETE',
         performance: cycles.some((item) => item.performance !== null) || input.revalidation.performance_gate
-          ? allPerformance ? 'PASSED' : 'FAILED'
+          ? invalidPerformance ? 'INVALID' : allPerformance ? 'PASSED' : input.revalidation.performance_gate?.statistics?.verdict === 'INCONCLUSIVE' ? 'INCONCLUSIVE' : 'FAILED'
           : 'NOT_EXECUTED',
+        ...(cycleFeedback.length ? { correctness_coverage: {
+          planned: cycleFeedback.reduce((sum, item) => sum + item.correctness_coverage.planned, 0),
+          executed: cycleFeedback.reduce((sum, item) => sum + item.correctness_coverage.executed, 0),
+          passed: cycleFeedback.reduce((sum, item) => sum + item.correctness_coverage.passed, 0),
+          failed: cycleFeedback.reduce((sum, item) => sum + item.correctness_coverage.failed, 0),
+          complete: cycleFeedback.every(item => item.correctness_coverage.complete),
+        } } : {}),
         details: {
           formal_passed: input.revalidation.formal?.passed ?? null,
           independent_passed: input.revalidation.independent?.passed ?? null,
           legacy_revalidation_passed: input.revalidation.passed,
+          performance_gate: input.revalidation.performance_gate ?? null,
         },
       },
       ended_at: experiment.ended_at ?? timestamp,
@@ -754,23 +787,21 @@ function sameFact(left: CommandExecution | Measurement, right: CommandExecution 
 }
 
 function validationEvaluation(validation: ValidationCycleResult, performance: PerformanceGateResult | null): Experiment['evaluation'] {
-  const correctness = !validation.build.ok || validation.correctness === null
-    ? 'NOT_EXECUTED'
-    : !validation.correctness.ok || validation.correctness_coverage.failed > 0
-      ? 'FAILED'
-      : validation.formal_correctness_complete
-        ? 'PASSED'
-        : 'INCOMPLETE';
+  const feedback = candidateEvaluationFeedback({ validation, performance });
+  const correctness = feedback.correctness_status;
   const performanceStatus = validation.performance === null
     ? 'NOT_EXECUTED'
-    : !validation.performance.ok || performance?.passed !== true
-      ? 'FAILED'
-      : 'PASSED';
+    : feedback.performance_summary.status === 'INVALID'
+      ? 'INVALID'
+      : feedback.performance_summary.status === 'INCONCLUSIVE' ? 'INCONCLUSIVE'
+      : !validation.performance.ok || performance?.passed !== true
+        ? 'FAILED'
+        : 'PASSED';
   return {
     build: validation.build.ok ? 'PASSED' : 'FAILED',
     correctness,
     performance: performanceStatus,
-    correctness_coverage: validation.correctness_coverage,
+    correctness_coverage: feedback.correctness_coverage,
     ...(performance ? {
       performance_workloads: performance.workloads.map((item) => ({
         workload_id: item.case_id,
@@ -781,12 +812,21 @@ function validationEvaluation(validation: ValidationCycleResult, performance: Pe
         speedup: item.speedup,
         critical: item.critical,
         regression: item.regression,
+        ...(item.ci_lower === undefined ? {} : { ci_lower: item.ci_lower, ci_upper: item.ci_upper, conclusion: item.conclusion }),
       })),
     } : {}),
     details: {
       validation_passed: validation.passed,
       performance_gate_passed: performance?.passed ?? null,
       performance_reason: performance?.reason ?? null,
+      performance_gate: performance ? {
+        gate_version: performance.gate_version ?? 1,
+        passed: performance.passed, weighted_geomean: performance.weighted_geomean,
+        overall_ci_lower: performance.overall_ci_lower, key_case_ci_lower: performance.key_case_ci_lower,
+        ...(performance.statistics ? { statistics: performance.statistics } : {}),
+        statistics_note: performance.statistics ? 'Fixed-sample paired block bootstrap; versioned method, workload-adjusted intervals and raw sample digest retained'
+          : 'Historical point-estimate gate; no confidence interval computed',
+      } : null,
     },
   };
 }
@@ -803,6 +843,7 @@ function validationFailure(
   if (state.formalIncomplete) return 'INVALID_EXPERIMENT';
   if (validation.performance && !validation.performance.ok) return 'EVALUATOR_FAILURE';
   if (performance && !performance.passed) {
+    if (performance.statistics?.verdict === 'INCONCLUSIVE' || performance.statistics?.verdict === 'INVALID') return null;
     return performance.workloads.some((item) => item.regression) ? 'PERFORMANCE_REGRESSION' : 'PERFORMANCE_TARGET_NOT_MET';
   }
   return null;

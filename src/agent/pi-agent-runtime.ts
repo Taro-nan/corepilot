@@ -13,6 +13,8 @@ import type { CandidateEvaluationDecision } from '../contracts/candidate-evaluat
 export type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
 
 export interface PiAgentRuntimeResult {
+  budget_exhausted?: boolean;
+  interrupted?: boolean;
   ok: boolean;
   text: string;
   hypothesis: string | null;
@@ -53,7 +55,7 @@ export interface PiAgentRuntimeOptions {
 
 export interface PiRuntimeStreamOptions {
   fetch?: typeof fetch;
-  /** Zero or undefined means that the provider request has no PhyOpt time limit. */
+  /** Zero or undefined means that the provider request has no CorePilot time limit. */
   timeoutMs?: number;
 }
 
@@ -115,7 +117,7 @@ function candidateHypothesis(messages: readonly AgentMessage[]): string | null {
 
 /**
  * Run one Candidate-editing session with the complete pi-agent-core runtime.
- * PhyOpt supplies tools and stop policy; Pi owns the model/tool loop and transcript.
+ * CorePilot supplies tools and stop policy; Pi owns the model/tool loop and transcript.
  */
 export async function runPiAgentRuntime(prompt: string, options: PiAgentRuntimeOptions): Promise<PiAgentRuntimeResult> {
   const stopTools = new Set(options.stopAfterSuccessfulTools ?? []);

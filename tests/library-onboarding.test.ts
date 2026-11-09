@@ -14,7 +14,7 @@ import { onboardLibraryRepository, OnboardingToolset } from '../src/onboarding/o
 import { RepositoryInspector } from '../src/onboarding/repository-inspector.js';
 
 function temporaryRoot(context: test.TestContext): { root: string; repository: string; packagesRoot: string; evaluatorsRoot: string } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-onboarding-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-onboarding-'));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const repository = path.join(root, 'source');
   fs.cpSync('fixtures/example-vector-repo', repository, { recursive: true });
@@ -132,6 +132,20 @@ test('fixture becomes a valid unqualified package and unexecutable evaluator dra
   assert.ok(draft.evidence.test_evidence.every((item) => item.status === 'DISCOVERED_TEST'));
   assert.ok(draft.evidence.benchmark_evidence.every((item) => item.status === 'DISCOVERED'));
   assert.equal(fs.existsSync(path.join(paths.repository, 'packages')), false);
+});
+
+test('bulk onboarding keeps colliding symbol slugs as distinct targets', async (context) => {
+  const paths = temporaryRoot(context);
+  fs.appendFileSync(path.join(paths.repository, 'include/vector_add.h'), '\nint alpha_beta(void);\nint alpha__beta(void);\n');
+  fs.writeFileSync(path.join(paths.repository, 'src/alpha.c'), 'int alpha_beta(void) { return 1; }\nint alpha__beta(void) { return 2; }\n');
+  const draft = await onboardLibraryRepository({ ...paths, repositoryRoot: paths.repository, packageId: 'bulk-vector',
+    targetSymbols: ['alpha_beta', 'alpha__beta'] });
+  const loaded = new LibraryPackageLoader({ packagesRoot: paths.packagesRoot, evaluatorsRoot: paths.evaluatorsRoot }).loadPackage('bulk-vector', '0.1.0');
+  assert.equal(new Set(loaded.manifest.targets.map(target => target.target_id)).size, 2);
+  assert.deepEqual(loaded.manifest.functions.map(item => item.api), ['alpha_beta', 'alpha__beta']);
+  assert.deepEqual(draft.evidence.generated.targets.map(item => item.symbol), ['alpha_beta', 'alpha__beta']);
+  assert.equal(draft.evaluatorPaths.length, 2);
+  for (const evaluatorPath of draft.evaluatorPaths) assert.equal(loadFormalEvaluatorBundle(evaluatorPath).qualification.status, 'DRAFT');
 });
 
 test('configured onboarding runs through the existing Pi Agent loop with read-only tools', async (context) => {

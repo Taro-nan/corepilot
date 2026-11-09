@@ -1,0 +1,20 @@
+.machine-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,350px),1fr)); gap:20px; }
+.machine-status { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; font-size:11px; color:#8a95a7; }
+.machine-status i { width:6px; height:6px; border-radius:50%; background:currentColor; }
+.machine-status.online { color:#25a287; }
+.machine-status.offline { color:#c95757; }
+.machine-status.disabled { color:#8b92a0; }
+.machine-error { margin:0 22px 18px; color:#b14f4f; font-size:12px; overflow-wrap:anywhere; }
+.machine-card>.hint { margin:0 22px 16px; }
+.machine-selection { margin:16px 22px; border:1px solid #e7ebf2; border-radius:9px; background:#fbfcff; }
+.machine-card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px 0; }
+.machine-selection .definition { padding:18px 20px; }
+.machine-selection>.hint { margin:0 20px 16px; }
+.machine-management-link { border-top:1px solid #edf0f6; padding:12px 22px; }
+.machine-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 20px; }
+.machine-deployment { margin-top:10px; border-top:1px solid #edf0f6; padding-top:18px; }
+.machine-deployment summary { cursor:pointer; font-size:12px; font-weight:500; }
+.machine-deployment .hint { line-height:1.8; }
+.machine-deployment .machine-form-grid { margin-top:18px; }
+.maintainer-nav-label { display:block; font-size:10px; color:#9aa4b4; padding:15px 16px 4px; }
+@media(max-width:760px) { .machine-form-grid { grid-template-columns:1fr; } .maintainer-nav-label { display:none; } }

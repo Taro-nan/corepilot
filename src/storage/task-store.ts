@@ -1,6 +1,9 @@
 import type { CommandRecord } from '../contracts/command.js';
 import type { Event, RunnerJob, Task, TaskStatus } from '../contracts/index.js';
 import type { OptimizationStore } from './optimization-store.js';
+import type { ProjectRecord } from '../contracts/project.js';
+import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
+import type { OptimizationTask } from '../contracts/optimization-domain.js';
 
 export interface LeaseRecord {
   owner_id: string;
@@ -34,5 +37,16 @@ export interface TaskStore extends OptimizationStore {
   releaseLease(ownerId: string): void;
   getActiveLease(): LeaseRecord | null;
   saveOptimizationWorkflowJson(workflowId: string, workflowJson: string): void;
+  saveCompletedDelivery(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   getOptimizationWorkflowJson(workflowId: string): string | null;
+  listOptimizationWorkflowJson(limit: number): string[];
+  listPendingDeliveryWorkflowIds(): string[];
+  getOptimizationWorkflowByRequestId(requestId: string): string | null;
+  listProjects(): ProjectRecord[];
+  getProject(projectId: string): ProjectRecord | null;
+  saveProject(project: ProjectRecord): void;
+  migrateProjectConfigPath(projectId: string, previousPath: string, nextPath: string): void;
+  listExecutionMachines(): ExecutionMachineRecord[];
+  getExecutionMachine(machineId: string): ExecutionMachineRecord | null;
+  saveExecutionMachine(machine: ExecutionMachineRecord, expectedRevision?: number): boolean;
 }

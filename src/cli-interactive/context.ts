@@ -25,14 +25,15 @@ export class WorkbenchContext {
   readonly credentialsPath: string;
   readonly modelSettingsPath: string;
   readonly targetProfilesPath: string;
-  readonly targetChecker: (target: OptimizationConfig['target']) => SshTargetCheck;
+  readonly targetChecker: (target: OptimizationConfig['target']) => SshTargetCheck | Promise<SshTargetCheck>;
   readonly modelTransportFactory: (proxy?: string) => ModelTransport;
   private api: ApiClient | null = null;
   private selectedTask: string | null = null;
+  private selectedWorkflow: string | null = null;
   backend: BackendState | null = null;
 
-  constructor(options: { configPath?: string; credentialsPath?: string; modelSettingsPath?: string; targetProfilesPath?: string; targetChecker?: (target: OptimizationConfig['target']) => SshTargetCheck; modelTransportFactory?: (proxy?: string) => ModelTransport } = {}) {
-    this.configPath = path.resolve(options.configPath ?? 'phyopt.yaml');
+  constructor(options: { configPath?: string; credentialsPath?: string; modelSettingsPath?: string; targetProfilesPath?: string; targetChecker?: (target: OptimizationConfig['target']) => SshTargetCheck | Promise<SshTargetCheck>; modelTransportFactory?: (proxy?: string) => ModelTransport } = {}) {
+    this.configPath = path.resolve(options.configPath ?? 'corepilot.yaml');
     this.credentialsPath = options.credentialsPath ?? defaultCredentialsPath();
     this.modelSettingsPath = options.modelSettingsPath ?? defaultModelSettingsPath();
     this.targetProfilesPath = options.targetProfilesPath ?? defaultTargetProfilesPath();
@@ -52,7 +53,7 @@ export class WorkbenchContext {
 
   async ensureBackend(): Promise<BackendState> {
     const loaded = loadOptimizationConfig(this.configPath);
-    const url = process.env.PHYOPT_SERVER_URL ?? 'http://127.0.0.1:4317';
+    const url = process.env.COREPILOT_SERVER_URL ?? 'http://127.0.0.1:4317';
     const parsed = new URL(url);
     const port = Number(parsed.port || 4317);
     const manager = new BackendManager({
@@ -61,7 +62,7 @@ export class WorkbenchContext {
       spec: {
         host: parsed.hostname,
         port,
-        dbPath: path.join(loaded.configDir, '.phyopt', 'workflow.sqlite'),
+        dbPath: path.join(loaded.configDir, '.corepilot', 'workflow.sqlite'),
         runner: 'workflow',
         transport: 'ssh',
         sshAlias: 'ssh_alias' in loaded.config.target ? loaded.config.target.ssh_alias : null,
@@ -85,4 +86,6 @@ export class WorkbenchContext {
 
   currentTaskId(): string | null { return this.selectedTask; }
   setCurrentTask(taskId: string | null): void { this.selectedTask = taskId; }
+  currentWorkflowId(): string | null { return this.selectedWorkflow; }
+  setCurrentWorkflow(workflowId: string | null): void { this.selectedWorkflow = workflowId; }
 }

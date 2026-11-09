@@ -1,3 +1,6 @@
+import type { ExperimentStatus, ExperimentStep } from './optimization-domain.js';
+import type { FailureOrigin } from './experiment-failure.js';
+
 export const DEVELOPMENT_ONLY = 'DEVELOPMENT_ONLY' as const;
 
 export type DevelopmentInvestigationToolName =
@@ -61,6 +64,19 @@ export interface DevelopmentGateResult {
   passed: boolean;
   reason: string;
   workloads: DevelopmentGateWorkload[];
+  failure?: DevelopmentExecutionFailure;
+}
+
+export interface DevelopmentExecutionFailure {
+  experiment_id: string;
+  tool: DevelopmentInvestigationToolName;
+  status: ExperimentStatus;
+  step: ExperimentStep | null;
+  code: string | null;
+  message: string;
+  failure_origin: FailureOrigin;
+  raw_command_execution_ids: string[];
+  command_output: string;
 }
 
 export interface PerfCounterSet {

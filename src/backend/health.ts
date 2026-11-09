@@ -1,5 +1,5 @@
-import { PHYOPT_API_VERSION } from '../version.js';
-import { isPhyoptHealth } from '../contracts/health.js';
+import { COREPILOT_API_VERSION } from '../version.js';
+import { isCorePilotHealth } from '../contracts/health.js';
 import type { BackendHealth } from '../contracts/health.js';
 
 export type ProbeResult =
@@ -25,7 +25,7 @@ export async function probeBackend(url: string, options: ProbeOptions = {}): Pro
   let parsed: unknown;
   try { parsed = JSON.parse(await response.text()); }
   catch { return { kind: 'unknown-service', detail: `port responded with non-JSON (HTTP ${response.status})` }; }
-  if (!isPhyoptHealth(parsed)) return { kind: 'unknown-service', detail: `port responded (HTTP ${response.status}) but is not a PhyOpt workflow backend` };
-  if (parsed.api_version !== PHYOPT_API_VERSION) return { kind: 'incompatible', health: parsed, reason: `backend api_version ${parsed.api_version} != client ${PHYOPT_API_VERSION}` };
+  if (!isCorePilotHealth(parsed)) return { kind: 'unknown-service', detail: `port responded (HTTP ${response.status}) but is not a CorePilot workflow backend` };
+  if (parsed.api_version !== COREPILOT_API_VERSION) return { kind: 'incompatible', health: parsed, reason: `backend api_version ${parsed.api_version} != client ${COREPILOT_API_VERSION}` };
   return { kind: 'ok', health: parsed };
 }

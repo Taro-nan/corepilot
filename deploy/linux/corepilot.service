@@ -1,0 +1,20 @@
+[Unit]
+Description=CorePilot web workbench and shared CLI API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=corepilot
+Group=corepilot
+WorkingDirectory=/var/lib/corepilot
+EnvironmentFile=/etc/corepilot/corepilot.env
+ExecStart=/usr/bin/node /opt/corepilot/current/dist/entry.js web --host 127.0.0.1 --port 4317 --data-dir /var/lib/corepilot
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+KillMode=mixed
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

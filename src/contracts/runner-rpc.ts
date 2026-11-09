@@ -16,6 +16,20 @@ export interface RunnerHealth {
   protocol_version: typeof RUNNER_PROTOCOL_VERSION;
   status: 'READY';
   resource_enforcement: 'DISABLED' | 'REQUIRED';
+  capabilities?: { controlled_validation: 1; source_archive_upload?: 1; execution_logs?: 1; resource_matrix?: 1; exclusive_queue?: 1 };
+}
+
+export interface RunnerQueueState {
+  policy: 'runner-exclusive-fifo-v1';
+  sequence: number;
+  enqueued_at: string;
+  acquired_at: string | null;
+  released_at: string | null;
+  wait_ms: number | null;
+  position?: number;
+  waiting_for?: string | null;
+  reason?: string | null;
+  stop_confirmation?: { reviewer: string; reason: string; confirmed_at: string };
 }
 
 export interface RunnerMachineInfo {
@@ -63,10 +77,12 @@ export interface ExperimentExecutionStep {
   command: ValidationCommand;
   /** Selects the immutable root in which the command is allowed to run. */
   execution_domain?: 'CANDIDATE' | 'EVALUATOR';
-  /** Parse PHYOPT_MEASUREMENT-prefixed JSON lines emitted on stdout. */
+  /** Parse COREPILOT_MEASUREMENT-prefixed JSON lines emitted on stdout. */
   measurements_from_stdout?: boolean;
   /** Required semantic identity for each Formal Evaluator case/iteration. */
   formal_context?: FormalExecutionContext;
+  /** Only DEVELOPMENT_FEEDBACK: run unchanged correctness code against a known-bad artifact. */
+  diagnostic_probe?: { probe_id: string; defect: string; input_id: string };
 }
 
 export type FormalExecutionPhase = 'CORRECTNESS_CASE' | 'PERFORMANCE_WARMUP' | 'PERFORMANCE_SAMPLE';
@@ -83,11 +99,14 @@ export interface FormalExecutionContext {
     path: string;
     /** Null only for a just-built Candidate binary; Runner observes and pins it before first use. */
     sha256: string | null;
+    /** Frozen bundled and system runtime dependencies, checked before each Baseline command. */
+    dependencies?: Array<{ path: string; sha256: string }>;
   };
   resources: {
     threads: number;
     cpu_set: string;
     numa_node: number;
+    omp_proc_bind?: 'close' | 'spread';
   };
 }
 
@@ -116,6 +135,28 @@ export interface ExperimentExecutionPlan {
   /** Required for formal evaluation/revalidation and verified before and after use. */
   evaluator?: StagedEvaluatorIdentity;
   steps: ExperimentExecutionStep[];
+  /** Optional exported command logs, disjoint from source and evaluator. SQLite remains authoritative. */
+  output_directory?: string;
+  /** Optional writable build tree outside the immutable staged source tree. */
+  build_directory?: string;
+}
+
+export interface StagedSourceArchive {
+  workspace_path: string;
+  source_sha256: string;
+  archive_sha256: string;
+  archive_bytes: number;
+}
+
+export interface RunnerExecutionOutput {
+  stdout: string; stderr: string;
+  stdout_path: string; stderr_path: string;
+  truncated: boolean;
+  artifacts?: RunnerBuildArtifact[];
+}
+
+export interface RunnerBuildArtifact {
+  relative_path: string; path: string; source_path: string; sha256: string; bytes: number;
 }
 
 export interface RunnerFailure {
@@ -151,6 +192,7 @@ export type ExperimentStatusResponse = Pick<Experiment,
     cancel_requested: boolean;
     failure: RunnerFailure | null;
     failure_classification?: ExperimentFailureClassification | null;
+    queue?: RunnerQueueState;
   };
 
 export interface CancelExperimentResponse {

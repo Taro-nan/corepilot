@@ -28,7 +28,7 @@ export interface CandidateEvaluationFeedback {
   failure: RunnerFailure | null;
   failure_classification: ExperimentFailureClassification | null;
   performance_summary: {
-    status: 'PASSED' | 'FAILED' | 'INVALID' | 'NOT_EVALUATED' | 'NOT_EXECUTED';
+    status: 'PASSED' | 'FAILED' | 'INVALID' | 'INCONCLUSIVE' | 'NOT_EVALUATED' | 'NOT_EXECUTED';
     classification: 'FORMAL' | 'DEVELOPMENT_ONLY' | 'DIAGNOSTIC_ONLY';
     weighted_geomean: number | null;
     overall_ci_lower: number | null;

@@ -7,26 +7,16 @@ import { DEFAULT_WORKSPACE_ROOT, type TargetConfig } from './target-config.js';
 import { DEFAULT_BUILD_CWD, DEFAULT_BUILD_TIMEOUT_MS } from './build-config.js';
 import type { LibraryPackageSelection } from '../contracts/library-package.js';
 import { validateLibraryPackageSelection } from '../library-package/loader.js';
+import { DEFAULT_RUNNER_REQUEST_TIMEOUT_MS, DEFAULT_RUNNER_POLL_INTERVAL_MS, isRegisteredRunner, redactRpcRunner, type RunnerConfig } from './runner-config.js';
+export type { RunnerMode, RunnerConfig } from './runner-config.js';
 
 export const REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
-export type RunnerMode = 'legacy' | 'rpc';
-
-export type RunnerConfig =
-  | { mode: 'legacy' }
-  | {
-      mode: 'rpc';
-      endpoint: string;
-      token: string;
-      request_timeout_ms: number;
-      poll_interval_ms: number;
-    };
-
 /**
- * 面向 `phyopt optimize` 的最终公开 YAML 契约。
+ * 面向 `corepilot optimize` 的最终公开 YAML 契约。
  *
  * 这里故意不包含项目目录、后台服务、授权、补丁或模型循环预算。
- * 这些信息分别由 Git 预检、服务启动参数和 PhyOpt 内部运行状态负责。
+ * 这些信息分别由 Git 预检、服务启动参数和 CorePilot 内部运行状态负责。
  */
 export interface OptimizationConfig {
   model: {
@@ -51,6 +41,7 @@ export interface OptimizationConfig {
     timeout_ms: number;
   };
   validation: {
+    /** Empty while setting up a project; preflight still requires a real validation source. */
     testpack: string;
     library_package?: LibraryPackageSelection;
     baseline_artifact?: string;
@@ -96,9 +87,7 @@ const MODEL_KEYS = ['model_id', 'api_key', 'endpoint', 'proxy', 'reasoning_effor
 const TARGET_KEYS = ['ssh_alias', 'host', 'username', 'port', 'identity_file', 'workspace_root'] as const;
 const BUILD_KEYS = ['executable', 'args', 'cwd', 'environment', 'timeout_ms'] as const;
 const VALIDATION_KEYS = ['testpack', 'library_package', 'baseline_artifact'] as const;
-const RUNNER_KEYS = ['mode', 'endpoint', 'token', 'request_timeout_ms', 'poll_interval_ms'] as const;
-const DEFAULT_RUNNER_REQUEST_TIMEOUT_MS = 10_000;
-const DEFAULT_RUNNER_POLL_INTERVAL_MS = 250;
+const RUNNER_KEYS = ['mode', 'endpoint', 'token', 'request_timeout_ms', 'poll_interval_ms', 'machine_id'] as const;
 const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 16_384;
 const DEFAULT_MODEL_INACTIVITY_TIMEOUT_MS = 120_000;
 
@@ -137,6 +126,14 @@ function readOptionalString(value: Record<string, unknown>, key: string, field: 
     problems.push(`${field}.${key} must be a non-empty string when provided`);
     return undefined;
   }
+  return raw.trim();
+}
+
+/** A connection can be saved while setup is incomplete; execution rejects blanks. */
+function readSetupString(value: Record<string, unknown>, key: string, field: string, problems: string[]): string {
+  const raw = value[key];
+  if (raw === undefined) return '';
+  if (typeof raw !== 'string') { problems.push(`${field}.${key} must be a string`); return ''; }
   return raw.trim();
 }
 
@@ -244,31 +241,46 @@ function validateIdentityFile(value: string, field: string, problems: string[]):
   return value;
 }
 
-/** Validate an already parsed YAML value against the public contract. */
-export function parseOptimizationConfig(value: unknown, configDir = process.cwd()): OptimizationConfig {
+function parseRunner(value: unknown, problems: string[]): RunnerConfig | undefined {
+  let runner: RunnerConfig | undefined;
+  if (value !== undefined) {
+    const runnerValue = requireRecord(value, 'runner', problems);
+    checkUnknown(runnerValue, RUNNER_KEYS, 'runner', problems);
+    const mode = readRequiredString(runnerValue, 'mode', 'runner', problems);
+    if (mode === 'legacy') {
+      for (const field of RUNNER_KEYS.slice(1)) {
+        if (field in runnerValue) problems.push(`runner.${field} is not used in legacy mode`);
+      }
+      runner = { mode: 'legacy' };
+    } else if (mode === 'rpc' && 'machine_id' in runnerValue) {
+      for (const field of ['endpoint', 'token', 'request_timeout_ms', 'poll_interval_ms']) {
+        if (field in runnerValue) problems.push(`runner.${field} must be configured on the registered machine`);
+      }
+      runner = { mode: 'rpc', machine_id: readRequiredString(runnerValue, 'machine_id', 'runner', problems) };
+    } else if (mode === 'rpc') {
+      const endpointRaw = readSetupString(runnerValue, 'endpoint', 'runner', problems);
+      const endpoint = endpointRaw ? validateRunnerEndpoint(endpointRaw, problems) : '';
+      const token = readSetupString(runnerValue, 'token', 'runner', problems);
+      const requestTimeout = readOptionalPositiveInteger(runnerValue, 'request_timeout_ms', 'runner', problems, DEFAULT_RUNNER_REQUEST_TIMEOUT_MS);
+      const pollInterval = readOptionalPositiveInteger(runnerValue, 'poll_interval_ms', 'runner', problems, DEFAULT_RUNNER_POLL_INTERVAL_MS);
+      runner = { mode: 'rpc', endpoint, token, request_timeout_ms: requestTimeout, poll_interval_ms: pollInterval };
+    } else {
+      problems.push('runner.mode must be legacy or rpc');
+    }
+  }
+
+  return runner;
+}
+
+export function parseRunnerSettings(value: unknown): RunnerConfig {
   const problems: string[] = [];
-  const root = requireRecord(value, 'config', problems);
-  checkUnknown(root, TOP_LEVEL_KEYS, 'config', problems);
+  const runner = parseRunner(value, problems);
+  if (problems.length || !runner) throw new OptimizationConfigError(problems.length ? problems : ['runner is required']);
+  return runner;
+}
 
-  const modelValue = requireRecord(root.model, 'model', problems);
-  checkUnknown(modelValue, MODEL_KEYS, 'model', problems);
-  const modelId = readRequiredString(modelValue, 'model_id', 'model', problems);
-  const modelApiKey = readOptionalString(modelValue, 'api_key', 'model', problems);
-  const modelEndpointRaw = readRequiredString(modelValue, 'endpoint', 'model', problems);
-  const modelEndpoint = modelEndpointRaw ? validateEndpoint(modelEndpointRaw, problems) : '';
-  const modelProxyRaw = readOptionalString(modelValue, 'proxy', 'model', problems);
-  const modelProxy = modelProxyRaw === undefined ? undefined : validateProxy(modelProxyRaw, problems);
-  const modelReasoningRaw = readOptionalString(modelValue, 'reasoning_effort', 'model', problems);
-  const modelReasoningEffort = modelReasoningRaw === undefined
-    ? undefined
-    : REASONING_EFFORTS.includes(modelReasoningRaw as ReasoningEffort)
-      ? modelReasoningRaw as ReasoningEffort
-      : (problems.push(`model.reasoning_effort must be one of: ${REASONING_EFFORTS.join(', ')}`), undefined);
-  const modelMaxOutputTokens = readOptionalPositiveInteger(modelValue, 'max_output_tokens', 'model', problems, DEFAULT_MODEL_MAX_OUTPUT_TOKENS);
-  const modelTimeout = readNonNegativeInteger(modelValue, 'timeout_ms', 'model', problems);
-  const modelInactivityTimeout = readOptionalPositiveInteger(modelValue, 'inactivity_timeout_ms', 'model', problems, DEFAULT_MODEL_INACTIVITY_TIMEOUT_MS);
-
-  const targetValue = requireRecord(root.target, 'target', problems);
+function parseTarget(value: unknown, problems: string[]): TargetConfig {
+  const targetValue = requireRecord(value, 'target', problems);
   checkUnknown(targetValue, TARGET_KEYS, 'target', problems);
   const sshAlias = readOptionalString(targetValue, 'ssh_alias', 'target', problems);
   const host = readOptionalString(targetValue, 'host', 'target', problems);
@@ -298,6 +310,42 @@ export function parseOptimizationConfig(value: unknown, configDir = process.cwd(
     };
   }
 
+  return target;
+}
+
+export function parseExecutionTarget(value: unknown): TargetConfig {
+  const problems: string[] = [];
+  const target = parseTarget(value, problems);
+  if (problems.length) throw new OptimizationConfigError(problems);
+  return target;
+}
+
+/** Validate an already parsed YAML value against the public contract. */
+export function parseOptimizationConfig(value: unknown, configDir = process.cwd()): OptimizationConfig {
+  const problems: string[] = [];
+  const root = requireRecord(value, 'config', problems);
+  checkUnknown(root, TOP_LEVEL_KEYS, 'config', problems);
+
+  const modelValue = requireRecord(root.model, 'model', problems);
+  checkUnknown(modelValue, MODEL_KEYS, 'model', problems);
+  const modelId = readRequiredString(modelValue, 'model_id', 'model', problems);
+  const modelApiKey = readOptionalString(modelValue, 'api_key', 'model', problems);
+  const modelEndpointRaw = readRequiredString(modelValue, 'endpoint', 'model', problems);
+  const modelEndpoint = modelEndpointRaw ? validateEndpoint(modelEndpointRaw, problems) : '';
+  const modelProxyRaw = readOptionalString(modelValue, 'proxy', 'model', problems);
+  const modelProxy = modelProxyRaw === undefined ? undefined : validateProxy(modelProxyRaw, problems);
+  const modelReasoningRaw = readOptionalString(modelValue, 'reasoning_effort', 'model', problems);
+  const modelReasoningEffort = modelReasoningRaw === undefined
+    ? undefined
+    : REASONING_EFFORTS.includes(modelReasoningRaw as ReasoningEffort)
+      ? modelReasoningRaw as ReasoningEffort
+      : (problems.push(`model.reasoning_effort must be one of: ${REASONING_EFFORTS.join(', ')}`), undefined);
+  const modelMaxOutputTokens = readOptionalPositiveInteger(modelValue, 'max_output_tokens', 'model', problems, DEFAULT_MODEL_MAX_OUTPUT_TOKENS);
+  const modelTimeout = readNonNegativeInteger(modelValue, 'timeout_ms', 'model', problems);
+  const modelInactivityTimeout = readOptionalPositiveInteger(modelValue, 'inactivity_timeout_ms', 'model', problems, DEFAULT_MODEL_INACTIVITY_TIMEOUT_MS);
+
+  const target = parseTarget(root.target, problems);
+
   const packageSelected = isRecord(root.validation) && root.validation.library_package !== undefined;
   const buildValue = requireRecord(root.build ?? (packageSelected ? { args: [] } : undefined), 'build', problems);
   checkUnknown(buildValue, BUILD_KEYS, 'build', problems);
@@ -321,32 +369,17 @@ export function parseOptimizationConfig(value: unknown, configDir = process.cwd(
     if ('testpack' in validationValue) problems.push('validation.testpack and library_package are mutually exclusive');
     if (root.build !== undefined) problems.push('build is owned by the selected library package; omit config.build');
   } else if ('baseline_artifact' in validationValue) problems.push('validation.baseline_artifact requires library_package');
-  const baselineArtifact = packageSelected ? readRequiredString(validationValue, 'baseline_artifact', 'validation', problems) : undefined;
-  const testpackRaw = packageSelected ? '' : readRequiredString(validationValue, 'testpack', 'validation', problems);
+  // A selected Package can be saved while its baseline is still being prepared. Formal intake enforces the binding.
+  const baselineArtifact = packageSelected ? readSetupString(validationValue, 'baseline_artifact', 'validation', problems) : undefined;
+  const testpackValue = validationValue.testpack;
+  const testpackRaw = packageSelected || testpackValue === undefined ? ''
+    : typeof testpackValue === 'string' ? testpackValue.trim()
+    : (problems.push('validation.testpack must be a string when provided'), '');
   const testpack = testpackRaw && !path.isAbsolute(testpackRaw)
     ? path.resolve(configDir, testpackRaw)
     : testpackRaw;
 
-  let runner: RunnerConfig | undefined;
-  if (root.runner !== undefined) {
-    const runnerValue = requireRecord(root.runner, 'runner', problems);
-    checkUnknown(runnerValue, RUNNER_KEYS, 'runner', problems);
-    const mode = readRequiredString(runnerValue, 'mode', 'runner', problems);
-    if (mode === 'legacy') {
-      for (const field of RUNNER_KEYS.slice(1)) {
-        if (field in runnerValue) problems.push(`runner.${field} is not used in legacy mode`);
-      }
-      runner = { mode: 'legacy' };
-    } else if (mode === 'rpc') {
-      const endpoint = validateRunnerEndpoint(readRequiredString(runnerValue, 'endpoint', 'runner', problems), problems);
-      const token = readRequiredString(runnerValue, 'token', 'runner', problems);
-      const requestTimeout = readOptionalPositiveInteger(runnerValue, 'request_timeout_ms', 'runner', problems, DEFAULT_RUNNER_REQUEST_TIMEOUT_MS);
-      const pollInterval = readOptionalPositiveInteger(runnerValue, 'poll_interval_ms', 'runner', problems, DEFAULT_RUNNER_POLL_INTERVAL_MS);
-      runner = { mode: 'rpc', endpoint, token, request_timeout_ms: requestTimeout, poll_interval_ms: pollInterval };
-    } else {
-      problems.push('runner.mode must be legacy or rpc');
-    }
-  }
+  const runner = parseRunner(root.runner, problems);
 
   const outputRaw = readRequiredString(root, 'output_dir', 'config', problems);
   const outputDir = outputRaw && !path.isAbsolute(outputRaw)
@@ -379,11 +412,13 @@ export function parseOptimizationConfig(value: unknown, configDir = process.cwd(
 
 /** Resolve the runner secret only at execution time; callers must not persist this value. */
 export function resolveRunnerConfig(
-  config: OptimizationConfig,
+  config: Pick<OptimizationConfig, 'runner'>,
   options: { env?: NodeJS.ProcessEnv } = {},
 ): ResolvedRunnerConfig {
   const runner = config.runner;
   if (!runner || runner.mode === 'legacy') return { mode: 'legacy' };
+  if (isRegisteredRunner(runner)) throw new OptimizationConfigError(['此配置使用已注册机器，请通过共享 Control 服务执行，例如 corepilot project check <项目 ID>。']);
+  if (!runner.endpoint.trim()) throw new OptimizationConfigError(['尚未配置 Runner RPC 地址。请在「模型与机器 → 目标机器」选择已注册执行机器；维护者在「执行机器」登记连接信息。']);
   const env = options.env ?? process.env;
   const reference = runner.token.match(ENV_REFERENCE);
   const token = reference ? env[reference[1]]?.trim() : runner.token.trim();
@@ -391,7 +426,7 @@ export function resolveRunnerConfig(
     throw new OptimizationConfigError([
       reference
         ? `runner.token references ${reference[1]}, but that environment variable is missing or empty`
-        : 'runner.token is empty',
+        : '尚未配置 Runner Token。请由维护者登记机器凭据，再为项目选择执行机器；独立 YAML 可配置 runner.token。',
     ]);
   }
   return {
@@ -444,9 +479,9 @@ export function resolveOptimizationApiKey(
     if (!options.cliApiKey.trim()) throw new OptimizationConfigError(['CLI model API key is empty']);
     return { apiKey: options.cliApiKey.trim(), source: 'cli' };
   }
-  if (env.PHYOPT_MODEL_API_KEY !== undefined) {
-    if (!env.PHYOPT_MODEL_API_KEY.trim()) throw new OptimizationConfigError(['PHYOPT_MODEL_API_KEY is empty']);
-    return { apiKey: env.PHYOPT_MODEL_API_KEY.trim(), source: 'env_override' };
+  if (env.COREPILOT_MODEL_API_KEY !== undefined) {
+    if (!env.COREPILOT_MODEL_API_KEY.trim()) throw new OptimizationConfigError(['COREPILOT_MODEL_API_KEY is empty']);
+    return { apiKey: env.COREPILOT_MODEL_API_KEY.trim(), source: 'env_override' };
   }
   if (config.model.api_key?.trim()) return resolveConfiguredApiKey(config.model.api_key, { env });
   const stored = readStoredApiKey(config.model.endpoint, { filePath: options.credentialsPath });
@@ -465,7 +500,7 @@ export function resolveOptimizationProxy(
   options: { env?: NodeJS.ProcessEnv } = {},
 ): ResolvedModelProxy | undefined {
   const env = options.env ?? process.env;
-  const override = env.PHYOPT_MODEL_PROXY?.trim();
+  const override = env.COREPILOT_MODEL_PROXY?.trim();
   if (override) return { proxy: validateResolvedProxy(override), source: 'env_override' };
   const configured = config.model.proxy?.trim();
   if (!configured) return undefined;
@@ -527,12 +562,9 @@ export function redactOptimizationConfig(config: OptimizationConfig): Optimizati
     target: { ...config.target },
     validation: { ...config.validation },
     ...(config.runner ? {
-      runner: config.runner.mode === 'legacy'
-        ? { mode: 'legacy' }
-        : {
-            ...config.runner,
-            token: ENV_REFERENCE.test(config.runner.token.trim()) ? config.runner.token.trim() : '[redacted]',
-          },
+      runner: config.runner.mode === 'legacy' || isRegisteredRunner(config.runner)
+        ? { ...config.runner }
+        : redactRpcRunner(config.runner),
     } : {}),
   };
 }

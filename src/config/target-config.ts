@@ -12,7 +12,7 @@ export interface TargetProfile {
   updated_at: string;
 }
 
-export const DEFAULT_WORKSPACE_ROOT = '/tmp/phyopt';
+export const DEFAULT_WORKSPACE_ROOT = '/tmp/corepilot';
 
 export function isAliasTarget(target: TargetConnection): target is { ssh_alias: string } {
   return 'ssh_alias' in target;

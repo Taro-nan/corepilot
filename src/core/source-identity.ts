@@ -15,6 +15,17 @@ export function sourceTreeSha256(root: string): string {
   return hash.digest('hex');
 }
 
+/** Same identity, streaming file contents for large source exports on Runner. */
+export async function sourceTreeSha256Async(root: string): Promise<string> {
+  const hash = createHash('sha256');
+  for (const relative of sourceFiles(path.resolve(root))) {
+    hash.update(relative); hash.update('\0');
+    for await (const chunk of fs.createReadStream(path.join(root, ...relative.split('/')))) hash.update(chunk);
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
 function sourceFiles(root: string, current = root): string[] {
   if (!fs.existsSync(current)) throw new Error(`content directory does not exist: ${root}`);
   if (!fs.statSync(current).isDirectory()) throw new Error(`content path is not a directory: ${root}`);

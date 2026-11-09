@@ -5,8 +5,21 @@ import path from 'node:path';
 import test from 'node:test';
 import { WorkspaceToolset } from '../src/agent/workspace-tools.js';
 
+test('reference search accepts the advertised query and source reads support bounded continuation', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-tool-contract-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, 'kernel.c'), Array.from({ length: 500 }, (_, index) => `kernel_call_${index}`).join('\n'));
+  const tools = new WorkspaceToolset(root); const signal = new AbortController().signal;
+  const references = await tools.asAgentTools().find(tool => tool.name === 'find_references')!.execute('refs', { query: 'kernel_call_299' }, signal);
+  assert.match(JSON.stringify(references), /kernel_call_299/);
+  const first = JSON.parse((await tools.execute('read_file', { path: 'kernel.c' }, signal)).text);
+  assert.equal(first.truncated, true); assert.equal(first.total_lines, 500); assert.equal(first.content.includes('kernel_call_299'), false);
+  const next = JSON.parse((await tools.execute('read_file', { path: 'kernel.c', start_line: 300, line_count: 2 }, signal)).text);
+  assert.equal(next.content, 'kernel_call_299\nkernel_call_300');
+});
+
 test('search_code uses ripgrep semantics for fixed and regex searches while excluding protected trees', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-rg-search-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-rg-search-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
   fs.mkdirSync(path.join(root, 'node_modules'), { recursive: true });
@@ -25,7 +38,7 @@ test('search_code uses ripgrep semantics for fixed and regex searches while excl
 });
 
 test('search_code stops ripgrep at the 500-result contract limit', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-rg-limit-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-rg-limit-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, 'many.c'), Array.from({ length: 600 }, (_, index) => `needle_${index}`).join('\n'));
 
@@ -38,7 +51,7 @@ test('search_code stops ripgrep at the 500-result contract limit', async (t) => 
 });
 
 test('development execution tools are exposed only when their callbacks are configured', (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-workspace-tools-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-workspace-tools-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   const readOnlyNames = new WorkspaceToolset(root).asAgentTools().map((tool) => tool.name);
@@ -57,7 +70,7 @@ test('development execution tools are exposed only when their callbacks are conf
 });
 
 test('target investigation tools are opt-in and source mutation requires structured findings', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-investigation-tools-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-investigation-tools-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, 'kernel.c'), 'old\n');
   const callback = async () => ({ isError: false, text: '{"classification":"DEVELOPMENT_ONLY"}' });

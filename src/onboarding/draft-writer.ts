@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   FORMAL_EVALUATOR_DIGEST_ALGORITHM,
   type EvaluatorQualificationRecord,
@@ -26,15 +27,18 @@ export interface OnboardingEvidence {
   unknowns: string[];
   risks: string[];
   human_decisions: Array<{ topic: string; status: 'PENDING'; decision: null }>;
-  generated: { package_id: string; version: string; evaluator_id: string; evaluator_version: string };
+  generated: { package_id: string; version: string; evaluator_id: string; evaluator_version: string;
+    targets: Array<{ symbol: string | null; target_id: string; evaluator_id: string; evaluator_version: string }> };
+  candidate_scope_proposals: Array<{ target_id: string; include: string[]; exclude: string[] }>;
 }
 
 export interface DraftWriteOptions {
+  buildDefinition?: PackageBuildDefinition;
   packagesRoot: string;
   evaluatorsRoot: string;
   packageId: string;
   version: string;
-  target: FunctionCandidate | null;
+  targets: FunctionCandidate[];
   buildKind?: string | null;
   agent: OnboardingEvidence['agent'];
 }
@@ -92,14 +96,14 @@ function evaluatorDraft(root: string, evaluatorId: string, version: string, api:
     correctness: {
       definition: 'DRAFT ONLY: no trusted correctness oracle; this script always fails.',
       inventory: 'correctness/cases.json', case_ids: ['review-required'],
-      command: { executable: 'bash', script: 'scripts/run-correctness.sh', arguments: correctnessArgs, measurement_prefix: 'PHYOPT_MEASUREMENT' },
+      command: { executable: 'bash', script: 'scripts/run-correctness.sh', arguments: correctnessArgs, measurement_prefix: 'COREPILOT_MEASUREMENT' },
       reference: { implementation: 'correctness/oracle-proposal.txt', accumulation: 'UNKNOWN_REVIEW_REQUIRED', qualification_required: true },
       tolerance: { rule: 'UNKNOWN_REVIEW_REQUIRED', absolute: 0, relative: 0, qualification_required: true },
     },
     performance: {
       definition: 'DRAFT ONLY: no formal benchmark or qualified workload; this script always fails.',
       inventory: 'benchmark/workloads.json', workload_ids: ['review-required'],
-      command: { executable: 'bash', script: 'scripts/run-performance.sh', arguments: performanceArgs, measurement_prefix: 'PHYOPT_MEASUREMENT' },
+      command: { executable: 'bash', script: 'scripts/run-performance.sh', arguments: performanceArgs, measurement_prefix: 'COREPILOT_MEASUREMENT' },
       sampling: { warmup_count: 0, sample_count: 1, statistic: 'median', process_model: 'one-process-per-sample' },
       measurement: { unit: 'seconds', value: 'latency_seconds', derived: ['median'], raw_samples_retained: true, output_schema: 'benchmark/output-schema.json' },
     },
@@ -128,13 +132,13 @@ function evaluatorDraft(root: string, evaluatorId: string, version: string, api:
   writeJson(root, 'correctness/policy.json', { status: 'DRAFT', argument_contract: correctnessArgs, oracle: 'UNKNOWN_REVIEW_REQUIRED' });
   writeJson(root, 'benchmark/policy.json', { status: 'DRAFT', argument_contract: performanceArgs, benchmark: 'UNKNOWN_REVIEW_REQUIRED' });
   writeJson(root, 'benchmark/output-schema.json', {
-    line_prefix: 'PHYOPT_MEASUREMENT',
+    line_prefix: 'COREPILOT_MEASUREMENT',
     required_fields: ['kind', 'role', 'subject_id', 'sample_index', 'value', 'unit', 'validity', 'domain_payload'],
   });
   writeText(root, 'correctness/oracle-proposal.txt', 'No trusted oracle exists. Human review must supply an independent correctness harness.\n');
   writeText(root, 'benchmark/benchmark-proposal.txt', 'No formal benchmark exists. Human review must supply qualified workloads and a benchmark harness.\n');
   for (const [name, args] of [['run-correctness', correctnessArgs], ['run-performance', performanceArgs]] as const) {
-    writeText(root, `scripts/${name}.sh`, `#!/bin/sh\n: PHYOPT_ARGUMENT_CONTRACT: ${args.join(',')}\nprintf '%s\\n' 'DRAFT evaluator is not executable' >&2\nexit 1\n`);
+    writeText(root, `scripts/${name}.sh`, `#!/bin/sh\n: COREPILOT_ARGUMENT_CONTRACT: ${args.join(',')}\nprintf '%s\\n' 'DRAFT evaluator is not executable' >&2\nexit 1\n`);
   }
   const digest = evaluatorContentSha256(root);
   manifest.digest = digest;
@@ -153,26 +157,38 @@ function evaluatorDraft(root: string, evaluatorId: string, version: string, api:
 }
 
 export function writeOnboardingDraft(inspection: RepositoryInspection, options: DraftWriteOptions): {
-  packagePath: string; evaluatorPath: string; evidence: OnboardingEvidence;
+  packagePath: string; evaluatorPath: string; evaluatorPaths: string[];
+  targets: Array<{ symbol: string | null; targetId: string; evaluatorPath: string }>;
+  evidence: OnboardingEvidence;
 } {
-  const { packageId, version, target } = options;
+  const { packageId, version } = options;
   if (!IDENTIFIER.test(packageId) || !VERSION.test(version)) throw new Error('invalid package id or version');
-  const targetId = target ? target.symbol.replace(/_/g, '-').toLowerCase().replace(/[^a-z0-9-]/g, '') : 'unknown-api';
-  const safeTargetId = IDENTIFIER.test(targetId) ? targetId : 'unknown-api';
-  const evaluatorId = `${packageId}-${safeTargetId}`;
+  if (new Set(options.targets.map(target => target.symbol)).size !== options.targets.length) throw new Error('duplicate target symbol');
+  const selected = options.targets.length ? options.targets : [null];
+  const usedIds = new Set<string>();
+  const drafts = selected.map(target => {
+    const slug = target?.symbol.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') ?? 'unknown-api';
+    const base = /^[a-z]/.test(slug) ? slug : `function-${slug || 'unknown'}`;
+    let targetId = base;
+    if (usedIds.has(targetId)) targetId = `${base}-${createHash('sha256').update(target!.symbol).digest('hex').slice(0, 8)}`;
+    if (usedIds.has(targetId)) throw new Error(`target identity collision: ${target!.symbol}`);
+    usedIds.add(targetId);
+    const evaluatorId = `${packageId}-${targetId}`;
+    const include = target?.implementation_files.filter(item => !/(?:^|\/)(?:tests?|benchmarks?|perf|reference)(?:\/|[._-])/i.test(item)) ?? [];
+    const candidateScope = {
+      include: include.length ? include : ['REVIEW_REQUIRED_SOURCE_FILE'],
+      exclude: [...new Set([...inspection.tests, ...inspection.benchmarks, ...inspection.references, ...inspection.build_candidates.flatMap(item => item.evidence)])].slice(0, 200),
+    };
+    return { target, targetId, evaluatorId, evaluatorPath: path.resolve(options.evaluatorsRoot, evaluatorId, version), candidateScope };
+  });
   const packagePath = path.resolve(options.packagesRoot, packageId, version);
-  const evaluatorPath = path.resolve(options.evaluatorsRoot, evaluatorId, version);
+  const evaluatorPath = drafts[0].evaluatorPath;
   const repository = inspection.repository.path;
-  for (const output of [packagePath, evaluatorPath]) {
+  for (const output of [packagePath, ...drafts.map(draft => draft.evaluatorPath)]) {
     const relative = path.relative(repository, resolvedDestination(output));
     if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) throw new Error('draft output must not be inside the source repository');
     if (fs.existsSync(output)) throw new Error(`draft already exists: ${output}`);
   }
-  const include = target?.implementation_files.filter((item) => !/(?:^|\/)(?:tests?|benchmarks?|perf|reference)(?:\/|[._-])/i.test(item)) ?? [];
-  const candidateScope = {
-    include: include.length ? include : ['REVIEW_REQUIRED_SOURCE_FILE'],
-    exclude: [...new Set([...inspection.tests, ...inspection.benchmarks, ...inspection.references, ...inspection.build_candidates.flatMap((item) => item.evidence)])].slice(0, 200),
-  };
   const humanTopics = ['build command', 'optimization target and public API', 'candidate source scope', 'correctness oracle', 'tolerance', 'workloads', 'baseline identity', 'acceptance policy', 'target resources'];
   const evidence: OnboardingEvidence = {
     schema_version: 1, created_at: new Date().toISOString(), repository: inspection.repository, agent: options.agent,
@@ -184,28 +200,32 @@ export function writeOnboardingDraft(inspection: RepositoryInspection, options: 
       dependencies: inspection.dependencies, languages: inspection.languages,
       version_clues: inspection.version_clues, public_headers: inspection.public_headers,
     },
-    candidate_scope_proposal: candidateScope,
-    unknowns: [...inspection.unknowns, ...(target ? [] : ['Optimization target was not confirmed.'])],
+    candidate_scope_proposal: drafts[0].candidateScope,
+    candidate_scope_proposals: drafts.map(draft => ({ target_id: draft.targetId, ...draft.candidateScope })),
+    unknowns: [...inspection.unknowns, ...(options.targets.length ? [] : ['Optimization target was not confirmed.'])],
     risks: ['Discovered tests and benchmarks are development assets only.', 'Generated evaluator has no trusted oracle or formal benchmark.', 'No build or execution probe was run.'],
     human_decisions: humanTopics.map((topic) => ({ topic, status: 'PENDING', decision: null })),
-    generated: { package_id: packageId, version, evaluator_id: evaluatorId, evaluator_version: version },
+    generated: { package_id: packageId, version, evaluator_id: drafts[0].evaluatorId, evaluator_version: version,
+      targets: drafts.map(draft => ({ symbol: draft.target?.symbol ?? null, target_id: draft.targetId, evaluator_id: draft.evaluatorId, evaluator_version: version })) },
   };
   fs.mkdirSync(packagePath, { recursive: true });
-  fs.mkdirSync(evaluatorPath, { recursive: true });
-  const digest = evaluatorDraft(evaluatorPath, evaluatorId, version, target?.public_api ?? 'UNKNOWN', inspection.repository.name);
+  const evaluatorDigests = drafts.map(draft => {
+    fs.mkdirSync(draft.evaluatorPath, { recursive: true });
+    return evaluatorDraft(draft.evaluatorPath, draft.evaluatorId, version, draft.target?.public_api ?? 'UNKNOWN', inspection.repository.name);
+  });
   const manifest = {
     schema_version: 1, package_id: packageId, version, owner: 'human-review-required',
     library: {
       name: inspection.repository.name, source_compatibility: ['UNVERIFIED_REVIEW_REQUIRED'], target_compatibility: ['UNVERIFIED_REVIEW_REQUIRED'],
     },
     qualification: { state: 'DRAFT', reviewer: null, reviewed_at: null },
-    functions: [{ function_id: safeTargetId, api: target?.public_api ?? 'UNKNOWN' }],
+    functions: drafts.map(draft => ({ function_id: draft.targetId, api: draft.target?.public_api ?? 'UNKNOWN' })),
     build_definitions: [{ build_id: 'discovered-build', definition: 'build/discovered.json' }],
-    formal_evaluators: [{ evaluator_id: evaluatorId, version, owner: 'human-review-required', digest, catalog_path: `${evaluatorId}/${version}` }],
-    targets: [{
-      target_id: safeTargetId, function_id: safeTargetId, build_id: 'discovered-build',
-      evaluator: { evaluator_id: evaluatorId, evaluator_version: version }, candidate_scope: candidateScope,
-      development_benchmark: { evaluator: { evaluator_id: evaluatorId, evaluator_version: version }, workload_ids: ['review-required'] },
+    formal_evaluators: drafts.map((draft, index) => ({ evaluator_id: draft.evaluatorId, version, owner: 'human-review-required', digest: evaluatorDigests[index], catalog_path: `${draft.evaluatorId}/${version}` })),
+    targets: drafts.map(draft => ({
+      target_id: draft.targetId, function_id: draft.targetId, build_id: 'discovered-build',
+      evaluator: { evaluator_id: draft.evaluatorId, evaluator_version: version }, candidate_scope: draft.candidateScope,
+      development_benchmark: { evaluator: { evaluator_id: draft.evaluatorId, evaluator_version: version }, workload_ids: ['review-required'] },
       artifacts: {
         candidate: { artifact_id: 'unverified-candidate', relative_path: 'REVIEW_REQUIRED_ARTIFACT' },
         baseline: { id: 'unverified-baseline', library: inspection.repository.name, version: 'UNVERIFIED', sha256: ZERO },
@@ -213,11 +233,11 @@ export function writeOnboardingDraft(inspection: RepositoryInspection, options: 
       performance_acceptance: { weighted_geomean_min: 1, overall_ci_lower_min: 1, key_case_ci_lower_min: 1, confidence_level: 0.95 },
       analysis_sampling: { interleave_seed: 0, bootstrap_iterations: 100 },
       domain_payload: { onboarding_draft: true },
-    }],
+    })),
   } as unknown as LibraryPackageManifest;
   validateLibraryPackageManifest(manifest);
   writeJson(packagePath, 'package.json', manifest);
-  writeJson(packagePath, 'build/discovered.json', buildDefinition(inspection, options.buildKind));
+  writeJson(packagePath, 'build/discovered.json', options.buildDefinition ?? buildDefinition(inspection, options.buildKind));
   writeJson(packagePath, 'development/tests.json', {
     status: 'DISCOVERED_TEST', command: null, formal_correctness: false, assets: evidence.test_evidence,
   });
@@ -227,6 +247,7 @@ export function writeOnboardingDraft(inspection: RepositoryInspection, options: 
   });
   writeJson(packagePath, 'onboarding/evidence.json', evidence);
   const loader = new LibraryPackageLoader({ packagesRoot: options.packagesRoot, evaluatorsRoot: options.evaluatorsRoot });
-  loader.resolveSelection({ package_id: packageId, package_version: version, target_id: safeTargetId });
-  return { packagePath, evaluatorPath, evidence };
+  for (const draft of drafts) loader.resolveSelection({ package_id: packageId, package_version: version, target_id: draft.targetId });
+  return { packagePath, evaluatorPath, evaluatorPaths: drafts.map(draft => draft.evaluatorPath),
+    targets: drafts.map(draft => ({ symbol: draft.target?.symbol ?? null, targetId: draft.targetId, evaluatorPath: draft.evaluatorPath })), evidence };
 }

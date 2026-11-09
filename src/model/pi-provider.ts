@@ -2,11 +2,12 @@ import { createProvider, createModels, type Models } from '@earendil-works/pi-ai
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { contentText } from '@earendil-works/pi-ai';
 import type { Api, AssistantMessage, Context, Model } from '@earendil-works/pi-ai';
+import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { ModelCallResult, ModelProvider } from './provider.js';
 import { newRequestId, withRetriesAndTimeout, DEFAULT_MODEL_CALL_OPTIONS } from './provider.js';
 
 /** Internal Pi provider id for every user-supplied OpenAI-compatible endpoint. */
-export const PHYOPT_PI_PROVIDER_ID = 'phyopt-openai-compatible';
+export const COREPILOT_PI_PROVIDER_ID = 'corepilot-openai-compatible';
 
 export interface PiRuntimeModelConfig {
   modelId: string;
@@ -37,6 +38,11 @@ function isOfficialOpenAiEndpoint(endpoint: string): boolean {
   }
 }
 
+function isOfficialDeepSeekEndpoint(endpoint: string): boolean {
+  try { return new URL(endpoint).hostname.toLowerCase() === 'api.deepseek.com'; }
+  catch { return false; }
+}
+
 /**
  * Construct a Pi model for a user endpoint. The provider id is deliberately
  * internal: public YAML contains only endpoint and model_id.
@@ -44,27 +50,30 @@ function isOfficialOpenAiEndpoint(endpoint: string): boolean {
 export function createPiModel(config: PiRuntimeModelConfig): Model<'openai-completions'> {
   const endpoint = normalizeEndpoint(config.endpoint);
   const officialOpenAi = isOfficialOpenAiEndpoint(endpoint);
+  const officialDeepSeek = isOfficialDeepSeekEndpoint(endpoint);
   const reasoningCompatible = officialOpenAi || config.reasoningEffort !== undefined;
   return {
     id: config.modelId,
     name: config.modelId,
     api: 'openai-completions',
-    provider: PHYOPT_PI_PROVIDER_ID,
+    provider: COREPILOT_PI_PROVIDER_ID,
     baseUrl: endpoint,
-    reasoning: config.reasoningEffort !== undefined,
+    reasoning: officialDeepSeek || config.reasoningEffort !== undefined,
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: config.maxOutputTokens ?? 16_384,
     compat: {
       supportsStore: officialOpenAi,
-      supportsDeveloperRole: reasoningCompatible,
+      // A user-selected reasoning level does not imply support for OpenAI's developer role.
+      supportsDeveloperRole: officialOpenAi,
       supportsReasoningEffort: reasoningCompatible,
       supportsUsageInStreaming: true,
       supportsFinishReason: true,
-      maxTokensField: reasoningCompatible ? 'max_completion_tokens' : 'max_tokens',
+      maxTokensField: reasoningCompatible && !officialDeepSeek ? 'max_completion_tokens' : 'max_tokens',
       supportsStrictMode: officialOpenAi,
-      thinkingFormat: 'openai',
+      // Preserve Pi's native endpoint-specific thinking dialects instead of overriding all of them with OpenAI.
+      ...(officialOpenAi ? { thinkingFormat: 'openai' as const } : {}),
     },
   };
 }
@@ -79,7 +88,7 @@ export function createPiModels(config: PiRuntimeModelConfig): Models {
   const apiKey = config.apiKey.trim();
   const api = openAICompletionsApi();
   const provider = createProvider({
-    id: PHYOPT_PI_PROVIDER_ID,
+    id: COREPILOT_PI_PROVIDER_ID,
     name: 'CorePilot OpenAI-compatible endpoint',
     baseUrl: model.baseUrl,
     auth: {
@@ -101,9 +110,16 @@ export function createPiModels(config: PiRuntimeModelConfig): Models {
   return models;
 }
 
+/** Tool-only drafting still uses Pi's loop; provider-specific output selection stays in this adapter. */
+export function createPiToolSubmissionStream(models: Models, fetcher: typeof fetch): StreamFn {
+  return (model, context, options) => models.streamSimple(model, context, { ...options, fetch: fetcher, maxTokens: model.maxTokens,
+    ...(model.api === 'openai-completions' && (!model.reasoning || !options?.reasoning)
+      ? { samplingParams: { ...options?.samplingParams, tool_choice: 'required' } } : {}) });
+}
+
 /** Pi-backed model provider retained for generic provider callers and tests. */
 export class PiModelProvider implements ModelProvider {
-  readonly provider = PHYOPT_PI_PROVIDER_ID;
+  readonly provider = COREPILOT_PI_PROVIDER_ID;
   readonly model: string;
   private readonly models: Models;
   private readonly modelId: string;
@@ -116,7 +132,7 @@ export class PiModelProvider implements ModelProvider {
   constructor(config: PiModelProviderConfig) {
     this.modelId = config.modelId;
     this.apiKey = config.apiKey.trim();
-    this.model = this.modelId ? `${PHYOPT_PI_PROVIDER_ID}/${this.modelId}` : PHYOPT_PI_PROVIDER_ID;
+    this.model = this.modelId ? `${COREPILOT_PI_PROVIDER_ID}/${this.modelId}` : COREPILOT_PI_PROVIDER_ID;
     this.models = config.models ?? createPiModels(config);
     this.maxRetries = config.maxRetries ?? DEFAULT_MODEL_CALL_OPTIONS.maxRetries;
     this.timeoutMs = config.timeoutMs ?? DEFAULT_MODEL_CALL_OPTIONS.timeoutMs;
@@ -133,7 +149,7 @@ export class PiModelProvider implements ModelProvider {
     if (!this.configured) {
       return { ok: false, output: null, provider: this.provider, model: this.model, request_id: requestId, attempts: 0, timed_out: false, error: 'model_id is not configured' };
     }
-    const model = this.models.getModel(PHYOPT_PI_PROVIDER_ID, this.modelId);
+    const model = this.models.getModel(COREPILOT_PI_PROVIDER_ID, this.modelId);
     if (!model) {
       return { ok: false, output: null, provider: this.provider, model: this.model, request_id: requestId, attempts: 0, timed_out: false, error: `model not found: ${this.modelId}` };
     }

@@ -6,6 +6,20 @@ export interface FrozenEvidenceArtifactIdentity {
   archive_path: string;
   archive_sha256: string;
   manifest_path: string;
+  /** Absent on historical archives whose format was recorded externally. */
+  archive_format?: 'COREPILOT_EVIDENCE_JSON_GZIP_V1';
+}
+
+/** A frozen snapshot of the exact evidence offered for human review. */
+export interface WorkflowEvidenceSnapshot {
+  schema_version: 1;
+  task_id: string;
+  candidate_id: string;
+  candidate_commit: string;
+  first_formal_experiment_id: string;
+  revalidation_experiment_id: string;
+  artifact: FrozenEvidenceArtifactIdentity;
+  frozen_at: string;
 }
 
 export interface OptimizationApprovalRecord {

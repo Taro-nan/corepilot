@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { resolveCandidateRoot } from '../config/runtime-path.js';
+import { withRunnerValidationStatus } from '../workspace/validation-outcome.js';
 import { RunnerClientError } from '../client/runner-client.js';
 import type { Candidate, Experiment } from '../contracts/optimization-domain.js';
 import type { LoadedFormalEvaluatorBundle } from '../contracts/formal-evaluator.js';
@@ -22,6 +24,7 @@ import { loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
 import { createFormalEvaluatorSteps } from '../evaluator/formal-plan.js';
 import { formalCaseParameters, formalWorkloadParameters } from '../evaluator/formal-arguments.js';
 import { parametersAreSubset, validationCaseParameters } from '../testpack/validation-parameters.js';
+import { remoteWorkspaceBuild } from '../workspace/remote-build.js';
 
 const CONFIRMED_TERMINAL = new Set<ExperimentStatusResponse['status']>(['SUCCEEDED', 'FAILED', 'CANCELLED']);
 
@@ -62,6 +65,8 @@ export interface BaselineStageResult {
   baselineId: string;
   workspacePath: string;
   sha256: string;
+  libraryPaths?: string[];
+  dependencies?: Array<{ path: string; sha256: string }>;
 }
 
 export type BaselineStager = (input: BaselineStageRequest, signal?: AbortSignal) => Promise<BaselineStageResult>;
@@ -73,6 +78,7 @@ export interface RpcExperimentTransitionAdapterOptions {
   stageEvaluator: EvaluatorStager;
   stageBaseline?: BaselineStager;
   pollIntervalMs: number;
+  onStatus?: (status: ExperimentStatusResponse) => void;
   cancelConfirmationMs?: number;
   /** Bootstrap-only allowance for one exact TARGET_VALIDATED evaluator digest. */
   allowTargetValidatedDigest?: string;
@@ -124,7 +130,9 @@ export class RpcExperimentTransitionAdapter {
     sourceRoot: string;
     includePerformance: boolean;
     signal?: AbortSignal;
+    resume?: boolean;
   }): Promise<ValidationCycleResult> {
+    if (input.resume) return this.resumeValidation(input.experimentId, input.testpack, input.includePerformance, input.signal);
     const experiment = this.pendingExperiment(input.experimentId);
     const candidate = this.options.runtime.getCandidate(experiment.candidate_id);
     const staged = await this.stage(experiment, candidate, input.workspace, input.signal);
@@ -155,7 +163,7 @@ export class RpcExperimentTransitionAdapter {
       includePerformance: input.includePerformance,
       steps: plan.steps,
     });
-    return { ...validation, runner_status: terminal, passed: validation.passed && terminal.status === 'SUCCEEDED' };
+    return withRunnerValidationStatus(validation, terminal);
   }
 
   async executeRevalidation(input: {
@@ -165,7 +173,12 @@ export class RpcExperimentTransitionAdapter {
     testpack: ValidationTestpack;
     sourceRoot: string;
     signal?: AbortSignal;
+    resume?: boolean;
   }): Promise<RevalidationCycleResult> {
+    if (input.resume) {
+      const formal = await this.resumeValidation(input.experimentId, input.testpack, true, input.signal);
+      return { formal, independent: null, performance_gate: null, passed: formal.passed };
+    }
     const experiment = this.pendingExperiment(input.experimentId);
     const candidate = this.options.runtime.getCandidate(experiment.candidate_id);
     const staged = await this.stage(experiment, candidate, input.workspace, input.signal);
@@ -193,7 +206,7 @@ export class RpcExperimentTransitionAdapter {
       includePerformance: true,
       steps: mapped.steps,
     });
-    const formal = { ...validation, runner_status: terminal, passed: validation.passed && terminal.status === 'SUCCEEDED' };
+    const formal = withRunnerValidationStatus(validation, terminal);
     return { formal, independent: null, performance_gate: null, passed: formal.passed };
   }
 
@@ -219,6 +232,29 @@ export class RpcExperimentTransitionAdapter {
     const experiment = this.options.runtime.getExperiment(experimentId);
     if (experiment.status !== 'PENDING') throw new Error(`RPC experiment '${experimentId}' must be PENDING before submission (status: ${experiment.status})`);
     return experiment;
+  }
+
+  private async resumeValidation(experimentId: string, testpack: ValidationTestpack, includePerformance: boolean, signal?: AbortSignal): Promise<ValidationCycleResult> {
+    const experiment = this.options.runtime.getExperiment(experimentId);
+    const saved = experiment.declared_context.runner_execution_plan as Omit<ExperimentExecutionPlan, 'experiment'> | undefined;
+    if (!saved) throw new RemoteExperimentUnknownError(experimentId, 'Saved Runner execution plan is missing; remote work was not restarted.');
+    let terminal: ExperimentStatusResponse;
+    try {
+      await this.options.backend.reconcileExperiment(experimentId, signal);
+      terminal = await this.waitForTerminal(experimentId, signal);
+    } catch (error) {
+      if (!isNotFound(error) || experiment.ended_at) throw error;
+      // The original submission never arrived. Use its original ID and staged
+      // files; an existing or completed remote execution is never resubmitted.
+      const { runner_execution_plan: _saved, ...declared_context } = experiment.declared_context;
+      terminal = await this.submitAndWait({ ...saved, experiment: { ...experiment, status: 'PENDING', declared_context } }, signal);
+    }
+    const facts = await this.synchronizeFacts(experimentId);
+    if (terminal.status === 'UNKNOWN') throw new RemoteExperimentUnknownError(experimentId, remoteFailureMessage(terminal));
+    if (signal?.aborted) throw abortError('control observation interrupted');
+    if (!facts.commands.length) throw new RemoteExperimentUnknownError(experimentId, remoteFailureMessage(terminal));
+    const validation = validationCycleFromCommandExecutions({ testpack, commands: facts.commands, includePerformance, steps: saved.steps });
+    return withRunnerValidationStatus(validation, terminal);
   }
 
   private async stage(
@@ -284,6 +320,8 @@ export class RpcExperimentTransitionAdapter {
   private async submitAndWait(plan: ExperimentExecutionPlan, signal?: AbortSignal): Promise<ExperimentStatusResponse> {
     if (!this.preflightResult) await this.preflight(signal);
     signal?.throwIfAborted();
+    const { experiment: _experiment, ...stagedPlan } = plan;
+    this.options.runtime.recordRemoteExecutionPlan(plan.experiment.experiment_id, stagedPlan);
     try {
       const submitted = await this.options.backend.submitExperiment(plan, signal);
       if (submitted.experiment_id !== plan.experiment.experiment_id) throw new Error('runner acknowledged a different experiment identity');
@@ -314,6 +352,10 @@ export class RpcExperimentTransitionAdapter {
     let cancelRequested = false;
     let cancelDeadline = 0;
     while (true) {
+      if (signal?.aborted && signal.reason === 'backend shutting down') {
+        this.options.runtime.markRemoteStateUnknown(experimentId, 'Control service stopped observing the Runner; reconcile this Experiment on resume.');
+        throw new RemoteExperimentUnknownError(experimentId, 'Control service stopped; the existing Runner execution is preserved for reconciliation.');
+      }
       if (signal?.aborted && !cancelRequested) {
         cancelRequested = true;
         cancelDeadline = Date.now() + this.cancelConfirmationMs;
@@ -327,6 +369,7 @@ export class RpcExperimentTransitionAdapter {
       try {
         const status = await this.options.backend.reconcileExperiment(experimentId);
         this.options.runtime.synchronizeRemoteExperiment(status);
+        this.options.onStatus?.(status);
         if (CONFIRMED_TERMINAL.has(status.status) || status.status === 'UNKNOWN') return status;
       } catch (error) {
         if (isNotFound(error)) throw error;
@@ -373,16 +416,18 @@ function validationPlan(input: {
     expected: { evaluatorId: evaluatorSpec.id, version: evaluatorSpec.version, digest: evaluatorSpec.sha256 },
   });
   validateFormalTestpackCompatibility(input.testpack, bundle);
+  const mappedBuild = mapCandidateCommand(input.build, input.sourceRoot, input.staged.workspacePath);
+  const buildRoot = `${input.staged.workspacePath}.build`;
+  const preparedBuild = remoteWorkspaceBuild({ build: input.build,
+    cwdRelative: path.relative(path.resolve(input.sourceRoot), path.resolve(input.build.cwd)) || '.',
+    sourceRoot: input.staged.workspacePath, buildRoot,
+    artifactPath: mapFormalArtifactPath(input.testpack.performance.baselines.current.path, input.sourceRoot, input.staged.workspacePath) });
   const steps: ExperimentExecutionStep[] = [{
     step: 'BUILD',
     execution_domain: 'CANDIDATE',
-    command: mapCandidateCommand(input.build, input.sourceRoot, input.staged.workspacePath),
+    command: { ...preparedBuild.command, cwd: mappedBuild.cwd },
   }];
-  const candidateArtifactPath = mapFormalArtifactPath(
-    input.testpack.performance.baselines.current.path,
-    input.sourceRoot,
-    input.staged.workspacePath,
-  );
+  const candidateArtifactPath = preparedBuild.artifactPath;
   const baselineArtifactPath = input.baseline?.workspacePath ?? mapFormalArtifactPath(
     input.testpack.performance.baselines.comparison.path,
     input.sourceRoot,
@@ -391,9 +436,10 @@ function validationPlan(input: {
   steps.push(...createFormalEvaluatorSteps({
     bundle,
     stagedEvaluatorRoot: input.evaluator.workspace_path,
+    candidateSourceRoot: input.staged.workspacePath,
     runtimeRoot: joinForTarget(
       input.staged.workspacePath,
-      `.phyopt-formal-evaluator/${`${bundle.manifest.evaluator_id}-${bundle.manifest.version}`.replace(/[^A-Za-z0-9_.-]/g, '_')}`,
+      `.corepilot-formal-evaluator/${`${bundle.manifest.evaluator_id}-${bundle.manifest.version}`.replace(/[^A-Za-z0-9_.-]/g, '_')}`,
     ),
     candidateArtifact: {
       artifactId: input.testpack.performance.baselines.current.id,
@@ -404,12 +450,14 @@ function validationPlan(input: {
       artifactId: input.testpack.performance.baselines.comparison.id,
       path: baselineArtifactPath,
       sha256: input.baseline?.sha256 ?? input.testpack.performance.baselines.comparison.sha256,
+      ...(input.baseline?.dependencies ? { dependencies: input.baseline.dependencies } : {}),
     },
+    ...(input.baseline?.libraryPaths ? { baselineLibraryPaths: input.baseline.libraryPaths } : {}),
     correctnessTimeoutMs: input.testpack.correctness.command.timeout_ms,
     performanceTimeoutMs: input.testpack.performance.command.timeout_ms,
     includePerformance: input.includePerformance,
   }));
-  return plan(input.experiment, input.candidate, input.staged, input.evaluator, steps);
+  return { ...plan(input.experiment, input.candidate, input.staged, input.evaluator, steps), build_directory: buildRoot };
 }
 
 function plan(
@@ -448,7 +496,7 @@ function mapCandidateCommand(command: ValidationCommand, sourceRoot: string, sta
 }
 
 function mapFormalArtifactPath(value: string, sourceRoot: string, stagedCandidateRoot: string): string {
-  const substituted = value.replaceAll('${PHYOPT_CANDIDATE_ROOT}', stagedCandidateRoot);
+  const substituted = resolveCandidateRoot(value, stagedCandidateRoot);
   if (substituted !== value) return substituted;
   const configured = path.resolve(value);
   const relative = path.relative(path.resolve(sourceRoot), configured);

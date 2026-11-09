@@ -56,9 +56,6 @@ exec "$root/node/bin/node" "$root/app/dist/runner-entry.js" "$@"
   const launcherPath = path.join(packageRoot, 'bin', 'corepilot-runner');
   fs.writeFileSync(launcherPath, launcher);
   fs.chmodSync(launcherPath, 0o755);
-  const legacyLauncherPath = path.join(packageRoot, 'bin', 'phyopt-runner');
-  fs.writeFileSync(legacyLauncherPath, launcher);
-  fs.chmodSync(legacyLauncherPath, 0o755);
   run('tar', ['-cJf', output, '-C', temporary, 'corepilot-runner']);
   const sha256 = createHash('sha256').update(fs.readFileSync(output)).digest('hex');
   process.stdout.write(`${JSON.stringify({ output, sha256, node_runtime: nodeRuntime, node_archive_sha256: nodeArchiveSha256, entrypoint: 'corepilot-runner/bin/corepilot-runner' }, null, 2)}\n`);

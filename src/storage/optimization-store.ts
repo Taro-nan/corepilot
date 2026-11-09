@@ -7,9 +7,11 @@ import type {
 } from '../contracts/optimization-domain.js';
 import type { HypothesisOutcome, OptimizationHypothesis } from '../contracts/optimization-hypothesis.js';
 import type { OptimizationApprovalRecord } from '../contracts/optimization-approval.js';
+import type { StoredBuildFact } from '../contracts/build-planning.js';
 
 /** Append-oriented persistence boundary for real optimization facts. */
 export interface OptimizationStore {
+  latestBuildForRepository(repository: string): StoredBuildFact | null;
   saveOptimizationTask(task: OptimizationTask): void;
   getOptimizationTask(taskId: string): OptimizationTask | null;
   getOptimizationTaskByWorkflowId(workflowId: string): OptimizationTask | null;
@@ -31,6 +33,7 @@ export interface OptimizationStore {
   createExperiment(experiment: Experiment): void;
   saveExperiment(experiment: Experiment): void;
   getExperiment(experimentId: string): Experiment | null;
+  /** Durable insertion order; wall-clock changes must not reorder experiments. */
   listExperiments(taskId: string): Experiment[];
 
   appendCommandExecution(execution: CommandExecution): void;

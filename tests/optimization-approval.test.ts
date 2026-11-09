@@ -12,7 +12,7 @@ import { createFormalEvaluatorFixture } from './formal-evaluator-fixture.js';
 function hash(bytes: string | Buffer) { return createHash('sha256').update(bytes).digest('hex'); }
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'phyopt-human-approval-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-human-approval-'));
   const store = new SqliteTaskStore(path.join(root, 'control.sqlite'));
   store.init();
   const runtime = new OptimizationRuntime(store, { now: () => new Date('2026-10-14T08:00:00.000Z') });
