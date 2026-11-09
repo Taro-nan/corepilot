@@ -12,6 +12,7 @@
 | 下一阶段深度改进、优先级与验收标准 | [性能工程清单](roadmap/performance-depth.md) |
 | 技术评审整改状态、验证结果与外部阻塞 | [技术评审整改记录](engineering/corepilot-review-execution.md) |
 | 测试辨别力、Runner 排队、统计区间、A/A 校准与源码复现 | [性能可信度与复现](guides/performance-assurance.md) |
+| 不连接服务核验证据归档完整性与身份关联 | [离线核验证据归档](guides/evidence-verification.md) |
 | 目录职责、文件保留/清理和工程检查 | [仓库结构与维护](development/repository-layout.md) |
 | 贡献流程和本地验证 | [贡献指南](../CONTRIBUTING.md) |
 | 网页使用、CLI 互通、Linux 常驻部署和备份 | [网页工作台指南](guides/web-workbench.md) |

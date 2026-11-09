@@ -28,9 +28,27 @@ import { checkOptimization } from './workflow/check-optimization.js';
 import { ProjectService } from './application/project-service.js';
 import { TestingService } from './application/testing-service.js';
 import { executeTestingCommand } from './client/testing-commands.js';
+import { verifyFrozenEvidenceArchive } from './workspace/frozen-evidence.js';
 
 function fail(message: string): number { console.error(`corepilot: ${message}`); return 1; }
 function serverUrl(): string { return process.env.COREPILOT_SERVER_URL ?? 'http://127.0.0.1:4317'; }
+
+function evidenceCommand(args: string[]): number {
+  try {
+    const parsed = parseArgs({ args, allowPositionals: true, strict: true,
+      options: { sha256: { type: 'string' }, json: { type: 'boolean' } } });
+    if (parsed.positionals.length !== 2 || parsed.positionals[0] !== 'verify' || !parsed.values.sha256) {
+      throw new Error('用法：corepilot evidence verify <归档文件> --sha256 <可信渠道提供的 SHA-256> [--json]');
+    }
+    console.log(JSON.stringify({ ok: true, ...verifyFrozenEvidenceArchive(parsed.positionals[1], parsed.values.sha256) }, null, 2));
+    return 0;
+  } catch (error) {
+    const message = (error as Error).message;
+    if (!args.includes('--json')) return fail(message);
+    console.error(JSON.stringify({ ok: false, code: 'EVIDENCE_VERIFICATION_FAILED', message }));
+    return 1;
+  }
+}
 
 export function main(argv: string[]): number {
   if (argv[0] === '--help' || argv[0] === '-h') { console.log(renderCliHelp()); return 0; }
@@ -445,6 +463,7 @@ export async function runCli(argv: string[]): Promise<number> {
       return result.exitCode;
     } catch (error) { return fail((error as Error).message); }
   }
+  if (command === 'evidence') return evidenceCommand(args);
   if (command === 'workflow') return workflow(args);
   if (command === 'check') return check(args);
   if (command === 'backend') return backend(args);

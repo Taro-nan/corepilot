@@ -38,6 +38,7 @@ export function renderCliHelp(): string {
     '  corepilot workflow message <workflow-id> --message <补充要求> [--config <path>]',
     '    watch: [--interval <seconds>] [--timeout <seconds>] [--output <report-dir>]；report: [--output <report-dir>]',
     '  corepilot workflow evidence <workflow-id> [--prepare | --output <文件>] [--json] [--config <path>]',
+    '  corepilot evidence verify <归档文件> --sha256 <可信渠道提供的 SHA-256> [--json]（离线核验完整性）',
     '  corepilot workflow human-approve <workflow-id> --reviewer <姓名> --authorization-reference <明确授权> --evidence-digest <摘要> [--json] [--config <path>]',
     '  corepilot workflow deliver <workflow-id> --commit-message <说明> [--expected-baseline-commit <commit>] [--config <path>]（approve 仍可用于交付）',
     '  corepilot workflow delivery-check <workflow-id> [--json] [--config <path>]',
