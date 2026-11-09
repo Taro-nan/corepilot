@@ -129,7 +129,12 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   }
 
   if (method === 'GET' && pathname === '/v1/health') {
-    sendJson(res, 200, buildHealth({ capabilities: ['workflows', 'workflow-reports', 'optimization-sessions', 'tasks', 'events', ...(options.controlIdentity ? ['control-identity-v1'] : []), ...(options.projectService ? ['projects'] : []), ...(options.testingService ? ['testing-tasks'] : []), ...(options.webRoot ? ['web'] : [])] }));
+    const health = buildHealth({ capabilities: ['workflows', 'workflow-reports', 'optimization-sessions', 'tasks', 'events', ...(options.controlIdentity ? ['control-identity-v1'] : []), ...(options.projectService ? ['projects'] : []), ...(options.testingService ? ['testing-tasks'] : []), ...(options.webRoot ? ['web'] : [])] });
+    try { host.assertExecutionOwnership(); sendJson(res, 200, health); }
+    catch (error) {
+      const failure = error as ApiError;
+      sendJson(res, 503, { ...health, status: 'unavailable', error: { code: failure.code, message: failure.message } });
+    }
     return;
   }
   if (method === 'POST' && pathname === MANAGED_SHUTDOWN_PATH) {
@@ -144,6 +149,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
     try {
       const body = await readJson(req);
       if (expectedControl) requireControlIdentity(options, expectedControl.databaseId, expectedControl.dataRootId);
+      host.assertExecutionOwnership();
       const header = req.headers[COREPILOT_MODEL_API_KEY_HEADER];
       const requestId = req.headers['idempotency-key'] === undefined ? undefined : intakeRequestId(req.headers['idempotency-key']);
       const inputDigest = requestId ? optimizationInputDigest(body) : undefined;
@@ -166,15 +172,16 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   if (intake && (method === 'GET' && !intake[2] || method === 'POST' && intake[2] === 'close')) {
     try {
       const id = intakeRequestId(decodeURIComponent(intake[1]));
+      if (method === 'POST') host.assertExecutionOwnership();
       sendJson(res, 200, method === 'GET' ? options.workflowService.intakeStatus(id) : options.workflowService.closeIntake(id));
     } catch (error) { throw intakeError(error); }
     return;
   }
-  if (options.testingService && await testingRoutes(req, res, url, options.testingService)) return;
+  if (options.testingService && await testingRoutes(req, res, url, options.testingService, () => host.assertExecutionOwnership())) return;
   if (options.projectService) {
     try {
       if (await machineRoutes(req, res, url, options.projectService.machines)) return;
-      if (await projectRoutes(req, res, url, options.projectService, options.workflowService)) return;
+      if (await projectRoutes(req, res, url, options.projectService, options.workflowService, () => host.assertExecutionOwnership())) return;
     }
     catch (error) {
       if (error instanceof ApiError) throw error;
@@ -201,6 +208,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   const workflowSessionAction = pathname.match(/^\/v1\/workflows\/([^/]+)\/(resume|messages|retry-validation)$/);
   if (method === 'POST' && workflowSessionAction) {
     const body = await readJson(req);
+    host.assertExecutionOwnership();
     const id = decodeURIComponent(workflowSessionAction[1]);
     if (!options.workflowService.get(id)) throw new ApiError(404, 'WORKFLOW_NOT_FOUND', 'workflow not found');
     try {
@@ -236,6 +244,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   const reproduction = pathname.match(/^\/v1\/workflows\/([^/]+)\/reproduction(?:\/(cancel))?$/);
   if (reproduction && options.workflowService) {
     const id = decodeURIComponent(reproduction[1]);
+    if (method === 'POST') host.assertExecutionOwnership();
     try {
       if (method === 'GET' && !reproduction[2]) { sendJson(res, 200, options.workflowService.reproductions.manifest(id)); return; }
       if (method === 'POST' && reproduction[2] === 'cancel') { await options.workflowService.reproductions.cancel(id); sendJson(res, 202, { status: 'CANCEL_REQUESTED' }); return; }
@@ -254,6 +263,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   }
   const workflowCancel = pathname.match(/^\/v1\/workflows\/([^/]+)\/cancel$/);
   if (method === 'POST' && workflowCancel) {
+    host.assertExecutionOwnership();
     const result = options.workflowService.cancel(decodeURIComponent(workflowCancel[1]));
     if (!result.ok && result.status === 'NOT_FOUND') throw new ApiError(404, 'WORKFLOW_NOT_FOUND', result.message);
     if (!result.ok) throw new ApiError(409, 'WORKFLOW_NOT_ACTIVE', result.message, { status: result.status });
@@ -315,6 +325,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
 
   if (method === 'POST' && pathname === '/v1/tasks') {
     const body = await readJson(req);
+    host.assertExecutionOwnership();
     const scenario = requireString(body.scenario, 'scenario');
     if (!(MOCK_SCENARIOS as readonly string[]).includes(scenario)) throw new ApiError(400, 'INVALID_SCENARIO', `invalid scenario '${scenario}'`);
     const targetValue = body.target as { name?: unknown } | undefined;
@@ -335,6 +346,7 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   const taskCommand = pathname.match(/^\/v1\/tasks\/([^/]+)\/(cancel|retry|resume)$/);
   if (method === 'POST' && taskCommand) {
     const body = await readJson(req);
+    host.assertExecutionOwnership();
     const id = decodeURIComponent(taskCommand[1]);
     const commandId = requireString(body.command_id, 'command_id');
     const action = taskCommand[2];

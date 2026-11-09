@@ -65,7 +65,7 @@ export class TaskHost {
   private readonly activeRuns = new Map<string, AbortController>();
   private readonly stopController = new AbortController();
   private stopping = false;
-  private leaseLost = false;
+  private leaseFailure: 'LOST' | 'UNKNOWN' | null = null;
   private schedulerPromise: Promise<void> | null = null;
   private lastLeaseRenew = 0;
   private leaseAcquired = false;
@@ -89,7 +89,29 @@ export class TaskHost {
 
   /** true while the host still owns its lease (false once the lease is lost). */
   get healthy(): boolean {
-    return !this.leaseLost;
+    return this.executionOwnership() === 'HELD';
+  }
+
+  /** This is a point-in-time observation, not a distributed fencing token. */
+  executionOwnership(): 'HELD' | 'LOST' | 'UNKNOWN' {
+    if (this.leaseFailure) return this.leaseFailure;
+    if (!this.leaseAcquired || this.stopping) return 'UNKNOWN';
+    try {
+      const lease = this.store.getActiveLease();
+      if (!lease || lease.owner_id !== this.ownerId) { this.leaseFailure = 'LOST'; return 'LOST'; }
+      const expiry = Date.parse(lease.expires_at);
+      if (!Number.isFinite(expiry)) return 'UNKNOWN';
+      if (expiry <= Date.now()) { this.leaseFailure = 'LOST'; return 'LOST'; }
+      return 'HELD';
+    } catch { return 'UNKNOWN'; }
+  }
+
+  assertExecutionOwnership(): void {
+    const state = this.executionOwnership();
+    if (state === 'HELD') return;
+    throw new ApiError(503, state === 'LOST' ? 'CONTROL_LEASE_LOST' : 'CONTROL_LEASE_UNKNOWN', state === 'LOST'
+      ? '当前后台已失去执行权，请维护者停止旧后台继续写入并核对原作业；在途 Agent 或 Runner 可能仍在运行。'
+      : '暂时无法确认后台执行权，请维护者检查数据库和后台进程；在途 Agent 或 Runner 可能仍在运行。');
   }
 
   async start(): Promise<void> {
@@ -396,7 +418,7 @@ export class TaskHost {
   private async schedulerLoop(): Promise<void> {
     while (!this.stopping) {
       this.renewLeaseIfDue();
-      if (this.leaseLost) {
+      if (this.leaseFailure) {
         break;
       }
       try {
@@ -790,10 +812,16 @@ export class TaskHost {
   }
 
   private renewLeaseIfDue(): void {
-    if (this.leaseLost) return;
+    if (this.leaseFailure) return;
     if (Date.now() - this.lastLeaseRenew < this.options.heartbeatIntervalMs) return;
 
-    const renewed = this.store.renewLease(this.ownerId, this.options.leaseTtlMs);
+    let renewed: boolean;
+    try { renewed = this.store.renewLease(this.ownerId, this.options.leaseTtlMs); }
+    catch {
+      this.leaseFailure = 'UNKNOWN';
+      console.error('[corepilot-host] unable to confirm lease; stopping scheduling');
+      return;
+    }
     if (renewed) {
       this.lastLeaseRenew = Date.now();
       return;
@@ -801,7 +829,7 @@ export class TaskHost {
 
     // The lease is gone (taken over or expired without us). Stop claiming
     // work and enter an unhealthy state; never schedule a Runner again.
-    this.leaseLost = true;
+    this.leaseFailure = 'LOST';
     console.error(
       `[corepilot-host] lease lost for owner ${this.ownerId}; entering unhealthy state and stopping scheduling`,
     );

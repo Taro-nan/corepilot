@@ -37,8 +37,8 @@ export class ApiClient {
     this.testing = new TestingClient((method, path, body, headers) => this.request(method, path, body, headers), (path, body) => this.upload(path, body));
   }
 
-  health(): Promise<unknown> {
-    return this.request('GET', '/v1/health');
+  health(signal?: AbortSignal): Promise<unknown> {
+    return this.request('GET', '/v1/health', undefined, undefined, signal);
   }
 
   createTask(payload: Record<string, unknown>): Promise<unknown> {

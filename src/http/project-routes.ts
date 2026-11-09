@@ -15,7 +15,7 @@ function downloadTestPackage(res: http.ServerResponse, body: Buffer, filename: s
   res.end(body);
 }
 
-export async function projectRoutes(req: http.IncomingMessage, res: http.ServerResponse, url: URL, service: ProjectService, workflows: OptimizationWorkflowService): Promise<boolean> {
+export async function projectRoutes(req: http.IncomingMessage, res: http.ServerResponse, url: URL, service: ProjectService, workflows: OptimizationWorkflowService, assertOwnership: () => void): Promise<boolean> {
   const pathname = url.pathname;
   const method = req.method ?? 'GET';
   if (pathname === '/v1/projects') {
@@ -35,7 +35,7 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
     if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供有效的请求标识。');
     const project = service.get(decodeURIComponent(trialRequest[1]));
     if (method === 'GET' && !trialRequest[2]) { sendJson(res, 200, service.validationTrials.requestStatus(project, requestId)); return true; }
-    if (method === 'POST' && trialRequest[2] === 'close') { await readJson(req); sendJson(res, 200, service.validationTrials.closeRequest(project, requestId)); return true; }
+    if (method === 'POST' && trialRequest[2] === 'close') { await readJson(req); assertOwnership(); sendJson(res, 200, service.validationTrials.closeRequest(project, requestId)); return true; }
   }
   const trial = pathname.match(/^\/v1\/projects\/([^/]+)\/validation-trials(?:\/([^/]+))?$/);
   if (trial) {
@@ -43,6 +43,7 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
     if (method === 'GET' && !trial[2]) { sendJson(res, 200, { trials: service.validationTrials.list(service.get(id)) }); return true; }
     if (method === 'POST' && !trial[2]) {
       const body = await readJson(req);
+      assertOwnership();
       const requestId = req.headers['idempotency-key'];
       if (requestId !== undefined && (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 200)) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供有效的请求标识。');
       for (const key of ['package_id', 'package_version', 'target_id'] as const) {
@@ -73,6 +74,7 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
   const freezeBaseline = pathname.match(/^\/v1\/projects\/([^/]+)\/validation-trials\/([^/]+)\/freeze-baseline$/);
   if (freezeBaseline && method === 'POST') {
     const body = await readJson(req);
+    assertOwnership();
     if (body.artifact_relative_path !== undefined && typeof body.artifact_relative_path !== 'string') throw new ApiError(400, 'INVALID_ARGUMENT', 'artifact_relative_path must be a string');
     sendJson(res, 200, await service.freezeBranchBaseline(decodeURIComponent(freezeBaseline[1]), decodeURIComponent(freezeBaseline[2]), body.artifact_relative_path as string | undefined));
     return true;
@@ -119,6 +121,7 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
       }
       if (method === 'POST' && ['check', 'bind', 'finalize'].includes(bundles[3])) {
         const body = await readJson(req);
+        assertOwnership();
         if (typeof body.entry_path !== 'string' || !body.entry_path.trim()) throw new ApiError(400, 'INVALID_ARGUMENT', 'entry_path is required');
         const result = bundles[3] === 'check' ? await service.baselineBundles.check(project, bundleId, body.entry_path)
           : bundles[3] === 'bind' ? await service.bindBundleBaseline(id, bundleId, body.entry_path)
@@ -172,6 +175,7 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
       url.searchParams.get('digest') ?? undefined)); return true; }
     if (method === 'POST' && assets[5] === 'generate') {
       const body = await readJson(req);
+      assertOwnership();
       if (body.scope !== undefined && !['correctness', 'performance', 'both'].includes(String(body.scope))) throw new ApiError(400, 'INVALID_ARGUMENT', 'scope must be correctness, performance or both');
       if (body.purpose !== undefined && !['CORRECTNESS_PLAN', 'TEST_CODE'].includes(String(body.purpose))) throw new ApiError(400, 'INVALID_ARGUMENT', 'purpose must be TEST_CODE or CORRECTNESS_PLAN');
       if (body.instructions !== undefined && (typeof body.instructions !== 'string' || body.instructions.length > 12000)) throw new ApiError(400, 'INVALID_ARGUMENT', '生成提示词必须是 12000 字符以内的文本');
@@ -230,11 +234,12 @@ export async function projectRoutes(req: http.IncomingMessage, res: http.ServerR
         sendJson(res, 200, await service.check(id, body.function_name as string | undefined, body.source_branch as string | undefined, body.machine_id as string | undefined, body.verification_mode as 'verified' | 'source_only' | undefined, body.candidate_scope as import('../contracts/library-package.js').CandidateSourceScope | undefined)); return true;
       }
       if (project[2] === 'models') { const body = await readJson(req); sendJson(res, 200, await service.discoverModels(id, body.model)); return true; }
-      if (project[2] === 'model-test') { sendJson(res, 200, await service.modelTest(id)); return true; }
+      if (project[2] === 'model-test') { assertOwnership(); sendJson(res, 200, await service.modelTest(id)); return true; }
       if (project[2] === 'target-test') { sendJson(res, 200, await service.targetTest(id)); return true; }
       if (project[2] === 'runner-test') { const body = await readJson(req); sendJson(res, 200, await service.runnerTest(id, body.runner)); return true; }
       if (project[2] === 'discover') {
         const body = await readJson(req);
+        assertOwnership();
         if (body.symbol !== undefined && typeof body.symbol !== 'string') throw new ApiError(400, 'INVALID_ARGUMENT', 'symbol must be a string');
         if (body.symbols !== undefined && (!Array.isArray(body.symbols) || body.symbols.some((item: unknown) => typeof item !== 'string' || !item.trim()) || body.symbols.length > MAX_ONBOARDING_TARGETS || new Set(body.symbols).size !== body.symbols.length)) {
           throw new ApiError(400, 'INVALID_ARGUMENT', `symbols must contain at most ${MAX_ONBOARDING_TARGETS} unique, non-empty strings`);

@@ -107,9 +107,11 @@ test('exclusive database contention reports unknown and retains the request', as
     const api = new ApiClient(f.url, { token: f.token });
     blocker.exec('BEGIN EXCLUSIVE');
     const busy = (error: ApiClientError) => error.status === 503 && error.code === 'WORKFLOW_REQUEST_BUSY';
+    const ownershipUnknown = (error: ApiClientError) => error.status === 503 && error.code === 'CONTROL_LEASE_UNKNOWN';
     await assert.rejects(api.getOptimizationIntake('locked'), busy);
-    await assert.rejects(api.closeOptimizationIntake('locked'), busy);
-    await assert.rejects(api.submitOptimizationWorkflow({ project_id: 'any' }, { requestId: 'locked' }), busy);
+    // Writes must fail before changing the intake when the lease cannot be checked.
+    await assert.rejects(api.closeOptimizationIntake('locked'), ownershipUnknown);
+    await assert.rejects(api.submitOptimizationWorkflow({ project_id: 'any' }, { requestId: 'locked' }), ownershipUnknown);
     blocker.exec('ROLLBACK');
     assert.deepEqual(await api.getOptimizationIntake('locked'), { status: 'NOT_FOUND' });
     assert.deepEqual(await api.closeOptimizationIntake('locked'), { status: 'CLOSED' });

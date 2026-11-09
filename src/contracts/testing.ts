@@ -114,4 +114,6 @@ export interface TestingTaskDetails {
   measurements: Measurement[];
   output: RunnerExecutionOutput | null;
   formal_evidence: false;
+  /** The saved facts are readable, but this Control cannot reconcile Runner. */
+  observation?: { status: 'LOCAL_ONLY'; code: 'CONTROL_LEASE_LOST' | 'CONTROL_LEASE_UNKNOWN'; message: string };
 }

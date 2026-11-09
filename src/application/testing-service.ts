@@ -165,6 +165,8 @@ export class TestingService {
     return task;
   }
   list(): TestingTaskRecord[] { return this.store.tasks().map(task => this.localRecord(task)); }
+  /** Read saved facts without contacting Runner or mutating the task. */
+  localDetails(taskId: string): TestingTaskDetails { return this.details(this.localRecord(this.store.task(taskId))); }
   /** Refresh persisted list projections without holding the browser request open. */
   refreshActive(): void {
     if (this.refreshing) return;

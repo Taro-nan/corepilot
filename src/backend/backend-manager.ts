@@ -17,6 +17,7 @@ export type BackendErrorCode =
   | 'PORT_IN_USE'
   | 'INCOMPATIBLE_VERSION'
   | 'MODE_MISMATCH'
+  | 'CONTROL_UNAVAILABLE'
   | 'START_FAILED'
   | 'START_TIMEOUT';
 
@@ -159,6 +160,9 @@ export class BackendManager {
     if (first.kind === 'incompatible') {
       throw new BackendError('INCOMPATIBLE_VERSION', first.reason, `at ${this.options.url}`);
     }
+    if (first.kind === 'unhealthy') {
+      throw new BackendError('CONTROL_UNAVAILABLE', first.reason, '已有后台仍可访问，不自动启动或终止其他进程。');
+    }
     if (first.kind === 'unknown-service') {
       throw new BackendError(
         'PORT_IN_USE',
@@ -229,6 +233,11 @@ export class BackendManager {
       if (result.kind === 'unknown-service') {
         child.kill();
         throw new BackendError('PORT_IN_USE', `port ${this.options.spec.port} became occupied during startup`, result.detail);
+      }
+      if (result.kind === 'unhealthy') {
+        child.unref();
+        throw new BackendError('CONTROL_UNAVAILABLE', result.reason,
+          `监听服务与已启动子进程 ${child.pid ?? '?'} 的归属未确认；未写托管记录或自动终止，请核对端口和已有任务。`);
       }
       if (exited) {
         // The child may have lost the lease race to another host: re-probe once
@@ -380,7 +389,7 @@ export async function stopManagedBackend(options: {
   if (result.kind === 'unknown-service') {
     return { stopped: false, reason: `refusing to stop: ${options.url} is held by a non-CorePilot service` };
   }
-  if (result.kind === 'ok' || result.kind === 'incompatible') {
+  if (result.kind === 'ok' || result.kind === 'incompatible' || result.kind === 'unhealthy') {
     if (!state.shutdown_token) return { stopped: false, reason: 'managed backend state has no shutdown token; state retained' };
     const requestShutdown = options.requestShutdown ?? requestManagedShutdown;
     const graceful = await requestShutdown(options.url, state.shutdown_token);

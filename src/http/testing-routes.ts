@@ -12,32 +12,41 @@ function requestKey(req: http.IncomingMessage): string | undefined {
 }
 
 /** Authentication belongs to ServerAccess; all execution decisions belong to TestingService. */
-export async function testingRoutes(req: http.IncomingMessage, res: http.ServerResponse, url: URL, service: TestingService): Promise<boolean> {
+export async function testingRoutes(req: http.IncomingMessage, res: http.ServerResponse, url: URL, service: TestingService, assertOwnership: () => void): Promise<boolean> {
   if (!url.pathname.startsWith('/v1/testing-')) return false;
   const method = req.method ?? 'GET';
+  const localOnly = () => {
+    try { assertOwnership(); return null; }
+    catch (error) {
+      if (!(error instanceof ApiError) || (error.code !== 'CONTROL_LEASE_LOST' && error.code !== 'CONTROL_LEASE_UNKNOWN')) throw error;
+      return { status: 'LOCAL_ONLY' as const, code: error.code, message: error.message + ' 当前仅显示已保存记录，未查询 Runner。' };
+    }
+  };
   if (url.pathname === '/v1/testing-requests' && method === 'GET') {
     const key = requestKey(req); if (key === undefined) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供请求标识。');
     sendJson(res, 200, service.requestStatus(key)); return true;
   }
   if (url.pathname === '/v1/testing-requests/close' && method === 'POST') {
     const key = requestKey(req); if (key === undefined) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供请求标识。');
-    await readJson(req); sendJson(res, 200, service.closeRequest(key)); return true;
+    await readJson(req); assertOwnership(); sendJson(res, 200, service.closeRequest(key)); return true;
   }
   if (url.pathname === '/v1/testing-plans/preview' && method === 'POST') {
     sendJson(res, 200, { plan: service.plan(await readJson(req) as unknown as TestingPlanRef) }); return true;
   }
   if (url.pathname === '/v1/testing-tasks') {
-    if (method === 'GET') { service.refreshActive(); sendJson(res, 200, { tasks: service.list() }); return true; }
+    if (method === 'GET') { const observation = localOnly(); if (!observation) service.refreshActive(); sendJson(res, 200, { tasks: service.list(), ...(observation ? { observation } : {}) }); return true; }
     if (method === 'POST') {
-      const task = await service.start(await readJson(req) as unknown as CreateTestingTask, { requestId: requestKey(req) });
+      const body = await readJson(req);
+      assertOwnership();
+      const task = await service.start(body as unknown as CreateTestingTask, { requestId: requestKey(req) });
       sendJson(res, 202, { task }); return true;
     }
   }
   const task = url.pathname.match(/^\/v1\/testing-tasks\/([^/]+)(?:\/(cancel))?$/);
   if (task) {
     const id = decodeURIComponent(task[1]);
-    if (!task[2] && method === 'GET') { sendJson(res, 200, await service.get(id)); return true; }
-    if (task[2] === 'cancel' && method === 'POST') { await readJson(req); sendJson(res, 202, await service.cancel(id)); return true; }
+    if (!task[2] && method === 'GET') { const observation = localOnly(); sendJson(res, 200, observation ? { ...service.localDetails(id), observation } : await service.get(id)); return true; }
+    if (task[2] === 'cancel' && method === 'POST') { await readJson(req); assertOwnership(); sendJson(res, 202, await service.cancel(id)); return true; }
   }
   if (url.pathname === '/v1/testing-assets') {
     if (method === 'GET') { sendJson(res, 200, { assets: service.assets.list() }); return true; }

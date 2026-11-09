@@ -6,7 +6,7 @@ type BinaryUpload = (path: string, body: Uint8Array | Blob) => Promise<unknown>;
 /** Web and CLI consume the same persisted testing use case. */
 export class TestingClient {
   constructor(private readonly request: JsonRequest, private readonly upload: BinaryUpload) {}
-  list(): Promise<{ tasks: TestingTaskRecord[] }> { return this.request('GET', '/v1/testing-tasks') as Promise<{ tasks: TestingTaskRecord[] }>; }
+  list(): Promise<{ tasks: TestingTaskRecord[]; observation?: TestingTaskDetails['observation'] }> { return this.request('GET', '/v1/testing-tasks') as Promise<{ tasks: TestingTaskRecord[]; observation?: TestingTaskDetails['observation'] }>; }
   start(input: CreateTestingTask, requestId?: string): Promise<{ task: TestingTaskRecord }> {
     return this.request('POST', '/v1/testing-tasks', { ...input }, requestId === undefined ? undefined : { 'idempotency-key': requestId }) as Promise<{ task: TestingTaskRecord }>;
   }

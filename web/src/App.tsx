@@ -44,6 +44,7 @@ export function App() {
   const [currentRoute, setRoute] = useState(route);
   const [response, setResponse] = useState<OptimizationReportResponse | null>(null);
   const [online, setOnline] = useState(true);
+  const [ownershipProblem, setOwnershipProblem] = useState('');
   const [hasLoaded, setHasLoaded] = useState(false);
   const [notice, setNotice] = useState<{ text: string; bad: boolean } | null>(null);
   const [modal, setModal] = useState<'project' | 'run' | null>(null);
@@ -120,6 +121,23 @@ export function App() {
     const timer = setInterval(() => void refresh(), 2500);
     return () => clearInterval(timer);
   }, [authenticated, refresh]);
+  useEffect(() => {
+    if (!authenticated) return;
+    let active = true, checking = false;
+    const inspect = async () => {
+      if (checking) return;
+      checking = true;
+      try { await api.health(AbortSignal.timeout(3000)); if (active) setOwnershipProblem(''); }
+      catch (error) {
+        const code = (error as { code?: string }).code;
+        if (active) setOwnershipProblem(code === 'CONTROL_LEASE_LOST'
+          ? '当前后台已失去执行权，新请求受阻止；在途 Agent 或 Runner 可能继续。请维护者停止旧后台继续写入，并按原任务 ID 核对。'
+          : '暂时无法确认后台执行权。请维护者检查数据库与后台进程；在途 Agent 或 Runner 可能仍在运行，需核对原任务。');
+      } finally { checking = false; }
+    };
+    void inspect(); const timer = setInterval(() => void inspect(), 2500);
+    return () => { active = false; clearInterval(timer); };
+  }, [authenticated]);
   useEffect(() => {
     setReportError('');
     if (!currentRoute.workflow || !authenticated) { setResponse(null); return; }
@@ -198,6 +216,7 @@ export function App() {
     <div className="app-content"><header className="topbar"><div><span>{project?.name ?? 'CorePilot'}</span><b>/</b>{title}{selected && <><b>/</b><span>{selected.function_name}</span></>}</div><div className="topbar-right"><span className="environment">自托管工作台</span><span className="avatar">CP</span></div></header>
       <main id="main-content" tabIndex={-1}>
         {!online && <div className="connection-banner" role="alert"><Icon name="server" size={18} /><span>与服务器的连接已中断，正在自动重连。下方保留上次同步的记录。</span><button onClick={() => void refresh()}>立即重连</button></div>}
+        {online && ownershipProblem && <div className="connection-banner" role="alert"><Icon name="server" size={18} /><span>{ownershipProblem}</span></div>}
         {!hasLoaded ? <div className="loading" role="status">{online ? '正在读取项目与任务…' : '未能读取工作台数据，请检查服务并重新连接。'}</div> : active === 'testing' ? <TestingWorkspace taskId={currentRoute.testingTask} projects={projects} projectId={project?.project_id}
           navigate={id => { location.hash = '/testing' + (id ? '/' + encodeURIComponent(id) : ''); }} notify={notify} prepare={(id, functionName) => {
             const target = projects.find(item => item.project_id === id); if (!target) return;

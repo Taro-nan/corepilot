@@ -14,6 +14,7 @@ export function TestingResult({ details, back, refresh, notify, optimize }: {
   const [busy, setBusy] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const { task, summary } = details;
+  const localOnly = !!details.observation;
   const active = testingActive(task.execution.status);
   const source = task.input.candidate.kind === 'source' ? task.input.candidate : null;
   const command = details.commands[commandIndex];
@@ -28,10 +29,11 @@ export function TestingResult({ details, back, refresh, notify, optimize }: {
     <div className="page-heading"><div><div className="title-row"><h1>{task.name}</h1><Badge value={task.execution.status} /></div>
       <p>{task.plan.function_name} · {task.machine.name} · {time(task.created_at)}</p></div>
       <div className="actions"><button onClick={() => download('corepilot-test-result.json', JSON.stringify(details, null, 2))}><Icon name="download" size={16} />下载结果</button>
-        {active && <button disabled={busy || task.execution.cancel_requested} onClick={() => void cancel()}>{task.execution.cancel_requested ? '等待停止确认' : '取消测试'}</button>}
+        {active && <button disabled={busy || localOnly || task.execution.cancel_requested} onClick={() => void cancel()}>{task.execution.cancel_requested ? '等待停止确认' : '取消测试'}</button>}
         {!active && source && <button className="primary" onClick={() => optimize(source.project_id, source.branch, task.plan.function_name)}>优化待测源码<Icon name="arrow" size={15} /></button>}
       </div>
     </div>
+    {details.observation && <p className="notice compact" role="status">{details.observation.message}</p>}
     <dl className="outcome-strip testing-outcomes" aria-label="测试结果">
       <div><dt>执行</dt><dd>{label(task.execution.status)}<small>{task.execution.cancel_requested ? '已请求取消，终态以 Runner 确认为准' : task.execution.message || '执行状态不代表测试通过'}</small></dd></div>
       <div><dt>正确性</dt><dd>{label(summary.correctness.status)}<small>{summary.correctness.status === 'NOT_REQUESTED' ? '本次未选择正确性测试' : `${summary.correctness.status === 'UNVERIFIED' ? '原始记录：' : ''}${summary.correctness.passed} / ${summary.correctness.planned} 通过 · ${summary.correctness.failed} 失败`}</small></dd></div>
@@ -41,7 +43,7 @@ export function TestingResult({ details, back, refresh, notify, optimize }: {
     </dl>
     {active && <section className="run-progress" aria-label="测试执行进展"><div><h2>{task.execution.status !== 'UNKNOWN' && <span className="pulse" />}{task.execution.status === 'UNKNOWN' ? '核对原作业状态' : testingPhaseLabel(task.execution.phase)}</h2>
       {task.execution.message && <p>{task.execution.message}</p>}
-      <p>{task.execution.status === 'UNKNOWN' ? '正在查询原作业；不会重复提交。' : '关闭页面后后台继续运行，刷新可查看真实进展。'}</p></div><small>最近更新 {time(task.updated_at)}</small></section>}
+      <p>{localOnly ? '仅显示上次保存的状态，未向 Runner 查询或发送取消请求。' : task.execution.status === 'UNKNOWN' ? '正在查询原作业；不会重复提交。' : '关闭页面后后台继续运行，刷新可查看真实进展。'}</p></div><small>最近更新 {time(task.updated_at)}</small></section>}
     {task.execution.failure && <div className="notice"><strong>{task.execution.failure.message}</strong><p>请检查本次配置和下方执行记录。修复后创建新的测试，原任务会保留。</p><small>{task.execution.failure.stage} · {task.execution.failure.code}</small></div>}
     {!!summary.provenance_issues?.length && <div className="notice compact" role="status"><strong>库身份待核对</strong><p>{summary.provenance_issues.join('；')}</p></div>}
     {!!summary.performance.issues.length && <div className="notice compact"><strong>性能结论的限制</strong><p>{summary.performance.issues.join('；')}</p></div>}

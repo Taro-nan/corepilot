@@ -313,7 +313,9 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   renewLease(ownerId: string, ttlMs: number): boolean {
-    const result = this.db.prepare('UPDATE host_lease SET expires_at = ? WHERE lease_key = 1 AND owner_id = ?').run(new Date(Date.now() + ttlMs).toISOString(), ownerId);
+    const now = Date.now();
+    const result = this.db.prepare('UPDATE host_lease SET expires_at = ? WHERE lease_key = 1 AND owner_id = ? AND expires_at > ?')
+      .run(new Date(now + ttlMs).toISOString(), ownerId, new Date(now).toISOString());
     return Number(result.changes) === 1;
   }
 

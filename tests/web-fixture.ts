@@ -149,7 +149,7 @@ export async function startWebFixture(options: { execute?: boolean; validationTe
     for (const worktree of worktrees) if (path.resolve(worktree) !== path.resolve(repo)) git('worktree', 'remove', '--force', worktree);
     fs.rmSync(root, { recursive: true, force: true });
   }
-  return { root, repo, configPath, dataDir, store, service, projects, testing, controlIdentity, token, url, git, close, modelRequests, readyValidation };
+  return { root, repo, configPath, dataDir, store, host, service, projects, testing, controlIdentity, token, url, git, close, modelRequests, readyValidation };
 }
 
 export function runFixtureCli(url: string, token: string, args: string[]) {

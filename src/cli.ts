@@ -350,7 +350,7 @@ async function backend(args: string[]): Promise<number> {
     }
     if (action === 'status') {
       const result = await probeBackend(spec.url);
-      console.log(result.kind === 'ok' ? `后台正常：${spec.url}` : `后台状态：${result.kind}`);
+      console.log(result.kind === 'ok' ? `后台正常：${spec.url}` : result.kind === 'unhealthy' ? `后台不可执行：${result.reason}` : `后台状态：${result.kind}`);
       return result.kind === 'ok' ? 0 : 1;
     }
     if (action === 'stop') {
