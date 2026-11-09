@@ -69,7 +69,7 @@ test('historical testing results show unchecked library identity without claimin
   const result = details(task);
   result.summary.correctness = { ...result.summary.correctness, status: 'UNVERIFIED', passed: 1, failed: 0 };
   result.summary.performance = { ...result.summary.performance, status: 'UNVERIFIED', speedup: null, interval: null };
-  result.summary.comparisons[0] = { ...result.summary.comparisons[0], conclusion: 'UNVERIFIED', speedup: null, interval: null };
+  result.summary.comparisons[0] = { ...result.summary.comparisons[0], conclusion: 'UNVERIFIED', baseline_median: null, candidate_median: null, speedup: null, interval: null };
   result.summary.provenance_issues = ['部分历史测量缺少有效的 Runner 库路径核对，原始记录已保留；请升级 Runner 并创建新测试。'];
   await page.route('**/v1/testing-tasks/**', route => route.fulfill({ json: result }));
   await login(page);
@@ -80,6 +80,8 @@ test('historical testing results show unchecked library identity without claimin
   await expect(page.getByRole('status').filter({ hasText: '库身份待核对' })).toContainText('原始记录已保留');
   await page.reload();
   await expect(page.getByLabel('测试结果')).toContainText('身份待核对');
+  fs.mkdirSync(path.join(repositoryRoot, 'build/ux-review'), { recursive: true });
+  await page.screenshot({ path: path.join(repositoryRoot, 'build/ux-review/testing-unverified.png'), fullPage: true });
 });
 
 test('standalone library comparison preserves conditions and separates execution from correctness and performance', async ({ page }) => {
