@@ -26,6 +26,8 @@
 
 准备代码时可离开测试弹窗，返回后继续原草稿。系统会重新读取已有方案；目录或机器信息读取失败时使用“重新读取创建条件”，不用重新填写整个任务。测试和优化弹窗底部始终保留主操作。
 
+创建请求发出后，如果响应丢失或页面刷新，浏览器会保留请求标识，并要求先“核对原请求”。若已创建，页面打开原测试；若暂未查到，请求仍可能在途中。只有“关闭未创建的请求”返回关闭状态后，才能安全地以新标识提交。关闭操作不会取消已创建的测试；需要取消时请进入对应测试任务操作。浏览器需要可用的 IndexedDB；无法保存请求标识时，页面会保留草稿并阻止提交。
+
 从代码待验证候选进入测试时，应固定候选的 commit。再次选择原始分支 HEAD 测到的是分支当前源码，不能据此声称验证了候选补丁。
 
 没有源码时可独立选择两份库包和目录中已有的适用测试方案。当前 AI 测试代码生成仍在项目测试准备页复用；本次没有新增脱离库接入上下文的通用脚本生成器。
@@ -48,6 +50,8 @@ corepilot test assets
 corepilot test import --directory ./library --entry lib/libexample.so --name Example --version 1.0
 corepilot test plan --file ./plan-ref.json
 corepilot test start --file ./test-request.json --request-id my-comparison-1
+corepilot test request --request-id my-comparison-1
+corepilot test close-request --request-id my-comparison-1
 corepilot test status <测试ID>
 corepilot test cancel <测试ID>
 ```
@@ -75,4 +79,12 @@ corepilot test cancel <测试ID>
 
 纯库包比较把 `candidate` 换成另一个 `{ "kind": "binary", "asset_id": "..." }`；两份源码可指定不同项目、分支、单次构建命令和相对产物路径。Web 与 CLI 共用 `/v1/testing-tasks`、`/v1/testing-assets` 和 `/v1/testing-plans/preview`。
 
-自动化可在预览后提交 `expected_evaluator_digest` 和 `expected_package_digest`，要求实际使用的规则与刚刚确认的版本相同。网页默认携带这两个值。复用 `Idempotency-Key` 只用于重试相同提交；改变测试对象、机器、模式或方案后应使用新标识。
+自动化可在预览后提交 `expected_evaluator_digest` 和 `expected_package_digest`，要求实际使用的规则与刚刚确认的版本相同。网页默认携带这两个值。
+
+创建测试可通过 `Idempotency-Key` 请求头或 CLI 的 `--request-id` 提供 1 至 160 个字符的非空标识。同一标识和相同输入复用原测试；不同输入返回冲突。未提供标识时，每次提交仍会创建独立测试。
+
+创建响应未知时，使用上述 `test request` 或带相同请求头的 `GET /v1/testing-requests` 查询：`CREATED` 仅表示控制端已保存测试，须按返回的测试 ID 查看实际准备和执行状态；`NOT_FOUND` 不能证明在途请求不会随后到达。决定放弃尚未创建的请求时，使用 `test close-request` 或 `POST /v1/testing-requests/close`（相同请求头、空 JSON 对象）。关闭与创建原子竞争：返回 `CLOSED` 后此标识不能再创建测试；返回 `CREATED` 表示原测试已存在，不会被关闭或取消。历史记录若同一标识对应多条测试，系统保留全部记录并要求维护者核对，不自动选择。
+
+带标识的创建需要控制端数据目录支持同一文件系统内的硬链接和正常文件写入；不支持时会报错并要求核对原请求，不退回非原子创建。当前只保证新版本控制端之间的创建与关闭竞争；测试状态更新尚无跨进程事务，不能将多个控制进程或新旧版本同时指向同一数据目录。
+
+请求尚待核对时，即使访问 URL 未变，也不能切换到另一套控制端数据目录后把该目录的查询或关闭结果当成原请求的结果；旧目录中的请求仍可能存在或在途中。请恢复原数据目录并核对，或由维护者检查原控制端状态。目前尚无绑定请求的持久控制端数据目录身份，不保证跨实例或跨数据目录的核对安全。

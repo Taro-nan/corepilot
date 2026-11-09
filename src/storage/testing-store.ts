@@ -1,8 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ApiError } from '../core/api-error.js';
 import type { TestingAsset, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
+
+interface ClosedTestingRequest { schema_version: 1; kind: 'CLOSED_TESTING_REQUEST'; task_id: string; request_key_digest: string }
+type RequestDecision = { state: 'NOT_FOUND' } | { state: 'CLOSED' } | { state: 'CREATED'; task: TestingTaskRecord };
+
+export function testingRequestIdentity(requestId: string): { keyDigest: string; taskId: string } {
+  if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 160) throw new ApiError(400, 'INVALID_REQUEST_ID', '请求标识应为 1 到 160 个字符。');
+  const keyDigest = createHash('sha256').update('corepilot-testing-request-v1\0').update(requestId).digest('hex');
+  const variant = ((Number.parseInt(keyDigest[16], 16) & 3) | 8).toString(16);
+  const uuid = `${keyDigest.slice(0, 8)}-${keyDigest.slice(8, 12)}-8${keyDigest.slice(13, 16)}-${variant}${keyDigest.slice(17, 20)}-${keyDigest.slice(20, 32)}`;
+  return { keyDigest, taskId: `testing:${uuid}` };
+}
+
+function closed(record: TestingTaskRecord | ClosedTestingRequest): record is ClosedTestingRequest {
+  return 'kind' in record && record.kind === 'CLOSED_TESTING_REQUEST';
+}
 
 /** Independent test facts never overwrite project configuration or optimization evidence. */
 export class TestingStore {
@@ -33,7 +48,8 @@ export class TestingStore {
     }
   }
   task(id: string): TestingTaskRecord {
-    const record = this.read<TestingTaskRecord>(path.join(this.taskRoot(id), 'task.json'));
+    const record = this.read<TestingTaskRecord | ClosedTestingRequest>(path.join(this.taskRoot(id), 'task.json'));
+    if (closed(record)) throw new ApiError(404, 'TESTING_NOT_FOUND', '测试记录不存在，该创建请求已关闭。');
     if (record.task_id !== id) throw new Error('testing task identity mismatch');
     return record;
   }
@@ -45,9 +61,59 @@ export class TestingStore {
     const root = path.join(this.root, 'tasks');
     if (!fs.existsSync(root)) return [];
     return fs.readdirSync(root).filter(id => /^[a-f0-9-]{36}$/.test(id) && fs.existsSync(path.join(root, id, 'task.json')))
-      .map(id => this.task(`testing:${id}`)).sort((a, b) => b.created_at.localeCompare(a.created_at));
+      .flatMap(id => { const record = this.read<TestingTaskRecord | ClosedTestingRequest>(path.join(root, id, 'task.json'));
+        if (closed(record)) return [];
+        if (record.task_id !== `testing:${id}`) throw new Error('testing task identity mismatch');
+        return [record]; }).sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
-  findRequest(requestId: string): TestingTaskRecord | null { return this.tasks().find(task => task.request_id === requestId) ?? null; }
+  requestDecision(requestId: string): RequestDecision {
+    const identity = testingRequestIdentity(requestId);
+    const filename = path.join(this.taskRoot(identity.taskId), 'task.json');
+    const gate = fs.existsSync(filename) ? this.read<TestingTaskRecord | ClosedTestingRequest>(filename) : null;
+    if (gate && (gate.task_id !== identity.taskId || (closed(gate) ? gate.request_key_digest !== identity.keyDigest : gate.request_id !== requestId))) {
+      throw new ApiError(409, 'TESTING_REQUEST_IDENTITY_CONFLICT', '请求身份与已有记录不一致，请维护者核对。');
+    }
+    const matches = this.tasks().filter(task => task.request_id === requestId);
+    if (matches.length > 1 || gate && closed(gate) && matches.length) {
+      throw new ApiError(409, 'TESTING_REQUEST_AMBIGUOUS', '同一请求标识对应多条历史记录，请维护者核对；原记录均已保留。');
+    }
+    if (gate && closed(gate)) return { state: 'CLOSED' };
+    if (matches.length === 1) return { state: 'CREATED', task: matches[0] };
+    if (gate) return { state: 'CREATED', task: gate as TestingTaskRecord };
+    return { state: 'NOT_FOUND' };
+  }
+  private publishRequestDecision(filename: string, value: TestingTaskRecord | ClosedTestingRequest): boolean {
+    const temporary = `${filename}.${randomUUID()}.tmp`;
+    try {
+      fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
+      const fd = fs.openSync(temporary, 'wx', 0o600);
+      try { fs.writeFileSync(fd, JSON.stringify(value, null, 2) + '\n'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      try {
+        fs.linkSync(temporary, filename);
+        if (process.platform !== 'win32') { const dir = fs.openSync(path.dirname(filename), 'r'); try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); } }
+        return true;
+      } catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false; throw error; }
+    } catch {
+      throw new ApiError(503, 'TESTING_ATOMIC_STORAGE_UNAVAILABLE', '无法确认测试请求是否原子保存；请检查数据目录权限与文件系统是否支持硬链接，并核对原请求。');
+    } finally { fs.rmSync(temporary, { force: true }); }
+  }
+  claimRequest(task: TestingTaskRecord): { created: boolean; decision: RequestDecision } {
+    if (!task.request_id) throw new Error('a testing request key is required');
+    const identity = testingRequestIdentity(task.request_id);
+    if (task.task_id !== identity.taskId) throw new Error('testing request task identity mismatch');
+    const prior = this.requestDecision(task.request_id);
+    if (prior.state !== 'NOT_FOUND') return { created: false, decision: prior };
+    const created = this.publishRequestDecision(path.join(this.taskRoot(task.task_id), 'task.json'), task);
+    return { created, decision: this.requestDecision(task.request_id) };
+  }
+  closeRequest(requestId: string): RequestDecision {
+    const identity = testingRequestIdentity(requestId);
+    const prior = this.requestDecision(requestId);
+    if (prior.state !== 'NOT_FOUND') return prior;
+    const marker: ClosedTestingRequest = { schema_version: 1, kind: 'CLOSED_TESTING_REQUEST', task_id: identity.taskId, request_key_digest: identity.keyDigest };
+    this.publishRequestDecision(path.join(this.taskRoot(identity.taskId), 'task.json'), marker);
+    return this.requestDecision(requestId);
+  }
   asset(id: string): TestingAsset {
     const record = this.read<TestingAsset>(path.join(this.assetRoot(id), 'asset.json'));
     if (record.asset_id !== id) throw new Error('testing asset identity mismatch');

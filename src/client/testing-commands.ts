@@ -7,6 +7,7 @@ import { uploadTestingAsset } from './upload-testing-asset.js';
 const usage = [
   'corepilot test list | status <id> | cancel <id>',
   'corepilot test start --file <测试请求.json> [--request-id <幂等标识>]',
+  'corepilot test request|close-request --request-id <幂等标识>',
   'corepilot test plan --file <测试方案引用.json>',
   'corepilot test assets | import --directory <解压目录> --entry <相对入口> --name <库名> [--version <版本>]',
   '测试请求固定两端、机器和方案；测试不创建优化候选、批准或交付。',
@@ -25,7 +26,14 @@ export async function executeTestingCommand(args: string[], options: { baseUrl: 
     directory: { type: 'string' }, entry: { type: 'string' }, name: { type: 'string' }, version: { type: 'string' }, json: { type: 'boolean' } },
     strict: true, allowPositionals: true });
   const api = new ApiClient(options.baseUrl, { token: options.token });
+  const requestId = parsed.values['request-id'];
+  if (requestId !== undefined && (!requestId.trim() || requestId.length > 160)) throw new Error('--request-id 应为 1 到 160 个字符。');
+  if (requestId !== undefined && !['start', 'request', 'close-request'].includes(action)) throw new Error('--request-id 仅适用于 test start、request 或 close-request。');
   const noArguments = () => { if (parsed.positionals.length) throw new Error(usage); };
+  if (action === 'request' || action === 'close-request') {
+    noArguments(); const key = requireText(requestId, 'request-id');
+    return { value: action === 'request' ? await api.testing.requestStatus(key) : await api.testing.closeRequest(key), exitCode: 0 };
+  }
   if (action === 'list' || action === 'assets') { noArguments(); return { value: action === 'list' ? await api.testing.list() : await api.testing.listAssets(), exitCode: 0 }; }
   if (action === 'status' || action === 'cancel') {
     if (parsed.positionals.length !== 1) throw new Error(usage);

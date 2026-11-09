@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { CreateTestingTask, TestingPlanRef, TestingPlanPreview, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
+import type { CreateTestingTask, TestingPlanRef, TestingPlanPreview, TestingRequestStatus, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
 import type { ResolvedExecutionMachine } from '../contracts/execution-machine.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { TargetConfig } from '../config/target-config.js';
@@ -12,7 +12,7 @@ import { resolveRunnerConfig } from '../config/optimization-config.js';
 import { AsyncSshTransport } from '../testpack/remote-transport.js';
 import { LibraryPackageLoader } from '../library-package/loader.js';
 import { stageAndInspectBaselineBundle } from '../workspace/baseline-bundle-staging.js';
-import { TestingStore } from '../storage/testing-store.js';
+import { testingRequestIdentity, TestingStore } from '../storage/testing-store.js';
 import { TestingAssetService } from './testing-assets.js';
 import { previewTestingPlan } from './testing-plan.js';
 import { parseTestingInput, testingRequestDigest } from './testing-input.js';
@@ -73,15 +73,26 @@ export class TestingService {
     try { const runner = machine && resolveRunnerConfig({ runner: machine.runner }); if (runner?.mode === 'rpc' && runner.token) message = message.split(runner.token).join('[redacted]'); } catch { /* Preserve the original diagnostic. */ }
     return message.slice(0, 6000);
   }
+  requestStatus(requestId: string): TestingRequestStatus {
+    const decision = this.store.requestDecision(requestId);
+    return decision.state === 'CREATED' ? { state: 'CREATED', task_id: decision.task.task_id } : { state: decision.state };
+  }
+  closeRequest(requestId: string): TestingRequestStatus {
+    const decision = this.store.closeRequest(requestId);
+    return decision.state === 'CREATED' ? { state: 'CREATED', task_id: decision.task.task_id } : { state: decision.state };
+  }
   async start(value: CreateTestingTask, options: { requestId?: string } = {}): Promise<TestingTaskRecord> {
     const input = parseTestingInput(value), digest = testingRequestDigest(input);
     const requestId = options.requestId ?? null;
-    if (requestId !== null && (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 160)) throw new ApiError(400, 'INVALID_REQUEST_ID', '请求标识应为 1..160 字符。');
-    const existing = requestId ? this.store.findRequest(requestId) : null;
-    if (existing) {
-      if (existing.request_digest !== digest) throw new ApiError(409, 'TESTING_REQUEST_CONFLICT', '同一请求标识已用于其他测试条件，请使用新的请求标识。');
-      return this.localRecord(existing);
-    }
+    const identity = requestId === null ? null : testingRequestIdentity(requestId);
+    const previous = (decision: ReturnType<TestingStore['requestDecision']>): TestingTaskRecord | null => {
+      if (decision.state === 'CLOSED') throw new ApiError(409, 'TESTING_REQUEST_CLOSED', '原测试创建请求已关闭，请使用新的请求标识。');
+      if (decision.state === 'NOT_FOUND') return null;
+      if (decision.task.request_digest !== digest) throw new ApiError(409, 'TESTING_REQUEST_CONFLICT', '同一请求标识已用于其他测试条件，请核对原请求。');
+      return this.localRecord(decision.task);
+    };
+    const existing = requestId === null ? null : previous(this.store.requestDecision(requestId));
+    if (existing) return existing;
     let resolved: ReturnType<LibraryPackageLoader['resolveSelection']>;
     let preview: TestingPlanPreview;
     try { ({ resolved, preview } = previewTestingPlan(this.catalog, input.plan)); }
@@ -99,7 +110,7 @@ export class TestingService {
     const transport = this.options.transportFactory?.(machine.target) ?? new AsyncSshTransport(machine.target);
     const workspaceRoot = machine.target.workspace_root.replaceAll('\\', '/').replace(/\/+$/, '');
     if (!path.posix.isAbsolute(workspaceRoot)) throw new ApiError(400, 'INVALID_TESTING_WORKSPACE', '执行机器需要 Linux 绝对工作目录，请由维护者完成配置。');
-    const taskId = `testing:${randomUUID()}`, label = (input.name ?? preview.function_name).replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 48) || 'test';
+    const taskId = identity?.taskId ?? `testing:${randomUUID()}`, label = (input.name ?? preview.function_name).replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 48) || 'test';
     const run = path.posix.join(workspaceRoot, 'testing', `${createdAt.replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}-${label}-${taskId.slice(-8)}`);
     const task: TestingTaskRecord = { schema_version: 1, task_id: taskId, name: input.name ?? `${preview.function_name} 测试`, request_id: requestId,
       request_digest: digest, input, plan: preview, machine: { ...machine.identity, connection_key: testingConnectionKey(machine), runner_id: null, hardware: null },
@@ -107,7 +118,15 @@ export class TestingService {
         assets_root: path.posix.join(run, 'development', 'assets'), runtime_root: path.posix.join(run, 'development', 'runtime') },
       execution: { status: 'PREPARING', phase: 'SNAPSHOTTING', message: '正在固定测试方案与两端版本', cancel_requested: false, submission_attempted: false, failure: null },
       created_at: createdAt, updated_at: createdAt, formal_evidence: false };
-    this.store.saveTask(task);
+    if (requestId === null) this.store.saveTask(task);
+    else {
+      const claimed = this.store.claimRequest(task);
+      if (!claimed.created) {
+        const existingTask = previous(claimed.decision);
+        if (existingTask) return existingTask;
+        throw new ApiError(503, 'TESTING_REQUEST_UNCONFIRMED', '测试请求状态尚未确认，请按原请求标识核对。');
+      }
+    }
     try { snapshotValidationAssets(resolved.bundle.root, path.join(this.store.taskRoot(taskId), 'evaluator'), preview.evaluator.digest); }
     catch (error) { return this.store.updateTask(taskId, record => { record.execution.status = 'FAILED'; record.execution.failure = {
       code: 'TESTING_SNAPSHOT_FAILED', stage: 'SNAPSHOTTING', message: this.diagnostic(error) }; record.execution.message = '无法固定测试方案，请重新读取方案后创建新的测试。'; }); }

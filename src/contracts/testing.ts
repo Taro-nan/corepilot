@@ -81,6 +81,8 @@ export interface TestingTaskRecord {
   updated_at: string;
   formal_evidence: false;
 }
+/** A closed request fences only creation; it never cancels an existing task. */
+export type TestingRequestStatus = { state: 'NOT_FOUND' | 'CLOSED' } | { state: 'CREATED'; task_id: string };
 export interface TestingComparison {
   workload_id: string;
   parameters: Record<string, string | number | boolean>;

@@ -7,7 +7,7 @@ import { readJson, sendJson } from './json.js';
 function requestKey(req: http.IncomingMessage): string | undefined {
   const value = req.headers['idempotency-key'];
   if (value === undefined) return undefined;
-  if (typeof value !== 'string' || !value.trim() || value.length > 200) throw new ApiError(400, 'INVALID_ARGUMENT', '请提供有效的请求标识。');
+  if (typeof value !== 'string' || !value.trim() || value.length > 160) throw new ApiError(400, 'INVALID_ARGUMENT', '请提供有效的请求标识。');
   return value;
 }
 
@@ -15,6 +15,14 @@ function requestKey(req: http.IncomingMessage): string | undefined {
 export async function testingRoutes(req: http.IncomingMessage, res: http.ServerResponse, url: URL, service: TestingService): Promise<boolean> {
   if (!url.pathname.startsWith('/v1/testing-')) return false;
   const method = req.method ?? 'GET';
+  if (url.pathname === '/v1/testing-requests' && method === 'GET') {
+    const key = requestKey(req); if (key === undefined) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供请求标识。');
+    sendJson(res, 200, service.requestStatus(key)); return true;
+  }
+  if (url.pathname === '/v1/testing-requests/close' && method === 'POST') {
+    const key = requestKey(req); if (key === undefined) throw new ApiError(400, 'INVALID_REQUEST_ID', '请提供请求标识。');
+    await readJson(req); sendJson(res, 200, service.closeRequest(key)); return true;
+  }
   if (url.pathname === '/v1/testing-plans/preview' && method === 'POST') {
     sendJson(res, 200, { plan: service.plan(await readJson(req) as unknown as TestingPlanRef) }); return true;
   }

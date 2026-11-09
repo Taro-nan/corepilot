@@ -5,6 +5,7 @@ import { startWebFixture, repositoryRoot } from '../../tests/web-fixture.js';
 import type { CreateTestingTask, TestingAsset, TestingPlanPreview, TestingTaskDetails, TestingTaskRecord } from '../../src/contracts/testing.js';
 import { ApiClient } from '../../src/client/api-client.js';
 import { loadSourceOptimizationPreflight, sourceOptimizationContractDigest } from '../../src/workflow/source-optimization.js';
+import { createTestingFixture, testingPlanRef } from '../../tests/testing-fixture.js';
 
 let fixture: Awaited<ReturnType<typeof startWebFixture>>;
 test.beforeEach(async () => { fixture = await startWebFixture({ execute: true }); });
@@ -63,6 +64,223 @@ async function mockTesting(page: Page) {
   });
   return { libraries, submissions, requestIds, uploads, current: () => current };
 }
+
+async function fillLibraryComparison(page: Page) {
+  const composer = page.getByRole('dialog', { name: '创建测试任务' });
+  await composer.getByLabel('执行机器').selectOption('machine-fixture');
+  await composer.getByRole('group', { name: '待测对象 B', exact: true }).getByLabel('测试库包').selectOption('library-b');
+  await composer.getByRole('group', { name: '比较对象 A', exact: true }).getByLabel('测试库包').selectOption('library-a');
+  await composer.getByLabel('测试方案', { exact: true }).selectOption(JSON.stringify(ref));
+  return composer;
+}
+
+async function mockRealTestingChoices(page: Page, machine: ReturnType<typeof createTestingFixture>['machine']) {
+  await page.route('**/v1/catalog', route => route.fulfill({ json: { packages: [{ package_id: testingPlanRef.package_id,
+    version: testingPlanRef.package_version, library_name: '测试库', qualification: { state: 'DRAFT' },
+    functions: [{ function_id: 'test-function', api: 'cblas_saxpy' }], targets: [{ target_id: testingPlanRef.target_id,
+      function_id: 'test-function', evaluator: { evaluator_id: 'test-evaluator', evaluator_version: '1.0.0', qualification: 'DRAFT' } }] }] } }));
+  await page.route('**/v1/machines', route => route.fulfill({ json: { machines: [{ ...machine.identity, enabled: true, status: 'ONLINE', setup_complete: true }] } }));
+}
+
+async function fillRealLibraryComparison(page: Page, testing: ReturnType<typeof createTestingFixture>, candidateId: string, baselineId: string) {
+  const composer = page.getByRole('dialog', { name: '创建测试任务' });
+  await composer.getByLabel('执行机器').selectOption(testing.machine.identity.machine_id);
+  await composer.getByRole('group', { name: '待测对象 B' }).getByLabel('测试库包').selectOption(candidateId);
+  await composer.getByRole('group', { name: '比较对象 A' }).getByLabel('测试库包').selectOption(baselineId);
+  await composer.getByLabel('测试方案', { exact: true }).selectOption(JSON.stringify(testingPlanRef));
+  return composer;
+}
+
+test('a dropped HTTP response is reconciled with the actual testing service after refresh', async ({ page }) => {
+  const testing = createTestingFixture(), server = await startWebFixture({ testingService: testing.service });
+  const candidate = await testing.binary('被测库'), baseline = await testing.binary('比较库');
+  if (candidate.kind !== 'binary' || baseline.kind !== 'binary') throw new Error('binary fixture required');
+  const keys: string[] = [];
+  try {
+    await mockRealTestingChoices(page, testing.machine);
+    await page.route('**/v1/testing-tasks', async route => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      keys.push(route.request().headers()['idempotency-key']);
+      expect((await route.fetch()).status()).toBe(202); await route.abort('failed');
+    });
+    await page.goto(server.url); await page.getByLabel('管理员访问凭据').fill(server.token); await page.getByRole('button', { name: '进入工作台' }).click();
+    await page.goto(server.url + '/#/testing/new');
+    const composer = await fillRealLibraryComparison(page, testing, candidate.asset_id, baseline.asset_id);
+    await composer.getByRole('button', { name: '开始测试' }).click();
+    await expect(composer).toContainText('上次测试创建请求尚未确认');
+    await page.reload(); await expect(composer).toContainText('上次测试创建请求尚未确认');
+    const lookup = await new ApiClient(server.url, { token: server.token }).testing.requestStatus(keys[0]);
+    expect(lookup.state).toBe('CREATED');
+    await composer.getByRole('button', { name: '核对原请求' }).click();
+    await expect(page.getByLabel('测试结果')).toBeVisible();
+    await expect.poll(() => testing.plans.length).toBe(1); expect(keys).toHaveLength(1);
+    expect(testing.service.list()).toHaveLength(1);
+  } finally { await server.close(); testing.close(); }
+});
+
+test('temporary browser storage failure after creation keeps the original request for recovery', async ({ page }) => {
+  const testing = createTestingFixture(), server = await startWebFixture({ testingService: testing.service });
+  const candidate = await testing.binary('被测库'), baseline = await testing.binary('比较库');
+  if (candidate.kind !== 'binary' || baseline.kind !== 'binary') throw new Error('binary fixture required');
+  const keys: string[] = [];
+  try {
+    await mockRealTestingChoices(page, testing.machine);
+    await page.route('**/v1/testing-tasks', async route => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      keys.push(route.request().headers()['idempotency-key']);
+      const response = await route.fetch(); expect(response.status()).toBe(202);
+      await page.evaluate(() => { Object.defineProperty(indexedDB, 'open', { value: () => { throw new Error('temporarily blocked'); }, configurable: true }); });
+      await route.fulfill({ response });
+    });
+    await page.goto(server.url); await page.getByLabel('管理员访问凭据').fill(server.token); await page.getByRole('button', { name: '进入工作台' }).click();
+    await page.goto(server.url + '/#/testing/new');
+    const composer = await fillRealLibraryComparison(page, testing, candidate.asset_id, baseline.asset_id);
+    await composer.getByRole('button', { name: '开始测试' }).click();
+    await expect(composer.getByRole('alert')).toContainText('无法访问浏览器请求存储');
+    await expect(composer.getByRole('button', { name: '开始测试' })).toBeDisabled();
+    await page.reload(); await expect(composer).toContainText('上次测试创建请求尚未确认');
+    await composer.getByRole('button', { name: '核对原请求' }).click();
+    await expect(page.getByLabel('测试结果')).toBeVisible();
+    await expect.poll(() => testing.plans.length).toBe(1);
+    expect(keys).toHaveLength(1); expect(testing.service.list()).toHaveLength(1);
+  } finally { await server.close(); testing.close(); }
+});
+
+test('a second tab can fence an in-flight creation without cancelling or duplicating a task', async ({ page }) => {
+  const testing = createTestingFixture(), server = await startWebFixture({ testingService: testing.service });
+  const candidate = await testing.binary('被测库'), baseline = await testing.binary('比较库');
+  if (candidate.kind !== 'binary' || baseline.kind !== 'binary') throw new Error('binary fixture required');
+  const second = await page.context().newPage(), keys: string[] = [];
+  let markSent!: () => void, release!: () => void;
+  const sent = new Promise<void>(resolve => { markSent = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+  try {
+    await mockRealTestingChoices(page, testing.machine); await mockRealTestingChoices(second, testing.machine);
+    await page.route('**/v1/testing-tasks', async route => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      keys.push(route.request().headers()['idempotency-key']); markSent(); await gate;
+      const response = await route.fetch(); expect(response.status()).toBe(409); await route.fulfill({ response });
+    });
+    await page.goto(server.url); await page.getByLabel('管理员访问凭据').fill(server.token); await page.getByRole('button', { name: '进入工作台' }).click();
+    await page.goto(server.url + '/#/testing/new');
+    const firstForm = await fillRealLibraryComparison(page, testing, candidate.asset_id, baseline.asset_id);
+    await firstForm.getByRole('button', { name: '开始测试' }).click(); await sent;
+    await second.goto(server.url + '/#/testing/new');
+    const secondForm = second.getByRole('dialog', { name: '创建测试任务' });
+    await expect(secondForm).toContainText('上次测试创建请求尚未确认');
+    await secondForm.getByRole('button', { name: '关闭未创建的请求' }).click();
+    await expect(secondForm).toContainText('原请求已关闭');
+    const api = new ApiClient(server.url, { token: server.token });
+    expect(await api.testing.requestStatus(keys[0])).toEqual({ state: 'CLOSED' });
+    expect((await api.testing.list()).tasks).toHaveLength(0);
+    release(); await expect(firstForm.getByRole('alert')).toContainText('原测试创建请求已关闭');
+    await fillRealLibraryComparison(second, testing, candidate.asset_id, baseline.asset_id);
+    await secondForm.getByRole('button', { name: '开始测试' }).click();
+    await expect(second.getByLabel('测试结果')).toBeVisible();
+    await expect.poll(() => testing.plans.length).toBe(1);
+    expect(keys).toHaveLength(1); expect(testing.service.list()).toHaveLength(1);
+  } finally { release(); await second.close(); await server.close(); testing.close(); }
+});
+
+test('a lost creation response survives reload and opens the original request', async ({ page }) => {
+  await mockTesting(page); await login(page);
+  let saved: TestingTaskRecord | null = null; const posts: string[] = [], checks: string[] = [];
+  await page.route('**/v1/testing-tasks', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    posts.push(route.request().headers()['idempotency-key']); saved = record(route.request().postDataJSON());
+    await route.abort('failed');
+  });
+  await page.route('**/v1/testing-tasks/**', route => route.fulfill({ json: details(saved!) }));
+  await page.route('**/v1/testing-requests', route => { checks.push(route.request().headers()['idempotency-key']);
+    return route.fulfill({ json: { state: 'CREATED', task_id: saved!.task_id } }); });
+  await page.goto(fixture.url + '/#/testing/new');
+  let composer = await fillLibraryComparison(page);
+  await composer.getByRole('button', { name: '开始测试' }).click();
+  await expect(composer).toContainText('上次测试创建请求尚未确认');
+  await expect(composer.getByLabel('执行机器')).toBeDisabled();
+  await page.reload(); composer = page.getByRole('dialog', { name: '创建测试任务' });
+  await expect(composer).toContainText('上次测试创建请求尚未确认');
+  await expect(composer.getByRole('button', { name: '开始测试' })).toBeDisabled();
+  const stored = await page.evaluate(() => new Promise<unknown>((resolve, reject) => {
+    const open = indexedDB.open('corepilot-testing-request-v1', 1);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => { const database = open.result, request = database.transaction('pending').objectStore('pending').get('active');
+      request.onsuccess = () => { database.close(); resolve(request.result); }; request.onerror = () => reject(request.error); };
+  }));
+  expect(stored).toBe(posts[0]);
+  expect(stored).toMatch(/^[a-f0-9-]{36}$/);
+  await composer.getByRole('button', { name: '核对原请求' }).click();
+  await expect(page.getByLabel('测试结果')).toBeVisible();
+  expect(checks).toEqual(posts); expect(posts).toHaveLength(1);
+});
+
+for (const closeState of ['CLOSED', 'CREATED'] as const) test(`an absent request is not replaced until atomic close reports ${closeState}`, async ({ page }) => {
+  await mockTesting(page); await login(page);
+  const posts: string[] = [], checks: string[] = [], closes: string[] = []; let saved: TestingTaskRecord | null = null;
+  await page.route('**/v1/testing-tasks', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    posts.push(route.request().headers()['idempotency-key']); saved = record(route.request().postDataJSON());
+    if (posts.length === 1) await route.abort('failed'); else await route.fulfill({ status: 202, json: { task: saved } });
+  });
+  await page.route('**/v1/testing-tasks/**', route => route.fulfill({ json: details(saved!) }));
+  await page.route('**/v1/testing-requests**', route => {
+    const id = route.request().headers()['idempotency-key'];
+    if (route.request().method() === 'GET') { checks.push(id); return route.fulfill({ json: { state: 'NOT_FOUND' } }); }
+    closes.push(id); return route.fulfill({ json: closeState === 'CREATED' ? { state: 'CREATED', task_id: saved!.task_id } : { state: 'CLOSED' } });
+  });
+  await page.goto(fixture.url + '/#/testing/new');
+  const composer = await fillLibraryComparison(page);
+  await composer.getByRole('button', { name: '开始测试' }).click();
+  await expect(composer).toContainText('上次测试创建请求尚未确认');
+  await composer.getByRole('button', { name: '核对原请求' }).click();
+  await expect(composer).toContainText('它仍可能在途中');
+  await expect(composer.getByRole('button', { name: '开始测试' })).toBeDisabled();
+  expect(posts).toHaveLength(1);
+  await composer.getByRole('button', { name: '关闭未创建的请求' }).click();
+  if (closeState === 'CREATED') {
+    await expect(page.getByLabel('测试结果')).toBeVisible(); expect(posts).toHaveLength(1);
+  } else {
+    await expect(composer).toContainText('原请求已关闭');
+    await expect(composer.getByLabel('执行机器')).toHaveValue('machine-fixture');
+    await composer.getByRole('button', { name: '开始测试' }).click();
+    await expect(page.getByLabel('测试结果')).toBeVisible();
+    expect(posts).toHaveLength(2); expect(posts[1]).not.toBe(posts[0]);
+  }
+  expect(checks).toEqual([posts[0]]); expect(closes).toEqual([posts[0]]);
+});
+
+for (const channelAvailable of [true, false]) test(`two tabs reserve one pending creation key with ${channelAvailable ? 'available' : 'blocked'} broadcast channel`, async ({ page }) => {
+  if (!channelAvailable) await page.context().addInitScript(() => {
+    Object.defineProperty(window, 'BroadcastChannel', { value: class { constructor() { throw new Error('channel blocked'); } }, configurable: true });
+  });
+  await mockTesting(page); await login(page);
+  const second = await page.context().newPage(); await mockTesting(second);
+  const posts: string[] = [];
+  for (const tab of [page, second]) await tab.route('**/v1/testing-tasks', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    posts.push(route.request().headers()['idempotency-key']); await route.abort('failed');
+  });
+  try {
+    await Promise.all([page.goto(fixture.url + '/#/testing/new'), second.goto(fixture.url + '/#/testing/new')]);
+    const [firstForm, secondForm] = await Promise.all([fillLibraryComparison(page), fillLibraryComparison(second)]);
+    await Promise.all([firstForm.locator('form').evaluate(form => (form as HTMLFormElement).requestSubmit()),
+      secondForm.locator('form').evaluate(form => (form as HTMLFormElement).requestSubmit())]);
+    await expect.poll(() => posts.length).toBe(1);
+    await expect(firstForm).toContainText('上次测试创建请求尚未确认');
+    await expect(secondForm).toContainText('上次测试创建请求尚未确认');
+    expect(posts).toHaveLength(1);
+  } finally { await second.close(); }
+});
+
+test('unavailable request storage blocks submission without losing the draft', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { value: undefined, configurable: true }); });
+  const data = await mockTesting(page); await login(page); await page.goto(fixture.url + '/#/testing/new');
+  const composer = page.getByRole('dialog', { name: '创建测试任务' });
+  await expect(composer.getByRole('alert')).toContainText('无法访问浏览器请求存储');
+  await composer.getByLabel('执行机器').selectOption('machine-fixture');
+  await expect(composer.getByRole('button', { name: '开始测试' })).toBeDisabled();
+  await page.reload(); await expect(composer.getByLabel('执行机器')).toHaveValue('machine-fixture');
+  expect(data.submissions).toHaveLength(0);
+});
 
 test('historical testing results show unchecked library identity without claiming an improvement', async ({ page }) => {
   const task = record({ machine_id: 'machine-fixture', plan: ref, mode: 'both',

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { ProjectRecord } from '../../../src/contracts/project';
 import type { ExecutionMachineSummary } from '../../../src/contracts/execution-machine';
 import type { TestingAsset, TestingMode, TestingPlanPreview, TestingPlanRef } from '../../../src/contracts/testing';
@@ -10,7 +10,7 @@ import { TestingSubjectPicker } from './TestingSubjectPicker';
 import { TestingAssetUpload } from './TestingAssetUpload';
 import { TestingConditions } from './TestingConditions';
 import { emptySubject, testingSubject, type SubjectDraft } from './testing-draft';
-import { newRequestId } from '../request-id';
+import { useTestingRequest } from './useTestingRequest';
 
 interface TestingDraft { name: string; machineId: string; planKey: string; mode: TestingMode; correctnessBaseline: boolean; candidate: SubjectDraft; baseline: SubjectDraft }
 const planKey = (ref: TestingPlanRef) => JSON.stringify(ref);
@@ -36,7 +36,8 @@ export function TestingComposer({ projects, catalog, machines, assets, projectId
   const [uploadFor, setUploadFor] = useState<'candidate' | 'baseline' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const requestId = useRef<string | null>(null);
+  const [requestMessage, setRequestMessage] = useState('');
+  const pending = useTestingRequest();
   const formId = React.useId();
   const options = catalog.flatMap(item => item.targets.map(target => ({ ref: { package_id: item.package_id, package_version: item.version, target_id: target.target_id },
     label: `${item.functions.find(fn => fn.function_id === target.function_id)?.api ?? target.function_id} · ${item.library_name ?? item.package_id} · ${item.version}` })));
@@ -44,7 +45,7 @@ export function TestingComposer({ projects, catalog, machines, assets, projectId
   const compare = form.mode !== 'correctness' || form.correctnessBaseline;
   const missingCode = !!plan && (!plan.code.setup || form.mode !== 'performance' && !plan.code.correctness || form.mode !== 'correctness' && !plan.code.performance);
   const planProject = projects.find(item => plan?.ref.package_id === 'project-' + item.project_id.slice(0, 8)) ?? projects.find(item => item.project_id === form.candidate.projectId);
-  function change(patch: Partial<TestingDraft>) { setForm(current => ({ ...current, ...patch })); setError(''); requestId.current = null; }
+  function change(patch: Partial<TestingDraft>) { setForm(current => ({ ...current, ...patch })); setError(''); }
   useEffect(() => { try { sessionStorage.setItem(storageKey, JSON.stringify({ version: 1, form })); } catch { /* Optional browser draft. */ } }, [storageKey, form]);
   useEffect(() => {
     let active = true; setPlan(null); setPlanError('');
@@ -55,19 +56,46 @@ export function TestingComposer({ projects, catalog, machines, assets, projectId
     event.preventDefault(); setBusy(true); setError('');
     try {
       if (!plan || missingCode) throw new Error('请选择已有可执行测试方案，或先准备对应测试代码。');
-      requestId.current ??= newRequestId();
-      const result = await api.testing.start({ name: form.name.trim() || `${plan.function_name} 测试`, machine_id: form.machineId, plan: plan.ref,
+      if (pending.loading || pending.error || pending.id) throw new Error('请先核对上次测试创建请求。');
+      const input = { name: form.name.trim() || `${plan.function_name} 测试`, machine_id: form.machineId, plan: plan.ref,
         expected_evaluator_digest: plan.evaluator.digest, expected_package_digest: plan.package_digest,
-        candidate: testingSubject(form.candidate), ...(compare ? { baseline: testingSubject(form.baseline) } : {}), mode: form.mode }, requestId.current);
+        candidate: testingSubject(form.candidate), ...(compare ? { baseline: testingSubject(form.baseline) } : {}), mode: form.mode };
+      const requestId = await pending.begin();
+      const result = await api.testing.start(input, requestId);
+      await pending.clear(requestId);
       try { sessionStorage.removeItem(storageKey); } catch { /* Optional browser draft. */ }
       created(result.task.task_id);
     } catch (failure) { setError((failure as Error).message); }
     finally { setBusy(false); }
   }
+  async function reconcile(closeRequest: boolean) {
+    if (!pending.id) return;
+    const id = pending.id; setBusy(true); setError(''); setRequestMessage('');
+    try {
+      const result = closeRequest ? await api.testing.closeRequest(id) : await api.testing.requestStatus(id);
+      if (result.state === 'CREATED') {
+        await pending.clear(id);
+        try { sessionStorage.removeItem(storageKey); } catch { /* Optional browser draft. */ }
+        created(result.task_id);
+      } else if (result.state === 'CLOSED') {
+        const remaining = await pending.clear(id);
+        setRequestMessage(remaining ? '原请求已关闭；另一个页面还有待核对的请求，请先核对。' : '原请求已关闭，可以调整条件后创建新测试。');
+      } else setRequestMessage('服务端暂未找到原请求，它仍可能在途中。请关闭未创建的请求后再创建新测试。');
+    } catch (failure) { setError((failure as Error).message); }
+    finally { setBusy(false); }
+  }
   return <>
-    <Modal title="创建测试任务" wide className="testing-dialog" onClose={() => { if (!busy) close(); }} footer={<div className="composer-actions"><span className="hint">{form.mode === 'correctness' ? '不测性能' : '在同一机器比较两个固定版本'} · 不修改源码</span><button className="primary" type="submit" form={formId} disabled={busy || !plan || missingCode || !machine}>{busy ? '正在提交…' : '开始测试'}<Icon name="arrow" size={15} /></button></div>}>
+    <Modal title="创建测试任务" wide className="testing-dialog" onClose={() => { if (!busy) close(); }} footer={<div className="composer-actions"><span className="hint">{form.mode === 'correctness' ? '不测性能' : '在同一机器比较两个固定版本'} · 不修改源码</span><button className="primary" type="submit" form={formId} disabled={busy || pending.loading || !!pending.error || !!pending.id || !plan || missingCode || !machine}>{busy ? '正在处理…' : '开始测试'}<Icon name="arrow" size={15} /></button></div>}>
       <form id={formId} onSubmit={event => void submit(event)}>
-        <fieldset disabled={busy} className="config-fields">
+        {pending.loading && <p role="status" className="hint">正在核对浏览器中的创建请求…</p>}
+        {pending.error && <Feedback text={pending.error} bad />}
+        {pending.id && <div className="notice compact" role="status"><strong>上次测试创建请求尚未确认</strong>
+          <p>刷新或离开页面不会重新提交。请先核对原请求；关闭只会阻止尚未创建的请求，不会取消已有测试。</p>
+          <div className="actions"><button type="button" disabled={busy} onClick={() => void reconcile(false)}>核对原请求</button>
+            <button type="button" disabled={busy} onClick={() => void reconcile(true)}>关闭未创建的请求</button></div>
+        </div>}
+        {requestMessage && <Feedback text={requestMessage} />}
+        <fieldset disabled={busy || pending.loading || !!pending.id} className="config-fields">
           <div className="field-grid"><Field label="测试内容"><select value={form.mode} onChange={event => change({ mode: event.target.value as TestingMode })}><option value="both">正确性与性能</option><option value="correctness">仅正确性</option><option value="performance">仅性能</option></select></Field>
             <Field label="执行机器"><select required value={form.machineId} onChange={event => change({ machineId: event.target.value })}><option value="" disabled>选择执行机器</option>{machines.map(item => <option value={item.machine_id} key={item.machine_id} disabled={!item.enabled}>{item.name} · {item.status === 'ONLINE' ? '在线' : item.status === 'OFFLINE' ? '离线' : '状态待检测'}</option>)}</select></Field></div>
           {!machines.length && <p className="hint">还没有执行机器。<a href="#/machines">先注册执行机器</a>，返回后会保留本次配置。</p>}

@@ -1,4 +1,4 @@
-import type { CreateTestingTask, TestingAsset, TestingAssetFile, TestingPlanPreview, TestingPlanRef, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
+import type { CreateTestingTask, TestingAsset, TestingAssetFile, TestingPlanPreview, TestingPlanRef, TestingRequestStatus, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
 
 type JsonRequest = (method: string, path: string, body?: Record<string, unknown>, headers?: Record<string, string>) => Promise<unknown>;
 type BinaryUpload = (path: string, body: Uint8Array | Blob) => Promise<unknown>;
@@ -8,8 +8,10 @@ export class TestingClient {
   constructor(private readonly request: JsonRequest, private readonly upload: BinaryUpload) {}
   list(): Promise<{ tasks: TestingTaskRecord[] }> { return this.request('GET', '/v1/testing-tasks') as Promise<{ tasks: TestingTaskRecord[] }>; }
   start(input: CreateTestingTask, requestId?: string): Promise<{ task: TestingTaskRecord }> {
-    return this.request('POST', '/v1/testing-tasks', { ...input }, requestId ? { 'idempotency-key': requestId } : undefined) as Promise<{ task: TestingTaskRecord }>;
+    return this.request('POST', '/v1/testing-tasks', { ...input }, requestId === undefined ? undefined : { 'idempotency-key': requestId }) as Promise<{ task: TestingTaskRecord }>;
   }
+  requestStatus(requestId: string): Promise<TestingRequestStatus> { return this.request('GET', '/v1/testing-requests', undefined, { 'idempotency-key': requestId }) as Promise<TestingRequestStatus>; }
+  closeRequest(requestId: string): Promise<TestingRequestStatus> { return this.request('POST', '/v1/testing-requests/close', {}, { 'idempotency-key': requestId }) as Promise<TestingRequestStatus>; }
   get(id: string): Promise<TestingTaskDetails> { return this.request('GET', `/v1/testing-tasks/${encodeURIComponent(id)}`) as Promise<TestingTaskDetails>; }
   cancel(id: string): Promise<TestingTaskDetails> { return this.request('POST', `/v1/testing-tasks/${encodeURIComponent(id)}/cancel`, {}) as Promise<TestingTaskDetails>; }
   preview(plan: TestingPlanRef): Promise<{ plan: TestingPlanPreview }> { return this.request('POST', '/v1/testing-plans/preview', { ...plan }) as Promise<{ plan: TestingPlanPreview }>; }

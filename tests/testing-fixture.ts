@@ -59,9 +59,13 @@ export function createTestingFixture(options: { testPlan?: boolean } = {}) {
   let stagingGate: Promise<void> | null = null, submitGate: Promise<void> | null = null;
   const uploads: Array<{ sha256: string; workspacePath: string }> = [];
   const runner: TestingRunner = {
-    async probe() { return { health: { status: 'READY', runner_id: 'fixture-runner', store_instance_id: '11111111-1111-4111-8111-111111111111', protocol_version: RUNNER_PROTOCOL_VERSION, resource_enforcement: 'REQUIRED',
+    async probe() { return { health: { status: 'READY', runner_id: 'fixture-runner', version: 'fixture', store_instance_id: '11111111-1111-4111-8111-111111111111', protocol_version: RUNNER_PROTOCOL_VERSION, resource_enforcement: 'REQUIRED',
       capabilities: { controlled_validation: 1, source_archive_upload: 1, resource_matrix: 1, store_identity_guard: 1, artifact_path_check: 1 } },
-      machine: { hostname: 'mock-cpu', architecture: 'aarch64', cpu_count: 4, machine_identity_sha256: 'a'.repeat(64), cpu_topology: { online_cpus: '0-3', node_cpu_lists: { node0: '0-3' } } } }; },
+      machine: { hostname: 'mock-cpu', architecture: 'aarch64', platform: 'linux', os: 'fixture', kernel: 'fixture', cpu_count: 4, cpu_model: null,
+        machine_identity_sha256: 'a'.repeat(64), node_runtime: 'fixture',
+        cpu_identity: { product_model: null, hardware: null, implementer: null, architecture: null, variant: null, part: null, revision: null, midr_el1: null },
+        cpu_topology: { online_cpus: '0-3', possible_cpus: '0-3', sockets: 1, cores: 4, threads_per_core: 1, node_cpu_lists: { node0: '0-3' } },
+        numa_summary: { online_nodes: '0', node_count: 1 }, resource_capabilities: { taskset: true, numactl: true, proc_status: true } } }; },
     bindStoreIdentity() {},
     async submitExperiment(plan) { if (!failSubmit || acceptedOnFailure) plans.push(plan); await submitGate; if (failSubmit) throw failSubmit; return { experiment_id: plan.experiment.experiment_id, status: 'PENDING' }; },
     async getExperiment(id) { getCalls++; const experiment = plans.find(plan => plan.experiment.experiment_id === id)!.experiment;

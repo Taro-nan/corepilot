@@ -22,6 +22,7 @@ export function renderCliHelp(): string {
     '  corepilot machine add --file <机器配置.json> | machine update <machine-id> --file <机器配置.json>',
     '  corepilot test list | status <id> | cancel <id>',
     '  corepilot test start --file <测试请求.json> [--request-id <幂等标识>]',
+    '  corepilot test request|close-request --request-id <幂等标识>',
     '  corepilot test plan --file <测试方案引用.json> | assets',
     '  corepilot test import --directory <已解压库包> --entry <相对入口.so> --name <库名> [--version <版本>]',
     '  corepilot optimize --project <服务器项目 ID> [--branch <name>] [--function <name>] [--performance] [--watch] [--output <dir>]',
