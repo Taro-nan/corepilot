@@ -112,6 +112,32 @@ test('an older unapproved snapshot cannot bypass trace checks at approval time',
   } finally { db?.close(); await f.close(); }
 });
 
+test('revalidation permits workload-specific benchmarks but requires the same one across both roles for each workload', async () => {
+  const f = await startWebFixture();
+  let db: DatabaseSync | undefined;
+  try {
+    const seeded = await seedBlockedValidation(f, true);
+    const facts = seedApprovalFacts(f, seeded.workflowId, { twoWorkloads: true });
+    const api = new ApiClient(f.url, { token: f.token });
+    const rows = f.store.listMeasurements(facts.repeated.experiment_id).filter(row => row.kind === 'PERFORMANCE_SAMPLE');
+    const benchmark = (row: Measurement) => (row.domain_payload.benchmark_identity as { sha256: string }).sha256;
+    assert.notEqual(benchmark(rows.find(row => row.subject_id === 'workload-1')!), benchmark(rows.find(row => row.subject_id === 'workload-2')!));
+    assert.ok((await api.prepareWorkflowEvidence(seeded.workflowId)).snapshot);
+
+    const row = rows.find(item => item.subject_id === 'workload-2' && item.role === 'CANDIDATE')!;
+    const command = f.store.listCommandExecutions(facts.repeated.experiment_id).find(item => item.stdout.includes(`"subject_id":"${row.subject_id}"`)
+      && item.stdout.includes(`"role":"${row.role}"`) && item.stdout.includes(`"sample_index":${row.sample_index}`))!;
+    const modified = structuredClone(row);
+    (modified.domain_payload.benchmark_identity as { sha256: string }).sha256 = '8'.repeat(64);
+    db = new DatabaseSync(path.join(f.root, 'db.sqlite'));
+    db.prepare('UPDATE optimization_measurements SET record_json = ? WHERE measurement_id = ?').run(JSON.stringify(modified), row.measurement_id);
+    db.prepare('UPDATE optimization_experiment_commands SET record_json = ? WHERE command_id = ?')
+      .run(JSON.stringify({ ...command, stdout: command.stdout.replace('6'.repeat(64), '8'.repeat(64)) }), command.command_execution_id);
+    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /负载 workload-2 的两端性能样本评价程序自报身份不一致/);
+    assert.equal(f.store.getCandidateApproval(seeded.candidate.candidate_id), null);
+  } finally { db?.close(); await f.close(); }
+});
+
 test('existing legacy approval stays retryable without fabricating a missing RPC plan', async () => {
   const f = await startWebFixture();
   try {

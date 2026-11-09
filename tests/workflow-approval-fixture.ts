@@ -18,7 +18,7 @@ import { DEFAULT_STATISTICS } from '../src/contracts/performance-statistics.js';
 /** Simulated evaluator and measurements for public API/browser tests, never hardware evidence. */
 export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>, workflowId: string, options: {
   omitRevalidationSamples?: boolean; omitRevalidationCandidateSample?: number; extraUnobservedWorkload?: boolean;
-  statisticalGate?: boolean; distinctRevalidation?: boolean; revalidationCandidateSamples?: number[];
+  statisticalGate?: boolean; distinctRevalidation?: boolean; revalidationCandidateSamples?: number[]; twoWorkloads?: boolean;
 } = {}) {
   const workflow = f.service.get(workflowId)!;
   const task = f.store.getOptimizationTask(workflow.optimization_task_id!)!;
@@ -30,7 +30,7 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
   const manifestPath = path.join(root, 'manifest.json'), qualificationPath = path.join(root, 'qualification.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   manifest.domain.api = workflow.function_name;
-  if (options.extraUnobservedWorkload) {
+  if (options.extraUnobservedWorkload || options.twoWorkloads) {
     const workloadPath = path.join(root, 'benchmark', 'workloads.json');
     const inventory = JSON.parse(fs.readFileSync(workloadPath, 'utf8'));
     inventory.workloads.push({ ...inventory.workloads[0], workload_id: 'workload-2' });
@@ -58,6 +58,10 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
   testpack.performance.cases[0].critical = true;
   testpack.performance.cases[0].weight = 1;
   testpack.performance.key_cases = ['workload-1'];
+  if (options.twoWorkloads) {
+    testpack.performance.cases.push({ ...testpack.performance.cases[0], case_id: 'workload-2' });
+    testpack.performance.key_cases.push('workload-2');
+  }
   testpack.performance.sampling.warmup = manifest.performance.sampling.warmup_count;
   testpack.performance.sampling.samples = sampleCount;
   testpack.resources = { cpu_set: manifest.resource_requirements.cpu_set,
@@ -78,12 +82,12 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
     performance: command, passed: true };
   const baseline = Array.from({ length: sampleCount }, (_, i) => [10, 11, 9][i % 3]);
   const candidateSamples = baseline.map(value => value / 2);
-  const performance = evaluatePerformanceGate(testpack, [{ case_id: 'workload-1', baseline_samples: baseline, candidate_samples: candidateSamples,
-    ...(statisticalGate ? {} : { ci_lower: 1.5 }) }]);
+  const performance = evaluatePerformanceGate(testpack, testpack.performance.cases.map(({ case_id }) => ({ case_id, baseline_samples: baseline, candidate_samples: candidateSamples,
+    ...(statisticalGate ? {} : { ci_lower: 1.5 }) })));
   assert.equal(performance.passed, true);
   const repeatedCandidate = options.distinctRevalidation ? baseline.map(value => value / 2.2) : candidateSamples;
-  const repeatedPerformance = evaluatePerformanceGate(testpack, [{ case_id: 'workload-1', baseline_samples: baseline, candidate_samples: repeatedCandidate,
-    ...(statisticalGate ? { sample_indices: { baseline: baseline.map((_, index) => index), candidate: baseline.map((_, index) => index) } } : { ci_lower: 1.5 }) }]);
+  const repeatedPerformance = evaluatePerformanceGate(testpack, testpack.performance.cases.map(({ case_id }) => ({ case_id, baseline_samples: baseline, candidate_samples: repeatedCandidate,
+    ...(statisticalGate ? { sample_indices: { baseline: baseline.map((_, index) => index), candidate: baseline.map((_, index) => index) } } : { ci_lower: 1.5 }) })));
   assert.equal(repeatedPerformance.passed, true);
   const observed = { machine: { machine_identity_sha256: 'a'.repeat(64), fixture: true }, resource_policy: { validity: 'VALID', fixture: true } };
   const first = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'FORMAL_EVALUATION' });
@@ -108,12 +112,13 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
       let output: Omit<Measurement, 'schema_version' | 'measurement_id' | 'experiment_id' | 'evaluator' | 'recorded_at'> | null = null;
       if (context && (correctness || sample)) {
         const artifactSha = context.role === 'BASELINE' ? testpack.performance.baselines.comparison.sha256 : candidateSha;
+        const workloadBinarySha = options.twoWorkloads && experiment.type === 'REVALIDATION' && context.subject_id === 'workload-2' ? '6'.repeat(64) : binarySha;
         output = { kind: correctness ? 'CORRECTNESS_CASE' : 'PERFORMANCE_SAMPLE', role: context.role,
           subject_id: context.subject_id, sample_index: context.iteration_index,
           value: correctness ? 'PASS' : context.role === 'BASELINE' ? baseline[context.iteration_index!] : values[context.iteration_index!],
           unit: correctness ? null : 'seconds', validity: 'VALID', domain_payload: { parameters: context.parameters,
             artifact_identity: { input_path: context.artifact.path, sha256: artifactSha, resolved_symbol_path: context.artifact.path },
-            [correctness ? 'evaluator_binary_identity' : 'benchmark_identity']: { sha256: binarySha } } };
+            [correctness ? 'evaluator_binary_identity' : 'benchmark_identity']: { sha256: workloadBinarySha } } };
       }
       const prefix = correctness ? manifest.correctness.command.measurement_prefix : manifest.performance.command.measurement_prefix;
       f.store.appendCommandExecution({ schema_version: 1, command_execution_id: `command:${randomUUID()}`, experiment_id: experiment.experiment_id,

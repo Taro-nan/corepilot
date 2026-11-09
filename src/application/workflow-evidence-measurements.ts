@@ -39,7 +39,8 @@ export function assertMeasurementTrace(input: { candidate: Candidate; experiment
 
   const commands = [...input.commands].sort((a, b) => a.sequence - b.sequence);
   if (commands.length !== plan.steps.length) return fail('执行计划与命令记录数量不一致');
-  let candidateDigest: string | undefined, baselineDigest: string | undefined, benchmarkDigest: string | undefined;
+  let candidateDigest: string | undefined, baselineDigest: string | undefined;
+  const benchmarkDigests = new Map<string, string>();
   let candidateArtifact: FormalExecutionContext['artifact'] | undefined, baselineArtifact: FormalExecutionContext['artifact'] | undefined;
   const visited = new Set<string>();
   const measured = new Map<string, Measurement>();
@@ -119,9 +120,11 @@ export function assertMeasurementTrace(input: { candidate: Candidate; experiment
     const binary = row.domain_payload[isCorrectness ? 'evaluator_binary_identity' : 'benchmark_identity'];
     if (!object(binary) || !sha(binary.sha256)) return fail(`用例 ${context.subject_id} 缺少评价程序自报身份`);
     if (!isCorrectness) {
-      if (benchmarkDigest && benchmarkDigest !== binary.sha256.toLowerCase()) return fail('两端性能样本的评价程序自报身份不一致');
-      benchmarkDigest = binary.sha256.toLowerCase();
+      const benchmarkDigest = binary.sha256.toLowerCase();
+      const previousDigest = benchmarkDigests.get(context.subject_id);
+      if (previousDigest && previousDigest !== benchmarkDigest) return fail(`负载 ${context.subject_id} 的两端性能样本评价程序自报身份不一致`);
+      benchmarkDigests.set(context.subject_id, benchmarkDigest);
     }
   }
-  if (visited.size !== measured.size || !candidateDigest || !baselineDigest || !benchmarkDigest) fail('未能关联全部正确性和性能测量');
+  if (visited.size !== measured.size || !candidateDigest || !baselineDigest || benchmarkDigests.size !== bundle.workloads.workloads.length) fail('未能关联全部正确性和性能测量');
 }
