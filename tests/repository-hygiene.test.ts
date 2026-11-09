@@ -56,8 +56,9 @@ test('repository check rejects tracked local configuration even when Git ignores
       'src/application/workflow-delivery-service.ts': "import '../core/candidate-verification.js';",
       'src/application/workflow-approval-service.ts': "import '../evaluator/testpack-compatibility.js';",
       'src/core/rpc-experiment-transition-adapter.ts': "import '../evaluator/testpack-compatibility.js';",
-      'src/application/testing-results.ts': "import '../evaluator/performance-statistics.js';",
+      'src/application/testing-results.ts': "import '../evaluator/performance-statistics.js'; import '../evaluator/runner-artifact-path-check.js';",
       'src/evaluator/performance-statistics.ts': 'export {};',
+      'src/evaluator/runner-artifact-path-check.ts': "import 'node:path';",
       'src/evaluator/testpack-compatibility.ts': 'export {};',
       'src/http/testing-routes.ts': 'export {};',
       'tests/fixture.ts': 'export {};',
@@ -76,6 +77,12 @@ test('repository check rejects tracked local configuration even when Git ignores
     assert.equal(check().status, 0);
     assert.equal(fs.existsSync(path.join(root, 'corepilot.yaml')), true);
     assert.equal(fs.existsSync(path.join(root, '.tmp-model-test/config.json')), true);
+    const pathCheck = path.join(root, 'src/evaluator/runner-artifact-path-check.ts');
+    fs.writeFileSync(pathCheck, "import 'node:fs';\n");
+    const impure = check();
+    assert.equal(impure.status, 1);
+    assert.match(impure.stderr, /Artifact identity checks must remain free of I\/O: node:fs/);
+    fs.writeFileSync(pathCheck, "import 'node:path';\n");
     fs.writeFileSync(path.join(root, 'src/core/candidate-verification.ts'), 'export {};  \n<<<<<<< HEAD\n');
     const malformed = check();
     assert.equal(malformed.status, 1);
