@@ -522,7 +522,11 @@ export class OptimizationRuntime {
     if (experiment.task_id !== status.task_id || experiment.candidate_id !== status.candidate_id || experiment.type !== status.type) {
       throw new Error(`remote experiment identity mismatch for '${status.experiment_id}'`);
     }
-    if (isConfirmedTerminal(experiment.status) && !isConfirmedTerminal(status.status)) return experiment;
+    if (isConfirmedTerminal(experiment.status)) {
+      if (!isConfirmedTerminal(status.status)) return experiment;
+      if (experiment.status !== status.status) throw new Error(`conflicting terminal state for experiment '${status.experiment_id}'`);
+    }
+    const diagnostic = experiment.last_control_diagnostic;
     const synchronized: Experiment = {
       ...experiment,
       status: status.status,
@@ -532,6 +536,8 @@ export class OptimizationRuntime {
       started_at: status.started_at,
       ended_at: status.ended_at,
       updated_at: status.updated_at,
+      ...(diagnostic?.code === 'REMOTE_STATE_UNKNOWN' && !diagnostic.resolved_at && isConfirmedTerminal(status.status)
+        ? { last_control_diagnostic: { ...diagnostic, resolved_at: status.updated_at } } : {}),
     };
     this.store.saveExperiment(synchronized);
     return synchronized;
@@ -574,7 +580,7 @@ export class OptimizationRuntime {
     return { commandsAdded, measurementsAdded };
   }
 
-  markRemoteStateUnknown(experimentId: string, error: string): Experiment {
+  markRemoteStateUnknown(experimentId: string, _error: string): Experiment {
     const experiment = this.getExperiment(experimentId);
     if (isConfirmedTerminal(experiment.status)) return experiment;
     const timestamp = this.timestamp();
@@ -583,12 +589,7 @@ export class OptimizationRuntime {
       status: 'UNKNOWN',
       validity: 'UNKNOWN',
       failure_category: 'UNKNOWN',
-      evaluation: experiment.evaluation ?? {
-        build: 'NOT_EXECUTED',
-        correctness: 'NOT_EXECUTED',
-        performance: 'NOT_EXECUTED',
-        details: { remote_error: error.slice(0, 16_384) },
-      },
+      last_control_diagnostic: { code: 'REMOTE_STATE_UNKNOWN', message: 'Runner 状态尚未确认，请核对原实验。' },
       ended_at: null,
       updated_at: timestamp,
     };
@@ -605,12 +606,11 @@ export class OptimizationRuntime {
       status,
       validity: input.remoteStateUnknown ? 'UNKNOWN' : 'INVALID',
       failure_category: input.remoteStateUnknown ? 'UNKNOWN' : input.cancelled ? 'CANCELLED' : 'INFRASTRUCTURE_FAILURE',
-      evaluation: {
-        build: 'NOT_EXECUTED',
-        correctness: 'NOT_EXECUTED',
-        performance: 'NOT_EXECUTED',
-        details: { error: input.error.slice(0, 16_384) },
-      },
+      last_control_diagnostic: status === 'UNKNOWN'
+        ? { code: 'REMOTE_STATE_UNKNOWN', message: 'Runner 状态尚未确认，请核对原实验。' }
+        : status === 'CANCELLED'
+          ? { code: 'CANCELLED', message: '实验执行已取消，请查看已有命令记录。' }
+          : { code: 'EXECUTION_FAILED', message: '实验执行失败，请查看关联任务诊断和已有命令记录。' },
       ended_at: input.remoteStateUnknown ? null : timestamp,
       updated_at: timestamp,
     };

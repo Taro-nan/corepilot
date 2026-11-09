@@ -148,6 +148,8 @@ export interface Experiment {
   declared_context: Record<string, unknown>;
   observed_context: Record<string, unknown> | null;
   evaluation: ExperimentEvaluationSummary | null;
+  /** Control-plane diagnostic; not an observation that a test step ran or did not run. */
+  last_control_diagnostic?: { code: 'REMOTE_STATE_UNKNOWN' | 'CANCELLED' | 'EXECUTION_FAILED'; message: string; resolved_at?: string };
   started_at: string | null;
   ended_at: string | null;
   created_at: string;

@@ -117,12 +117,13 @@ export function renderOptimizationReport(report: OptimizationReport): string {
     const gate = e.evaluation?.details?.performance_gate as Record<string, unknown> | undefined;
     lines.push(`## 实验详情：${cell(e.experiment_id)}`, '',
       `用途：${cell(e.type)}；执行：${cell(e.status)}；有效性：${cell(e.validity)}；失败类别：${cell(e.failure_category)}`, '',
+      ...(e.last_control_diagnostic ? [`控制端诊断：${cell(e.last_control_diagnostic.code)}；${e.last_control_diagnostic.resolved_at ? `此前：${cell(e.last_control_diagnostic.message)}；已于 ${cell(e.last_control_diagnostic.resolved_at)} 核对终态` : cell(e.last_control_diagnostic.message)}`, ''] : []),
       '### 身份、资源与环境', '', code({ evaluator: e.evaluator, baseline: e.baseline, declared: e.declared_context, observed: e.observed_context }), '',
       '### 正确性', '', code(e.evaluation?.correctness_coverage ?? { note: '没有逐用例 coverage 记录' }), '',
       ...table(['Case', '结果', '有效性', '领域参数 / 诊断'], measurements.filter(m => m.kind === 'CORRECTNESS_CASE').map(m => [m.subject_id, m.value, m.validity, JSON.stringify(m.domain_payload)])),
       '### 性能（耗时单位以样本记录为准）',
       ...table(['指标', '保存值'], [
-        ['Acceptance', e.evaluation?.performance], ['Weighted geomean', gate?.weighted_geomean],
+        ['Acceptance', e.status === 'UNKNOWN' ? '待核对' : e.evaluation?.performance], ['Weighted geomean', gate?.weighted_geomean],
         ['Overall gate lower（按方法版本）', gate?.overall_ci_lower], ['Key-case gate lower（按方法版本）', gate?.key_case_ci_lower === null ? '不适用或区间未计算（见统计记录）' : gate?.key_case_ci_lower],
       ]),
       ...table(['Workload', 'Baseline 中位数', 'Candidate 中位数', '加速比', '关键用例', '退化', 'Baseline 样本数', 'Candidate 样本数'],

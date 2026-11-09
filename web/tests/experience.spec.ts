@@ -376,6 +376,12 @@ test('unconfirmed cancellation remains recoverable in the API and task page', as
   const runtime = new OptimizationRuntime(f.store);
   const experiment = runtime.startExperiment({ taskId: record.optimization_task_id!, candidateId: seeded.candidate.candidate_id, type: 'FORMAL_EVALUATION' });
   runtime.failExperiment({ experimentId: experiment.experiment_id, error: 'Runner 未确认停止', cancelled: true, remoteStateUnknown: true });
+  // A legacy UNKNOWN record may contain historical NOT_EXECUTED placeholders;
+  // keep the bytes but do not display them as confirmed facts.
+  const legacy = f.store.getExperiment(experiment.experiment_id)!;
+  expect(legacy.evaluation).toBeNull();
+  legacy.evaluation = { build: 'NOT_EXECUTED', correctness: 'NOT_EXECUTED', performance: 'NOT_EXECUTED' };
+  f.store.saveExperiment(legacy);
   const task = runtime.getTask(record.optimization_task_id!);
   f.store.saveOptimizationTask({ ...task, status: 'RUNNING' });
   Object.assign(record, { status: 'GENERATING', experiment_id: experiment.experiment_id, candidate_evaluation_feedback: null,
@@ -391,6 +397,11 @@ test('unconfirmed cancellation remains recoverable in the API and task page', as
   await page.goto(f.url + '/#/tasks/' + encodeURIComponent(record.workflow_id));
   await expect(page.locator('.page-heading .badge')).toContainText('已中断，可继续');
   await expect(page.getByLabel('验证与交付状态')).toContainText('待核对');
+  await page.locator('summary').filter({ hasText: '实验记录' }).click();
+  const lastExperiment = page.locator('.evidence-disclosure table tbody tr').last();
+  await expect(lastExperiment.locator('td').nth(3)).toHaveText('待核对');
+  await expect(lastExperiment.locator('td').nth(4)).toHaveText('待核对');
+  expect(f.store.getExperiment(experiment.experiment_id)?.evaluation?.correctness).toBe('NOT_EXECUTED');
   await expect(page.locator('.agent-session')).toContainText('继续时会恢复工作区，并核对已有 Runner 实验');
   await expect(page.locator('main')).not.toContainText('已取消');
 });

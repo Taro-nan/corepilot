@@ -20,7 +20,7 @@ import { createFormalEvaluatorFixture } from './formal-evaluator-fixture.js';
 import { candidateEvaluationFeedback } from '../src/workspace/candidate-evaluation-feedback.js';
 import { proposeFixtureHypothesis } from './hypothesis-fixture.js';
 
-async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailure?: 'aborted' | 'aborted-400' | '500' | '409' | 'rejected' | 'http-lost') {
+async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailure?: 'aborted' | 'aborted-400' | '500' | '409' | 'rejected' | 'http-lost' | 'progress-error' | 'sync-and-unknown-error') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-rpc-transition-'));
   const runnerRoot = path.join(root, 'runner');
   const localRepository = path.join(root, 'local-source');
@@ -152,7 +152,8 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
     mode: 'rpc', preflight: signal => realBackend.preflight(signal),
     submitExperiment: async () => {
       submissions++;
-      if (submissionFailure === 'aborted' || submissionFailure === 'aborted-400') cancellation.abort('cancelled by user');
+      if (['aborted', 'aborted-400', 'progress-error', 'sync-and-unknown-error'].includes(submissionFailure!)) cancellation.abort('cancelled by user');
+      if (submissionFailure === 'progress-error' || submissionFailure === 'sync-and-unknown-error') return { experiment_id: experiment.experiment_id, status: 'PENDING' };
       if (submissionFailure === '500') throw new RunnerClientError(500, 'INTERNAL', 'response after submission failed');
       if (submissionFailure === '409') throw new RunnerClientError(409, 'EXPERIMENT_ALREADY_EXISTS', 'same id exists');
       if (submissionFailure === 'rejected' || submissionFailure === 'aborted-400') throw new RunnerClientError(400, 'INVALID_EXPERIMENT_PLAN', 'rejected plan');
@@ -169,12 +170,17 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
     getCommandExecutions: id => runnerStopped ? Promise.resolve({ experiment_id: id, command_executions: [] }) : realBackend.getCommandExecutions(id),
     getMeasurements: id => runnerStopped ? Promise.resolve({ experiment_id: id, measurements: [] }) : realBackend.getMeasurements(id),
   } : realBackend;
+  if (submissionFailure === 'sync-and-unknown-error') {
+    runtime.synchronizeRemoteExperiment = () => { throw new Error('injected status persistence failure'); };
+    runtime.markRemoteStateUnknown = () => { throw new Error('injected unknown persistence failure'); };
+  }
   let baselineStageCalls = 0;
   const adapter = new RpcExperimentTransitionAdapter({
     backend,
     runtime,
     pollIntervalMs: 10,
     cancelConfirmationMs: 30,
+    ...(submissionFailure === 'progress-error' ? { onStatus: () => { throw new Error('injected progress persistence failure'); } } : {}),
     stageCandidate: async () => ({ candidateId: candidate.candidate_id, workspacePath: stagedCandidate, sourceSha256: candidateDigest }),
     stageEvaluator: async () => ({ evaluatorId: evaluator.id, version: evaluator.version, workspacePath: evaluatorRoot, digest: evaluatorDigest }),
     stageBaseline: async ({ baseline }) => {
@@ -195,9 +201,15 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
         assert.ok(['PENDING', 'RUNNING'].includes(original.status), 'the real Runner accepted the original experiment and did not confirm cancellation');
       }
       const unknown = runtime.getExperiment(experiment.experiment_id);
+      if (submissionFailure === 'sync-and-unknown-error') {
+        assert.equal(unknown.status, 'PENDING', 'failed writes retain the previous recoverable state instead of inventing cancellation');
+        assert.ok(unknown.declared_context.runner_execution_plan);
+        return;
+      }
       assert.equal(unknown.status, 'UNKNOWN');
       assert.equal(unknown.validity, 'UNKNOWN');
       assert.equal(unknown.ended_at, null);
+      assert.equal(unknown.evaluation, null);
       assert.ok(unknown.declared_context.runner_execution_plan, 'the original plan must remain available for reconciliation');
       runnerMissing = true;
       await assert.rejects(adapter.executeValidation({ ...input, resume: true }), RemoteExperimentUnknownError);
@@ -207,7 +219,9 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
       if (submissionFailure === 'aborted') {
         runnerMissing = false; runnerStopped = true;
         await assert.rejects(adapter.executeValidation({ ...input, resume: true }), RemoteExperimentCancelledError);
-        assert.equal(runtime.getExperiment(experiment.experiment_id).status, 'CANCELLED');
+        const confirmed = runtime.getExperiment(experiment.experiment_id);
+        assert.equal(confirmed.status, 'CANCELLED');
+        assert.ok(confirmed.last_control_diagnostic?.resolved_at, 'the prior unknown diagnostic is retained as resolved history');
         assert.equal(submissions, 1, 'confirmed cancellation is reconciled without another submission');
       }
       return;
@@ -298,3 +312,5 @@ test('a server error after submission checks the original experiment', () => ver
 test('a duplicate experiment response checks the original experiment', () => verifyRpcTransition(undefined, '409'));
 test('an explicitly rejected plan retains its diagnostic', () => verifyRpcTransition(undefined, 'rejected'));
 test('a real Runner keeps the original job when an accepted POST response is lost during cancellation', () => verifyRpcTransition(undefined, 'http-lost'));
+test('progress persistence failure during cancellation stays unknown', () => verifyRpcTransition(undefined, 'progress-error'));
+test('failed status and UNKNOWN writes still surface an unknown outcome to the workflow', () => verifyRpcTransition(undefined, 'sync-and-unknown-error'));

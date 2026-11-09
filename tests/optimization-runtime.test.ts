@@ -86,11 +86,28 @@ test('an unconfirmed remote cancellation remains unknown and cannot become a hyp
       checkpoint: { commit: 'commit', tree: 'tree', source_archive_sha256: 'archive', files: [] },
       hypothesis: 'fixture', agentIdentity: {} });
     const experiment = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'FORMAL_EVALUATION' });
-    const saved = runtime.failExperiment({ experimentId: experiment.experiment_id, error: 'stop unconfirmed', cancelled: true, remoteStateUnknown: true });
+    const saved = runtime.failExperiment({ experimentId: experiment.experiment_id, error: 'stop unconfirmed with fixture-secret-token', cancelled: true, remoteStateUnknown: true });
     assert.equal(saved.status, 'UNKNOWN'); assert.equal(saved.failure_category, 'UNKNOWN');
     assert.equal(saved.validity, 'UNKNOWN'); assert.equal(saved.ended_at, null);
+    assert.equal(saved.evaluation, null, 'unknown does not assert that any step was unexecuted');
+    assert.equal(saved.last_control_diagnostic?.code, 'REMOTE_STATE_UNKNOWN');
+    assert.doesNotMatch(JSON.stringify(saved), /fixture-secret-token/);
     assert.equal(store.getExperiment(experiment.experiment_id)?.status, 'UNKNOWN');
     assert.equal(store.listHypothesisOutcomes(task.task_id).length, 0);
+    const confirmedAt = new Date().toISOString();
+    const confirmed = runtime.synchronizeRemoteExperiment({ ...saved, status: 'SUCCEEDED', validity: 'UNKNOWN', failure_category: null,
+      updated_at: confirmedAt, ended_at: confirmedAt, current_step: null, cancel_requested: true, failure: null });
+    assert.equal(confirmed.last_control_diagnostic?.resolved_at, confirmedAt, 'the earlier unknown diagnostic remains as resolved history');
+    assert.equal(confirmed.evaluation, null, 'execution completion alone is not a correctness or performance result');
+    assert.throws(() => runtime.synchronizeRemoteExperiment({ ...confirmed, status: 'CANCELLED', validity: 'INVALID',
+      failure_category: 'CANCELLED', current_step: null, cancel_requested: true, failure: null }), /conflicting terminal state/);
+    assert.deepEqual(store.getExperiment(experiment.experiment_id), confirmed, 'conflicting terminal facts never overwrite history');
+    const later = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'FORMAL_EVALUATION' });
+    const partial = { build: 'PASSED' as const, correctness: 'INCOMPLETE' as const, performance: 'NOT_EXECUTED' as const };
+    store.saveExperiment({ ...later, evaluation: partial });
+    const failed = runtime.failExperiment({ experimentId: later.experiment_id, error: 'fixture failure', cancelled: false });
+    assert.deepEqual(failed.evaluation, partial, 'a later failure must not overwrite an earlier partial evaluation');
+    assert.equal(failed.last_control_diagnostic?.code, 'EXECUTION_FAILED');
   } finally { store.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
