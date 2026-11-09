@@ -5,6 +5,44 @@ import path from 'node:path';
 import test from 'node:test';
 import { WorkspaceToolset } from '../src/agent/workspace-tools.js';
 
+test('source tools reject final and intermediate symbolic links', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-tool-links-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = path.join(root, 'workspace'), external = path.join(root, 'external');
+  fs.mkdirSync(workspace); fs.mkdirSync(external);
+  fs.writeFileSync(path.join(external, 'oracle.c'), 'independent oracle\n');
+  fs.symlinkSync(external, path.join(workspace, 'linked-dir'), process.platform === 'win32' ? 'junction' : 'dir');
+  const tools = new WorkspaceToolset(workspace, { candidateSourceScope: { include: ['linked-dir/', 'linked-dir'], exclude: [] } });
+  const signal = new AbortController().signal;
+  for (const [name, args] of [
+    ['read_file', { path: 'linked-dir' }],
+    ['read_file', { path: 'linked-dir/oracle.c' }],
+    ['write_file', { path: 'linked-dir/oracle.c', content: 'tampered' }],
+  ] as const) {
+    const output = await tools.execute(name, args, signal);
+    assert.equal(output.isError, true);
+    assert.match(output.text, /symbolic link/);
+  }
+  assert.equal(fs.readFileSync(path.join(external, 'oracle.c'), 'utf8'), 'independent oracle\n');
+
+  // Windows commonly lacks permission to create file symlinks, but supports
+  // directory junctions above. Linux additionally tests file and dangling links.
+  if (process.platform !== 'win32') {
+    fs.symlinkSync(path.join(external, 'oracle.c'), path.join(workspace, 'linked-file'));
+    fs.symlinkSync(path.join(external, 'missing.c'), path.join(workspace, 'dangling-file'));
+    const fileTools = new WorkspaceToolset(workspace, { candidateSourceScope: { include: ['linked-file', 'dangling-file'], exclude: [] } });
+    for (const name of ['linked-file', 'dangling-file']) {
+      for (const operation of ['read_file', 'write_file', 'create_file', 'replace_text']) {
+        const output = await fileTools.execute(operation, { path: name, content: 'tampered', old_text: 'oracle', new_text: 'tampered' }, signal);
+        assert.equal(output.isError, true, `${operation}: ${name}`);
+        assert.match(output.text, /symbolic link/);
+      }
+    }
+    assert.equal(fs.readFileSync(path.join(external, 'oracle.c'), 'utf8'), 'independent oracle\n');
+    assert.equal(fs.existsSync(path.join(external, 'missing.c')), false);
+  }
+});
+
 test('reference search accepts the advertised query and source reads support bounded continuation', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-tool-contract-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -17,6 +17,7 @@
 | P0 | 开源许可与发布机制。 | BLOCKED：仓库缺少已选定的项目许可证；选择和修改许可证须由项目所有者授权。本次不发布 Release。 |
 | P1 | Application/Core/Runner/Evaluator/Storage/Agent 边界和实际状态所有权。 | IMPLEMENTED：现有架构图见 [系统架构](../architecture/corepilot-system.md)；部分 `core/` 仍依赖具体适配器，工作流、领域记录和 Runner 并非原子状态机，不能声明全仓治理完成。 |
 | P1 | 进程中断、重启、重复请求、远端未知、资源释放和状态一致性。 | IMPLEMENTED：已有 Runner、交付和部分工作流恢复；正在修复启动恢复仅扫描最近 200 条及恢复过程的持久状态一致性。其余跨存储故障需逐条验证。 |
+| P1 | Agent 读写必须受候选工作区和源码范围约束。 | IMPLEMENTED：本轮补上终点符号链接检查；这不等于对任意构建脚本或并发进程提供操作系统级沙箱。 |
 | P2 | Candidate、Baseline、Evaluator、机器、原始测量、Evidence、Approval、Delivery 的绑定和完整性。 | IMPLEMENTED：现有冻结包保存摘要和原始记录；正在核对冻结前的统计结果与原始样本一致性。公开脱敏归档不能直接复用包含私有信息的原始包。 |
 | P2 | 能从公开记录复核完整实验，提供脱敏、可验证的归档。 | BLOCKED：现有 [Dilate3x3 证据索引](../../examples/ippi-dilate3x3-success-case/evidence-index.md) 对应的部分原件和公开授权不在仓库；不得伪造原始记录或覆盖冻结证据。 |
 | P3 | A/A、A/B 对称、独立复验、多负载评价、置信区间、退化和不足证据。 | IMPLEMENTED：现有流程与口径见 [性能可信度与复现](../guides/performance-assurance.md)；历史 v2 与新 v3 统计语义不同，离线测试不证明目标机噪声及误报率。 |
@@ -35,5 +36,12 @@
 - **决策和修改**：仅从当前索引移除两项，保留原本地文件；`.gitignore` 忽略根配置，`scripts/check-repository.mjs` 拒绝跟踪配置、运行数据和临时模型测试目录，公共示例保留在 `examples/`。
 - **针对性测试**：`node --import tsx --test --test-concurrency=1 tests/repository-hygiene.test.ts`，3 项通过；测试使用隔离 Git 仓库验证强制加入本机配置会失败、移出索引后原文件仍存在。
 - **限制**：当前分支的删除不会清除既有 Git 历史或已推送副本；本次不擅自重写历史。
+
+### 候选源码符号链接
+
+- **原始问题**：`WorkspaceToolset` 检查中间目录链接，却允许最终路径为符号链接；读写最终链接可能访问工作区外的文件，包括独立 oracle。失效链接因 `existsSync` 返回 false 也未被识别。
+- **修改**：所有路径分量使用 `lstatSync` 检查，包括最终分量和失效链接；现有的源码范围检查继续执行。
+- **针对性测试**：`node --import tsx --test --test-concurrency=1 tests/workspace-tools.test.ts tests/library-package.test.ts`，24 项通过。本机 Windows 测试末尾和中间目录 junction 及外部文件保持不变；普通文件链接和失效文件链接已编写 Linux 测试，尚待执行，本机没有创建文件符号链接的权限。
+- **限制**：这是应用层路径约束，不能防止其他进程在检查与使用之间替换路径，也不能约束任意构建命令。需要系统级资源/权限隔离才能进一步收紧这些边界，不能把本次修复称作完整沙箱。
 
 后续每项实现的变更、测试结果与剩余限制在集成验证后补充，未记录的检查不视为通过。

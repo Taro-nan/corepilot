@@ -239,9 +239,14 @@ export class WorkspaceToolset {
     if (absolute !== this.root && !absolute.startsWith(this.root + path.sep)) throw new WorkspaceToolError(`path escapes editing workspace: ${relative}`);
     const parts = path.relative(this.root, absolute).split(path.sep).filter(Boolean);
     let current = this.root;
-    for (const part of parts.slice(0, -1)) {
+    for (const part of parts) {
       current = path.join(current, part);
-      if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new WorkspaceToolError(`path traverses a symbolic link: ${relative}`);
+      try {
+        // lstat, unlike existsSync/stat, also detects a dangling final link.
+        if (fs.lstatSync(current).isSymbolicLink()) throw new WorkspaceToolError(`path traverses a symbolic link: ${relative}`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
     }
     return absolute;
   }
