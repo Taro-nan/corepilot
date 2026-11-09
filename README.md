@@ -14,6 +14,20 @@ CorePilot 是面向 CPU 基础算法库的 Agent 性能工程工具。当前产�
 
 当前版本：`0.4.0`。Node.js 最低要求：`>=22.19.0`。
 
+## 从源码安装和启动
+
+准备 Git、Node.js 22.19.0 或更高版本及 npm，并确保能够访问 npm 仓库。从新克隆开始执行：
+
+```sh
+git clone https://github.com/Taro-nan/corepilot.git
+cd corepilot
+npm ci
+npm run build
+node dist/entry.js web --host 127.0.0.1 --port 4317 --data-dir ./corepilot-data
+```
+
+浏览器访问 `http://127.0.0.1:4317`；停止服务可在启动终端按 Ctrl+C。创建任务之前仍需按界面配置项目、模型与执行机器。完整开发测试需另外安装 Python 3 和 Playwright Chromium，命令及 Linux 依赖说明见[贡献指南](CONTRIBUTING.md)。这些离线测试不能替代目标机实验。
+
 产品与 npm 包统一使用 `corepilot`，命令为 `corepilot` 和 `corepilot-runner`，项目配置为 `corepilot.yaml`，用户设置与运行数据使用 `.corepilot/`，环境变量使用 `COREPILOT_*`。新生成的测试脚本使用 `COREPILOT_MEASUREMENT` 协议。已冻结测试包按各自清单读取，保持原始内容、摘要与资格记录不变。
 
 ## 已验证的成功案例
@@ -67,7 +81,7 @@ output_dir: ./.corepilot/runs
 
 ```yaml
 target:
-  host: 10.31.31.65
+  host: 192.0.2.10  # 文档示例；替换为自己的机器地址
   username: root
   port: 22
   # 可选：不填写时使用 SSH Agent 或 OpenSSH 默认密钥
@@ -150,12 +164,14 @@ corepilot package init <repo-path> [--target <symbol>] [--config <corepilot.yaml
 ## 开发验证
 
 ```powershell
-npm install
+npm ci
 npm run --silent dev
 npm run typecheck
 npm run build
 npm run check:repo
 npm test
+npx playwright install chromium
+npm run test:web
 node scripts/package-cli.mjs
 node scripts/verify-cli-install.mjs
 git diff --check
