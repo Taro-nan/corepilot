@@ -282,7 +282,7 @@ test('Agent process records and continuation reuse the same workflow and evaluat
   await expect(panel.getByRole('heading', { name: 'Agent 工作过程' })).toBeVisible();
   await expect(panel.getByText('本次探索预算已用完', { exact: true })).toBeVisible();
   await expect(panel.getByLabel('Agent 过程记录')).toContainText('提交候选验证');
-  await panel.locator('summary').filter({ hasText: '完整过程记录' }).click();
+  await panel.locator('summary').filter({ hasText: '过程记录' }).click();
   await panel.getByRole('button', { name: /修改源码/ }).first().click();
   await expect(page.getByRole('dialog')).toContainText('return 2');
   await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();

@@ -566,9 +566,9 @@ test('execution view explains a real-shaped queue snapshot, summarizes recent to
   await expect(page.getByRole('button', { name: '取消任务', exact: true })).toBeVisible();
   await expect(page.getByLabel('最近进展').getByRole('button')).toHaveCount(2);
   await expect(page.getByLabel('Agent 过程记录')).not.toBeVisible();
-  await page.locator('summary').filter({ has: page.getByText('完整过程记录', { exact: true }) }).click();
+  await page.locator('summary').filter({ has: page.getByText('过程记录', { exact: true }) }).click();
   await expect(page.getByLabel('Agent 过程记录')).toBeVisible();
-  await page.locator('summary').filter({ has: page.getByText('完整过程记录', { exact: true }) }).click();
+  await page.locator('summary').filter({ has: page.getByText('过程记录', { exact: true }) }).click();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: path.join(screenshots, 'fixture-running-task.png') });
   await page.setViewportSize({ width: 1280, height: 800 }); await noOverflow(page);
