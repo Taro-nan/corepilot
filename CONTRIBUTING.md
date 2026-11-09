@@ -4,7 +4,7 @@
 
 ## 本地准备
 
-准备 Git、Node.js >=22.19.0、npm 和 Python 3（Windows 上可执行命令为 `python`，Linux 为 `python3`）。从新克隆和 lockfile 安装依赖，并生成网页与服务端资源：
+准备 Git、ripgrep（命令 `rg`）、Node.js >=22.19.0、npm 和 Python 3（Windows 上可执行命令为 `python`，Linux 为 `python3`），并确认 `rg --version` 可以执行。Ubuntu 可使用 `sudo apt-get install ripgrep`；Windows 可以使用包管理器安装。从新克隆和 lockfile 安装依赖，并生成网页与服务端资源：
 
 ```text
 npm ci

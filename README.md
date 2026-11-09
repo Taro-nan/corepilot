@@ -16,7 +16,7 @@ CorePilot 是面向 CPU 基础算法库的 Agent 性能工程工具。当前产�
 
 ## 从源码安装和启动
 
-准备 Git、Node.js 22.19.0 或更高版本及 npm，并确保能够访问 npm 仓库。从新克隆开始执行：
+准备 Git、ripgrep（命令 `rg`）、Node.js 22.19.0 或更高版本及 npm，并确保能够访问 npm 仓库。Agent 的源码搜索依赖 `rg`，安装后用 `rg --version` 检查其已加入 PATH；Ubuntu 可使用 `sudo apt-get install ripgrep`，Windows 可通过包管理器安装。从新克隆开始执行：
 
 ```sh
 git clone https://github.com/Taro-nan/corepilot.git
