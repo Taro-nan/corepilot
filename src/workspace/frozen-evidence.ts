@@ -36,7 +36,7 @@ function validateManifest(value: unknown, expectedDigest?: string, maxFiles?: nu
 }
 
 /** Shared validation of the self-contained V1 inventory and archived bytes. */
-function inspectArchive(bytes: Buffer, options: { expectedManifest?: EvidenceManifest; limits?: typeof OFFLINE_LIMITS } = {}) {
+function inspectArchive(bytes: Buffer, options: { expectedManifest?: EvidenceManifest; limits?: typeof OFFLINE_LIMITS; includePerformance?: boolean } = {}) {
   let archive: { format?: unknown; manifest?: unknown; files?: unknown };
   try {
     const decoded = options.limits ? gunzipSync(bytes, { maxOutputLength: options.limits.inflatedBytes }) : gunzipSync(bytes);
@@ -50,6 +50,7 @@ function inspectArchive(bytes: Buffer, options: { expectedManifest?: EvidenceMan
       !Array.isArray(archive.files) || archive.files.length !== manifest.files.length) throw new Error('Evidence archive inventory mismatch');
   const selected = new Map<string, Buffer>();
   const needed = new Set(['evidence.json', 'task.json', 'candidate.json', 'formal/experiment.json', 'revalidation/experiment.json']);
+  if (options.includePerformance) for (const file of ['testpack.json', 'formal/measurements.json', 'revalidation/measurements.json']) needed.add(file);
   for (let i = 0; i < manifest.files.length; i++) {
     const expected = manifest.files[i];
     const archived = archive.files[i] as { relative_path?: unknown; base64?: unknown } | null;
@@ -114,7 +115,8 @@ function readBoundedArchive(filename: string, maximum: number): Buffer {
 }
 
 /** Verify an obtained V1 archive without extracting it or using a server directory. */
-export function verifyFrozenEvidenceArchive(archivePath: string, expectedSha256: string, stricterLimits: Partial<typeof OFFLINE_LIMITS> = {}) {
+export function inspectVerifiedEvidenceArchive(archivePath: string, expectedSha256: string, stricterLimits: Partial<typeof OFFLINE_LIMITS> = {},
+  includePerformance = false) {
   if (!/^[0-9a-f]{64}$/i.test(expectedSha256)) throw new Error('必须提供通过可信渠道取得的 64 位归档 SHA-256。');
   const limits = { ...OFFLINE_LIMITS, ...stricterLimits };
   for (const key of Object.keys(OFFLINE_LIMITS) as Array<keyof typeof OFFLINE_LIMITS>) {
@@ -123,7 +125,7 @@ export function verifyFrozenEvidenceArchive(archivePath: string, expectedSha256:
   const bytes = readBoundedArchive(archivePath, limits.archiveBytes);
   const actualSha256 = sha256(bytes);
   if (actualSha256 !== expectedSha256.toLowerCase()) throw new Error('Evidence archive SHA-256 mismatch');
-  const { manifest, selected } = inspectArchive(bytes, { limits });
+  const { manifest, selected } = inspectArchive(bytes, { limits, includePerformance });
   const evidence = parseEvidence(selected.get('evidence.json')!);
   const record = (name: string): Record<string, unknown> => {
     const content = selected.get(name);
@@ -152,7 +154,7 @@ export function verifyFrozenEvidenceArchive(archivePath: string, expectedSha256:
       [formal, repeated].some(item => item.task_id !== evidence.task_id || item.candidate_id !== evidence.candidate_id)) {
     throw new Error('Evidence archive identity records are incomplete or inconsistent');
   }
-  return { format: ARCHIVE_FORMAT, archive_sha256: actualSha256, inventory_digest: manifest.digest, file_count: manifest.files.length,
+  const summary = { format: ARCHIVE_FORMAT, archive_sha256: actualSha256, inventory_digest: manifest.digest, file_count: manifest.files.length,
     identity: { task_id: evidence.task_id, candidate_id: evidence.candidate_id, candidate_commit: evidence.candidate_commit,
       candidate_tree: tree, first_formal_experiment_id: evidence.first_formal_experiment_id,
       revalidation_experiment_id: evidence.revalidation_experiment_id },
@@ -160,4 +162,9 @@ export function verifyFrozenEvidenceArchive(archivePath: string, expectedSha256:
     not_verified: ['archive origin or authority', 'statistical conclusions and experiment validity', 'approval or delivery', 'suitability for public release',
       ...(evidence.candidate_tree == null ? ['candidate tree was not separately recorded in evidence.json'] : [])],
     notice: '核验只说明归档与提供的摘要一致，以及所列记录之间的身份匹配；不证明来源、实验结论、人工批准、交付或公开安全。' };
+  return { summary, selected, records: { task, evidence, formal, revalidation: repeated } };
+}
+
+export function verifyFrozenEvidenceArchive(archivePath: string, expectedSha256: string, stricterLimits: Partial<typeof OFFLINE_LIMITS> = {}) {
+  return inspectVerifiedEvidenceArchive(archivePath, expectedSha256, stricterLimits).summary;
 }

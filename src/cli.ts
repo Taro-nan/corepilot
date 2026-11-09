@@ -29,6 +29,7 @@ import { ProjectService } from './application/project-service.js';
 import { TestingService } from './application/testing-service.js';
 import { executeTestingCommand } from './client/testing-commands.js';
 import { verifyFrozenEvidenceArchive } from './workspace/frozen-evidence.js';
+import { recalculateFrozenEvidenceArchive } from './application/evidence-statistics-recalculation.js';
 
 function fail(message: string): number { console.error(`corepilot: ${message}`); return 1; }
 function serverUrl(): string { return process.env.COREPILOT_SERVER_URL ?? 'http://127.0.0.1:4317'; }
@@ -36,12 +37,15 @@ function serverUrl(): string { return process.env.COREPILOT_SERVER_URL ?? 'http:
 function evidenceCommand(args: string[]): number {
   try {
     const parsed = parseArgs({ args, allowPositionals: true, strict: true,
-      options: { sha256: { type: 'string' }, json: { type: 'boolean' } } });
+      options: { sha256: { type: 'string' }, json: { type: 'boolean' }, 'recalculate-performance': { type: 'boolean' } } });
     if (parsed.positionals.length !== 2 || parsed.positionals[0] !== 'verify' || !parsed.values.sha256) {
-      throw new Error('用法：corepilot evidence verify <归档文件> --sha256 <可信渠道提供的 SHA-256> [--json]');
+      throw new Error('用法：corepilot evidence verify <归档文件> --sha256 <可信渠道提供的 SHA-256> [--recalculate-performance] [--json]');
     }
-    console.log(JSON.stringify({ ok: true, ...verifyFrozenEvidenceArchive(parsed.positionals[1], parsed.values.sha256) }, null, 2));
-    return 0;
+    const recalculation = parsed.values['recalculate-performance'] ? recalculateFrozenEvidenceArchive(parsed.positionals[1], parsed.values.sha256) : null;
+    const result = recalculation ?? verifyFrozenEvidenceArchive(parsed.positionals[1], parsed.values.sha256);
+    const ok = !recalculation || recalculation.performance_recalculation.status === 'MATCH';
+    console.log(JSON.stringify({ ok, ...result }, null, 2));
+    return ok ? 0 : 2;
   } catch (error) {
     const message = (error as Error).message;
     if (!args.includes('--json')) return fail(message);

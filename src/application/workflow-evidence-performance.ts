@@ -1,9 +1,9 @@
 import type { Experiment, Measurement } from '../contracts/optimization-domain.js';
 import type { ValidationTestpack } from '../contracts/validation-testpack.js';
-import { evaluatePerformanceGate, type PerformanceCaseMeasurement, type PerformanceWorkloadResult } from '../workspace/validation-runner.js';
+import { evaluatePerformanceGate, type PerformanceCaseMeasurement, type PerformanceGateResult, type PerformanceWorkloadResult } from '../workspace/validation-runner.js';
 
 /** Recompute each recorded gate against that experiment's persisted samples before a new freeze. */
-export function assertPerformanceEvidenceConsistent(experiment: Experiment, rows: readonly Measurement[], testpack: ValidationTestpack): void {
+export function assertPerformanceEvidenceConsistent(experiment: Experiment, rows: readonly Measurement[], testpack: ValidationTestpack): PerformanceGateResult {
   const fail = (): never => {
     throw new Error(`${experiment.type} 的原始性能样本、冻结测试方案与已保存的性能结论不一致或信息不足，无法准备批准证据。请核对原实验并重新验证。`);
   };
@@ -76,6 +76,7 @@ export function assertPerformanceEvidenceConsistent(experiment: Experiment, rows
         !originalInterval || !actual.overall_interval || !sameNumber(originalInterval.lower, actual.overall_interval.lower) ||
         !sameNumber(originalInterval.upper, actual.overall_interval.upper)) fail();
   }
+  return recomputed;
 }
 
 function samePolicy(left: unknown, right: object): boolean {
