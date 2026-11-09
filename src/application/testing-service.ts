@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { CreateTestingTask, TestingPlanRef, TestingPlanPreview, TestingRequestStatus, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
 import type { ResolvedExecutionMachine } from '../contracts/execution-machine.js';
 import type { ProjectRecord } from '../contracts/project.js';
@@ -135,24 +136,31 @@ export class TestingService {
       runner, transport,
       stageBinary: this.options.stageBinary ?? stageAndInspectBaselineBundle, signal: controller.signal })
       .catch(error => {
-        this.store.updateTask(taskId, record => {
-          const cancelled = (controller.signal.aborted || record.execution.cancel_requested) && !record.execution.submission_attempted;
-          // Only a documented rejection of the submit request proves that the
-          // Runner did not store it. A later cancellation error, or a proxy's
-          // HTTP response, cannot prove that an accepted job has stopped.
-          const rejected = record.execution.phase === 'SUBMITTING' && isRunnerSubmissionRejected(error);
-          const unknown = record.execution.submission_attempted && !rejected;
-          record.execution.status = cancelled ? 'CANCELLED' : unknown ? 'UNKNOWN' : 'FAILED';
-          record.execution.message = cancelled ? '准备已取消，未提交 Runner 实验。' : unknown ? 'Runner 提交结果未知，请查询原任务；系统不会自动重复提交。' : '测试准备失败，请查看原因并修改条件后创建新的测试。';
-          record.execution.failure = cancelled ? null : { code: unknown ? 'TESTING_SUBMISSION_UNKNOWN' : 'TESTING_PREPARATION_FAILED', stage: record.execution.phase, message: this.diagnostic(error, machine) };
-        });
+        try {
+          this.store.updateTask(taskId, record => {
+            if (terminal.has(record.execution.status)) return;
+            const cancelled = (controller.signal.aborted || record.execution.cancel_requested) && !record.execution.submission_attempted;
+            // Only a documented rejection of the submit request proves that the
+            // Runner did not store it. A later cancellation error, or a proxy's
+            // HTTP response, cannot prove that an accepted job has stopped.
+            const rejected = record.execution.phase === 'SUBMITTING' && isRunnerSubmissionRejected(error);
+            const storageUnknown = error instanceof ApiError && ['TESTING_STATE_LOCK_UNAVAILABLE', 'TESTING_STATE_UNCONFIRMED'].includes(error.code);
+            const unknown = storageUnknown || record.execution.submission_attempted && !rejected;
+            record.execution.status = cancelled && !storageUnknown ? 'CANCELLED' : unknown ? 'UNKNOWN' : 'FAILED';
+            record.execution.message = cancelled && !storageUnknown ? '准备已取消，未提交 Runner 实验。' : unknown ? '测试状态尚未确认，请查询原任务；系统不会自动重复提交。' : '测试准备失败，请查看原因并修改条件后创建新的测试。';
+            record.execution.failure = cancelled && !storageUnknown ? null : { code: storageUnknown ? error.code : unknown ? 'TESTING_SUBMISSION_UNKNOWN' : 'TESTING_PREPARATION_FAILED', stage: record.execution.phase, message: this.diagnostic(error, machine) };
+          });
+        } catch {
+          // A storage failure must not be converted into a test result or an unhandled rejection.
+          console.error(`[corepilot-testing] 无法保存测试 ${taskId} 的准备状态，请检查数据目录并核对原任务。`);
+        }
       }).finally(() => this.preparing.delete(taskId));
     return task;
   }
   private localRecord(task: TestingTaskRecord): TestingTaskRecord {
     if (task.execution.status === 'PREPARING' && !this.preparing.has(task.task_id)) {
       return { ...task, execution: { ...task.execution, status: 'UNKNOWN', message: task.execution.submission_attempted
-        ? 'Control 在提交期间中断，请查询原任务以核对 Runner 状态；系统不会重复提交。' : 'Control 在准备期间中断。未自动重试；核对原任务后可取消并创建新的测试。' } };
+        ? '正在核对原 Runner 作业；系统不会重复提交。' : '无法确认原控制进程是否仍在准备；请核对原任务，系统不会自动重试。' } };
     }
     return task;
   }
@@ -167,7 +175,8 @@ export class TestingService {
   }
   private details(task: TestingTaskRecord): TestingTaskDetails {
     const cached = this.store.cache(task.task_id);
-    return { task, status: cached?.status ?? null, commands: cached?.commands ?? [], measurements: cached?.measurements ?? [], output: cached?.output ?? null,
+    const currentCache = cached && isDeepStrictEqual(cached.task.execution, task.execution);
+    return { task, status: currentCache ? cached.status : null, commands: cached?.commands ?? [], measurements: cached?.measurements ?? [], output: cached?.output ?? null,
       summary: summarizeTestingTask(task, cached?.measurements ?? []), formal_evidence: false };
   }
   get(taskId: string): Promise<TestingTaskDetails> {
@@ -178,48 +187,69 @@ export class TestingService {
     return reading;
   }
   private async readDetails(taskId: string): Promise<TestingTaskDetails> {
-    let task = this.localRecord(this.store.task(taskId));
+    const observed = this.store.task(taskId);
+    let task = this.localRecord(observed);
     const cached = this.store.cache(taskId);
-    if (!task.execution.submission_attempted || (terminal.has(task.execution.status) && (cached || !task.machine.runner_store_instance_id || task.execution.failure?.code === 'TESTING_PREPARATION_FAILED')) ||
+    const currentCache = cached && isDeepStrictEqual(cached.task.execution, task.execution);
+    if (!task.execution.submission_attempted || (terminal.has(task.execution.status) && (currentCache || !task.machine.runner_store_instance_id || task.execution.failure?.code === 'TESTING_PREPARATION_FAILED')) ||
       (this.preparing.has(taskId) && task.execution.phase !== 'SUBMITTED')) return this.details(task);
     try {
       const runner = this.runnerForExistingTask(task);
-      const status = await runner.getExperiment(taskId);
+      let status = await runner.getExperiment(taskId);
       if (status.experiment_id !== taskId) throw new Error('Runner 返回了其他测试任务，无法确认本次状态。');
+      const current = this.store.task(taskId);
+      if (current.execution.cancel_requested && !terminal.has(current.execution.status) && !terminal.has(status.status) && !status.cancel_requested) {
+        const receipt = await runner.cancelExperiment(taskId);
+        if (receipt.experiment_id !== taskId) throw new Error('Runner 取消回执与测试任务身份不一致。');
+        status = await runner.getExperiment(taskId);
+        if (status.experiment_id !== taskId) throw new Error('Runner 返回了其他测试任务，无法确认本次状态。');
+      }
       const [commands, measurements, output] = await Promise.all([runner.getCommandExecutions(taskId), runner.getMeasurements(taskId), runner.getExecutionOutput(taskId)]);
       if (commands.experiment_id !== taskId || measurements.experiment_id !== taskId ||
         commands.command_executions.some(command => command.experiment_id !== taskId) || measurements.measurements.some(measurement => measurement.experiment_id !== taskId)) throw new Error('Runner 测量或命令记录与测试任务身份不一致。');
-      task = this.store.updateTask(taskId, record => { record.execution.status = status.status; record.execution.phase = status.current_step ?? status.status;
+      let applied = false;
+      task = this.store.updateTask(taskId, record => {
+        if (!isDeepStrictEqual(record.execution, observed.execution) || terminal.has(record.execution.status) && record.execution.status !== status.status) return;
+        applied = true; record.execution.status = status.status; record.execution.phase = status.current_step ?? status.status;
         record.execution.cancel_requested ||= status.cancel_requested; record.execution.message = status.queue?.reason ?? (status.cancel_requested && !terminal.has(status.status) ? '已请求取消，等待 Runner 确认停止。' : null);
         record.execution.failure = status.failure ? { code: status.failure.code, stage: status.failure.step ?? 'RUNNER', message: status.failure.message } : null; });
+      if (!applied) return this.details(this.localRecord(task));
       const details: TestingTaskDetails = { task, status, commands: commands.command_executions, measurements: measurements.measurements, output,
         summary: summarizeTestingTask(task, measurements.measurements), formal_evidence: false };
-      this.store.saveResult(details); return details;
+      if (!this.store.saveResult(details)) return this.details(this.localRecord(this.store.task(taskId)));
+      return details;
     } catch (error) {
       const machine = (() => { try { return this.options.machines.resolve(task.machine.machine_id); } catch { return undefined; } })();
       const identityProblem = error instanceof RunnerClientError && ['RUNNER_STORE_MISMATCH', 'RUNNER_STORE_IDENTITY_UNAVAILABLE', 'RUNNER_STORE_GUARD_UNAVAILABLE'].includes(error.code);
-      task = this.store.updateTask(taskId, record => { record.execution.status = 'UNKNOWN'; record.execution.message = error instanceof ApiError ? error.message : identityProblem
+      task = this.store.updateTask(taskId, record => {
+        if (!isDeepStrictEqual(record.execution, observed.execution) || terminal.has(record.execution.status)) return;
+        record.execution.status = 'UNKNOWN'; record.execution.message = error instanceof ApiError ? error.message : identityProblem
         ? this.diagnostic(error, machine) : '暂时无法核对 Runner 状态，请继续查询原任务；系统不会重复提交。';
         record.execution.failure = { code: error instanceof ApiError ? error.code : error instanceof RunnerClientError ? error.code : 'TESTING_RECONCILIATION_FAILED', stage: 'RECONCILE', message: this.diagnostic(error, machine) }; });
       return this.details(task);
     }
   }
   async cancel(taskId: string): Promise<TestingTaskDetails> {
-    let task = this.store.task(taskId);
+    let task = this.store.updateTask(taskId, record => {
+      if (terminal.has(record.execution.status)) return;
+      record.execution.cancel_requested = true;
+      if (!record.execution.submission_attempted && !this.preparing.has(taskId)) {
+        record.execution.status = 'UNKNOWN'; record.execution.message = '已请求取消，无法确认原控制进程是否仍在准备；请继续核对原任务。';
+      } else record.execution.message = '已请求取消，正在等待停止确认。';
+    });
     if (terminal.has(task.execution.status)) return this.get(taskId);
-    task = this.store.updateTask(taskId, record => { record.execution.cancel_requested = true; record.execution.message = '已请求取消，正在等待停止确认。'; });
     if (!task.execution.submission_attempted) {
       const controller = this.preparing.get(taskId);
       if (controller) controller.abort();
-      else task = this.store.updateTask(taskId, record => { record.execution.status = 'CANCELLED'; record.execution.message = '准备已取消，未提交 Runner 实验。'; });
       return this.details(task);
     }
     try {
       const receipt = await this.runnerForExistingTask(task).cancelExperiment(taskId);
       if (receipt.experiment_id !== taskId) throw new Error('Runner 取消回执与测试任务身份不一致。');
-      task = this.store.updateTask(taskId, record => { record.execution.status = receipt.status; record.execution.cancel_requested = true; });
+      task = this.store.updateTask(taskId, record => { if (!terminal.has(record.execution.status)) record.execution.status = receipt.status; record.execution.cancel_requested = true; });
     } catch (error) {
-      task = this.store.updateTask(taskId, record => { record.execution.status = 'UNKNOWN'; record.execution.message = '取消尚未确认，请继续查询原任务；不会将仍可能运行的作业标成已停止。';
+      task = this.store.updateTask(taskId, record => { if (terminal.has(record.execution.status)) return;
+        record.execution.status = 'UNKNOWN'; record.execution.message = '取消尚未确认，请继续查询原任务；不会将仍可能运行的作业标成已停止。';
         record.execution.failure = { code: 'TESTING_CANCEL_UNKNOWN', stage: 'CANCEL', message: this.diagnostic(error) }; });
     }
     return this.get(taskId);

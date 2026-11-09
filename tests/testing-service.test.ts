@@ -269,7 +269,7 @@ test('legacy evaluator without test-plan.json still receives explicit two-librar
   } finally { f.close(); }
 });
 
-test('interrupted preparation remains unknown after restart and can be cancelled without a submission', async () => {
+test('a different Control requests cancellation without claiming the preparing owner has stopped', async () => {
   const f = createTestingFixture(); let release!: () => void;
   try {
     f.setStagingGate(new Promise<void>(resolve => { release = resolve; }));
@@ -279,7 +279,11 @@ test('interrupted preparation remains unknown after restart and can be cancelled
     const restarted = new TestingService(f.options), unknown = await restarted.get(task.task_id);
     assert.equal(unknown.task.execution.status, 'UNKNOWN'); assert.equal(f.getCalls, 0);
     assert.equal((await restarted.start(input, { requestId: 'interrupted-preparation' })).task_id, task.task_id);
-    assert.equal((await restarted.cancel(task.task_id)).task.execution.status, 'CANCELLED');
-    release(); await delay(30); assert.equal(f.plans.length, 0);
-  } finally { release?.(); f.close(); }
+    const requested = await restarted.cancel(task.task_id);
+    assert.equal(requested.task.execution.status, 'UNKNOWN'); assert.equal(requested.task.execution.cancel_requested, true);
+    assert.equal(f.plans.length, 0);
+    release();
+    for (let i = 0; i < 100 && f.service.list()[0].execution.status !== 'CANCELLED'; i++) await delay(10);
+    assert.equal(f.service.list()[0].execution.status, 'CANCELLED'); assert.equal(f.plans.length, 0);
+  } finally { release?.(); await delay(20); f.close(); }
 });

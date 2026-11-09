@@ -30,10 +30,14 @@ export interface TestingPreparation {
 export function testingConnectionKey(machine: ResolvedExecutionMachine): string {
   return createHash('sha256').update(JSON.stringify({ runner: machine.runner, target: machine.target })).digest('hex');
 }
-function phase(context: TestingPreparation, name: string, message: string): TestingTaskRecord {
+function phase(context: TestingPreparation, name: string, message: string, submission = false): TestingTaskRecord {
   context.signal.throwIfAborted();
-  if (context.store.task(context.taskId).execution.cancel_requested) throw new Error('测试准备已取消。');
-  return context.store.updateTask(context.taskId, record => { record.execution.phase = name; record.execution.message = message; });
+  return context.store.updateTask(context.taskId, record => {
+    if (record.execution.cancel_requested) throw new Error('测试准备已取消。');
+    if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(record.execution.status)) throw new Error('测试已结束，不能继续准备。');
+    record.execution.phase = name; record.execution.message = message;
+    if (submission) record.execution.submission_attempted = true;
+  });
 }
 function subjectIdentity(subject: TestingPreparedSubject) {
   return { id: subject.kind === 'source' ? `source:${subject.version}` : `binary:${subject.asset_id}`, version: subject.version,
@@ -121,11 +125,15 @@ export async function prepareTestingExecution(context: TestingPreparation): Prom
       machine_identity_sha256: probe.machine.machine_identity_sha256, runner_store_instance_id: runnerStoreInstanceId, subjects: record.subjects },
     observed_context: null, evaluation: null, started_at: null, ended_at: null, created_at: record.created_at, updated_at: new Date().toISOString() };
   const plan: ExperimentExecutionPlan = { experiment, steps, output_directory: record.workspace.logs_root };
-  phase(context, 'SUBMITTING', '正在向 Runner 提交固定测试计划');
-  context.store.updateTask(context.taskId, task => { task.execution.submission_attempted = true; });
+  // This arbitration shares the same cross-process lock as cancel().
+  phase(context, 'SUBMITTING', '正在向 Runner 提交固定测试计划', true);
   const submitted = await context.runner.submitExperiment(plan);
   if (submitted.experiment_id !== context.taskId) throw new Error('Runner 提交回执与测试任务身份不一致。');
-  record = context.store.updateTask(context.taskId, task => { task.execution.status = 'PENDING'; task.execution.phase = 'SUBMITTED';
-    task.execution.message = '测试计划已提交，等待 Runner 执行。'; });
-  if (record.execution.cancel_requested) await context.runner.cancelExperiment(context.taskId);
+  record = context.store.updateTask(context.taskId, task => {
+    if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(task.execution.status)) return;
+    if (task.execution.status === 'PREPARING') task.execution.status = 'PENDING';
+    task.execution.phase = 'SUBMITTED';
+    task.execution.message = task.execution.cancel_requested ? '已请求取消，正在等待 Runner 确认停止。' : '测试计划已提交，等待 Runner 执行。';
+  });
+  if (record.execution.cancel_requested && !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(record.execution.status)) await context.runner.cancelExperiment(context.taskId);
 }

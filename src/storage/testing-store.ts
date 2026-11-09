@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { isDeepStrictEqual } from 'node:util';
 import { ApiError } from '../core/api-error.js';
 import type { TestingAsset, TestingTaskDetails, TestingTaskRecord } from '../contracts/testing.js';
 
@@ -34,10 +36,17 @@ export class TestingStore {
   taskRoot(id: string): string { return path.join(this.root, 'tasks', this.identity(id, 'testing:')); }
   assetRoot(id: string): string { return path.join(this.root, 'assets', this.identity(id)); }
 
-  write(filename: string, value: unknown): void {
+  private write(filename: string, value: unknown, durable = false): void {
     fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
     const temporary = `${filename}.${randomUUID()}.tmp`;
-    try { fs.writeFileSync(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(temporary, filename); }
+    try {
+      const fd = fs.openSync(temporary, 'wx', 0o600);
+      try { fs.writeFileSync(fd, JSON.stringify(value, null, 2) + '\n'); if (durable) fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      fs.renameSync(temporary, filename);
+      if (durable && process.platform !== 'win32') {
+        const dir = fs.openSync(path.dirname(filename), 'r'); try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); }
+      }
+    }
     finally { fs.rmSync(temporary, { force: true }); }
   }
   private read<T>(filename: string): T {
@@ -53,9 +62,52 @@ export class TestingStore {
     if (record.task_id !== id) throw new Error('testing task identity mismatch');
     return record;
   }
-  saveTask(record: TestingTaskRecord): void { this.write(path.join(this.taskRoot(record.task_id), 'task.json'), record); }
+  saveTask(record: TestingTaskRecord): void {
+    this.withTaskWriteLock(() => {
+      const filename = path.join(this.taskRoot(record.task_id), 'task.json');
+      if (fs.existsSync(filename)) throw new ApiError(409, 'TESTING_TASK_EXISTS', '测试记录已存在，请核对原任务。');
+      this.replaceTask(filename, record);
+    });
+  }
+  private replaceTask(filename: string, record: TestingTaskRecord): void {
+    try { this.write(filename, record, true); }
+    catch { throw new ApiError(503, 'TESTING_STATE_UNCONFIRMED', '测试状态的保存结果尚未确认，请检查数据目录并查询原任务。'); }
+  }
+  /** A short SQLite write transaction serializes file updates across Control processes. */
+  private withTaskWriteLock<T>(write: () => T): T {
+    let database: DatabaseSync | undefined;
+    try {
+      fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
+      database = new DatabaseSync(path.join(this.root, 'task-write-lock.sqlite'));
+      database.exec('PRAGMA busy_timeout = 250; BEGIN IMMEDIATE');
+    } catch {
+      try { database?.close(); } catch { /* Preserve the lock error. */ }
+      throw new ApiError(503, 'TESTING_STATE_LOCK_UNAVAILABLE', '无法锁定测试状态，请检查数据目录权限及文件系统的 SQLite 锁支持后重试。原任务已保留。');
+    }
+    try {
+      const result = write();
+      try { database.exec('COMMIT'); }
+      catch { throw new ApiError(503, 'TESTING_STATE_UNCONFIRMED', '测试状态的保存结果尚未确认，请查询原任务；不要重复提交。'); }
+      return result;
+    } catch (error) {
+      try { database.exec('ROLLBACK'); } catch { /* The file may already have been replaced; callers must reconcile it. */ }
+      throw error;
+    } finally {
+      try { database.close(); }
+      catch { throw new ApiError(503, 'TESTING_STATE_UNCONFIRMED', '测试状态的保存结果尚未确认，请查询原任务；不要重复提交。'); }
+    }
+  }
   updateTask(id: string, change: (record: TestingTaskRecord) => void): TestingTaskRecord {
-    const record = this.task(id); change(record); record.updated_at = new Date().toISOString(); this.saveTask(record); return record;
+    return this.withTaskWriteLock(() => {
+      let record: TestingTaskRecord;
+      try { record = this.task(id); }
+      catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(503, 'TESTING_STATE_UNCONFIRMED', '无法读取测试状态，请检查数据目录并核对原任务。');
+      }
+      change(record); record.updated_at = new Date().toISOString();
+      this.replaceTask(path.join(this.taskRoot(id), 'task.json'), record); return record;
+    });
   }
   tasks(): TestingTaskRecord[] {
     const root = path.join(this.root, 'tasks');
@@ -130,5 +182,12 @@ export class TestingStore {
     const filename = path.join(this.taskRoot(id), 'result.json');
     return fs.existsSync(filename) ? this.read<TestingTaskDetails>(filename) : null;
   }
-  saveResult(result: TestingTaskDetails): void { this.write(path.join(this.taskRoot(result.task.task_id), 'result.json'), result); }
+  saveResult(result: TestingTaskDetails): boolean {
+    return this.withTaskWriteLock(() => {
+      const current = this.task(result.task.task_id);
+      if (!isDeepStrictEqual(current.execution, result.task.execution)) return false;
+      this.write(path.join(this.taskRoot(result.task.task_id), 'result.json'), result);
+      return true;
+    });
+  }
 }
