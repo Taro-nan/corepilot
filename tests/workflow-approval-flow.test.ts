@@ -230,13 +230,14 @@ test('unplanned samples and mixed revalidation prefixes cannot be ignored during
       await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /原始性能样本.*不一致/);
       db.prepare('DELETE FROM optimization_measurements WHERE measurement_id = ?').run(measurement_id);
     }
-    // A complete legacy revalidation uses one consistent formal. prefix.
+    // A complete legacy revalidation may use one consistent formal. prefix,
+    // but it is not the same identity as this saved RPC plan's unprefixed run.
     for (const row of f.store.listMeasurements(facts.repeated.experiment_id).filter(item => item.kind === 'PERFORMANCE_SAMPLE')) {
       const subject_id = `formal.${row.subject_id}`;
       db.prepare('UPDATE optimization_measurements SET name = ?, record_json = ? WHERE measurement_id = ?')
         .run(subject_id, JSON.stringify({ ...row, subject_id }), row.measurement_id);
     }
-    assert.ok((await api.prepareWorkflowEvidence(seeded.workflowId)).snapshot);
+    await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /测量身份或执行记录无法核验/);
   } finally { db?.close(); await f.close(); }
 });
 

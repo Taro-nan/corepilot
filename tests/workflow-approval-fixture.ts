@@ -4,8 +4,11 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { startWebFixture } from './web-fixture.js';
 import type { ValidationTestpack } from '../src/contracts/validation-testpack.js';
+import type { Experiment, Measurement } from '../src/contracts/optimization-domain.js';
+import type { ExperimentExecutionStep } from '../src/contracts/runner-rpc.js';
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
-import { evaluatorContentSha256, listFormalEvaluatorFiles } from '../src/evaluator/formal-evaluator.js';
+import { evaluatorContentSha256, listFormalEvaluatorFiles, loadFormalEvaluatorBundle } from '../src/evaluator/formal-evaluator.js';
+import { createFormalEvaluatorSteps } from '../src/evaluator/formal-plan.js';
 import { freezeValidationTestpack, readFrozenValidationTestpack } from '../src/testpack/validation-freeze.js';
 import { freezeEvidenceFiles } from '../src/workspace/freeze-evidence.js';
 import { createFormalEvaluatorFixture } from './formal-evaluator-fixture.js';
@@ -84,15 +87,54 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
   assert.equal(repeatedPerformance.passed, true);
   const observed = { machine: { machine_identity_sha256: 'a'.repeat(64), fixture: true }, resource_policy: { validity: 'VALID', fixture: true } };
   const first = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'FORMAL_EVALUATION' });
-  runtime.completeValidationExperiment({ experimentId: first.experiment_id, validation, performance, observedContext: observed });
+  const bundle = loadFormalEvaluatorBundle(root);
+  const populate = (experiment: Experiment, values: number[], omit: boolean) => {
+    const remoteRoot = `/runner/fixture/${experiment.type.toLowerCase()}`;
+    const candidatePath = `${remoteRoot}/build/libcandidate.so`, baselinePath = `${remoteRoot}/baseline/libreference.so`;
+    const candidateSha = experiment.type === 'FORMAL_EVALUATION' ? '2'.repeat(64) : '3'.repeat(64);
+    const binarySha = experiment.type === 'FORMAL_EVALUATION' ? '4'.repeat(64) : '5'.repeat(64);
+    const steps: ExperimentExecutionStep[] = [{ step: 'BUILD', execution_domain: 'CANDIDATE',
+      command: { executable: 'make', args: [], cwd: `${remoteRoot}/source`, environment: {}, timeout_ms: 1000 } },
+      ...createFormalEvaluatorSteps({ bundle, stagedEvaluatorRoot: `${remoteRoot}/evaluator`, runtimeRoot: `${remoteRoot}/runtime`,
+        candidateSourceRoot: `${remoteRoot}/source`, candidateArtifact: { artifactId: 'current', path: candidatePath, sha256: null },
+        baselineArtifact: { artifactId: 'base', path: baselinePath, sha256: testpack.performance.baselines.comparison.sha256 },
+        correctnessTimeoutMs: 1000, performanceTimeoutMs: 1000, includePerformance: true })];
+    runtime.recordRemoteExecutionPlan(experiment.experiment_id, { candidate: { candidate_id: candidate.candidate_id,
+      commit: candidate.source.commit, tree: candidate.source.tree, source_sha256: candidate.source.archive_sha256, workspace_path: `${remoteRoot}/source` },
+      evaluator: { evaluator_id: manifest.evaluator_id, version: manifest.version, digest, workspace_path: `${remoteRoot}/evaluator` }, steps });
+    for (const [sequence, step] of steps.entries()) {
+      const context = step.formal_context;
+      const correctness = context?.phase === 'CORRECTNESS_CASE', sample = context?.phase === 'PERFORMANCE_SAMPLE';
+      let output: Omit<Measurement, 'schema_version' | 'measurement_id' | 'experiment_id' | 'evaluator' | 'recorded_at'> | null = null;
+      if (context && (correctness || sample)) {
+        const artifactSha = context.role === 'BASELINE' ? testpack.performance.baselines.comparison.sha256 : candidateSha;
+        output = { kind: correctness ? 'CORRECTNESS_CASE' : 'PERFORMANCE_SAMPLE', role: context.role,
+          subject_id: context.subject_id, sample_index: context.iteration_index,
+          value: correctness ? 'PASS' : context.role === 'BASELINE' ? baseline[context.iteration_index!] : values[context.iteration_index!],
+          unit: correctness ? null : 'seconds', validity: 'VALID', domain_payload: { parameters: context.parameters,
+            artifact_identity: { input_path: context.artifact.path, sha256: artifactSha, resolved_symbol_path: context.artifact.path },
+            [correctness ? 'evaluator_binary_identity' : 'benchmark_identity']: { sha256: binarySha } } };
+      }
+      const prefix = correctness ? manifest.correctness.command.measurement_prefix : manifest.performance.command.measurement_prefix;
+      f.store.appendCommandExecution({ schema_version: 1, command_execution_id: `command:${randomUUID()}`, experiment_id: experiment.experiment_id,
+        evaluator: { id: manifest.evaluator_id, version: manifest.version, digest }, step: step.step, sequence,
+        command: step.command.executable, args: step.command.args, cwd: step.command.cwd, start_time: now, end_time: now, duration_ms: 1,
+        exit_code: 0, stdout: output ? `${prefix} ${JSON.stringify(output)}\n` : '', stderr: '', timeout_ms: step.command.timeout_ms,
+        timed_out: false, cancelled: false, resource_context: context ? { validity: 'VALID' } : null });
+      if (output && !(omit && sample && (options.omitRevalidationSamples || context?.role === 'CANDIDATE' && context.iteration_index === options.omitRevalidationCandidateSample))) {
+        f.store.appendMeasurement({ ...output, schema_version: 1, measurement_id: `measurement:${randomUUID()}`, experiment_id: experiment.experiment_id,
+          evaluator: { id: manifest.evaluator_id, version: manifest.version, digest }, recorded_at: now,
+          domain_payload: { ...output.domain_payload, evaluator_identity: { id: manifest.evaluator_id, version: manifest.version, digest }, resource_policy: { validity: 'VALID' } } });
+      }
+    }
+    const saved = f.store.getExperiment(experiment.experiment_id)!;
+    f.store.saveExperiment({ ...saved, status: 'SUCCEEDED', validity: 'VALID', observed_context: observed, ended_at: now, updated_at: now });
+  };
+  populate(first, candidateSamples, false);
+  runtime.completeValidationExperiment({ experimentId: first.experiment_id, validation, performance, observedContext: observed, factsAlreadyPersisted: true });
   const repeated = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'REVALIDATION' });
-  runtime.completeRevalidationExperiment({ experimentId: repeated.experiment_id, revalidation: { formal: validation, independent: null, performance_gate: repeatedPerformance, passed: true }, observedContext: observed });
-  if (!options.omitRevalidationSamples) for (const [role, samples] of [['BASELINE', baseline], ['CANDIDATE', options.revalidationCandidateSamples ?? repeatedCandidate]] as const) for (const [index, value] of samples.entries()) {
-    if (role === 'CANDIDATE' && index === options.omitRevalidationCandidateSample) continue;
-    f.store.appendMeasurement({ schema_version: 1, measurement_id: `measurement:${randomUUID()}`, experiment_id: repeated.experiment_id,
-      evaluator: { id: manifest.evaluator_id, version: manifest.version, digest }, kind: 'PERFORMANCE_SAMPLE', role,
-      subject_id: 'workload-1', sample_index: index, value, unit: 'ns', validity: 'VALID', domain_payload: {}, recorded_at: now });
-  }
+  populate(repeated, options.revalidationCandidateSamples ?? repeatedCandidate, true);
+  runtime.completeRevalidationExperiment({ experimentId: repeated.experiment_id, revalidation: { formal: validation, independent: null, performance_gate: repeatedPerformance, passed: true }, observedContext: observed, factsAlreadyPersisted: true });
   Object.assign(workflow, { status: 'WAITING_APPROVAL', enable_performance: true, testpack_digest: frozen.digest,
     testpack_snapshot_path: path.join(snapshotDir, 'validation-testpack.json'), candidate_evaluation_feedback: null, candidate_evaluation_decision: null });
   f.store.saveOptimizationWorkflowJson(workflowId, JSON.stringify(workflow));

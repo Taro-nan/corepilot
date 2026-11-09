@@ -10,7 +10,8 @@ import { RunnerClientExperimentExecutionBackend } from '../src/core/experiment-e
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
 import { RpcExperimentTransitionAdapter } from '../src/core/rpc-experiment-transition-adapter.js';
 import { sourceTreeSha256 } from '../src/core/source-identity.js';
-import { evaluatorBundleSha256 } from '../src/evaluator/formal-evaluator.js';
+import { evaluatorBundleSha256, loadFormalEvaluatorBundle } from '../src/evaluator/formal-evaluator.js';
+import { assertMeasurementTrace } from '../src/application/workflow-evidence-measurements.js';
 import { startRunnerHttpServer } from '../src/runner/http-server.js';
 import { SqliteTaskStore } from '../src/storage/sqlite-task-store.js';
 import type { CandidateWorkspaceState } from '../src/workspace/candidate-workspace.js';
@@ -185,6 +186,8 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS') {
     );
     assert.equal(measurements.some((item) => Object.hasOwn(item.domain_payload.parameters as object, 'm')), false);
     assert.equal((runtime.getExperiment(experiment.experiment_id).observed_context as { evaluator: { digest: string } }).evaluator.digest, evaluatorDigest);
+    assert.doesNotThrow(() => assertMeasurementTrace({ candidate, experiment: runtime.getExperiment(experiment.experiment_id),
+      rows: measurements, commands, bundle: loadFormalEvaluatorBundle(evaluatorRoot) }));
     const resumed = new RpcExperimentTransitionAdapter({ backend: new RunnerClientExperimentExecutionBackend(runnerClient), runtime, pollIntervalMs: 10,
       stageCandidate: async () => { throw new Error('Recovery must not restage or delete live source directories'); },
       stageEvaluator: async () => { throw new Error('Recovery must use the persisted execution plan'); },

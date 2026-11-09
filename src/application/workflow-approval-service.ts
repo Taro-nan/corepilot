@@ -18,6 +18,7 @@ import { readFrozenValidationTestpack } from '../testpack/validation-freeze.js';
 import { freezeEvidenceFiles } from '../workspace/freeze-evidence.js';
 import { verifyFrozenEvidenceArtifact } from '../workspace/frozen-evidence.js';
 import { assertPerformanceEvidenceConsistent } from './workflow-evidence-performance.js';
+import { assertMeasurementTrace } from './workflow-evidence-measurements.js';
 
 const jsonBytes = (value: unknown) => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 
@@ -147,6 +148,7 @@ export class WorkflowApprovalService {
     for (const [experiment, rows] of [[inspected.first, firstMeasurements], [inspected.repeated, repeatedMeasurements]] as const) {
       assertRawEvidenceComplete(experiment, rows, inspected.evaluatorBundle, frozen.testpack);
       assertPerformanceEvidenceConsistent(experiment, rows, frozen.testpack);
+      assertMeasurementTrace({ candidate, experiment, rows, commands: this.store.listCommandExecutions(experiment.experiment_id), bundle: inspected.evaluatorBundle });
     }
     const previous = workflow.review_evidence;
     if (previous && previous.candidate_id === candidate.candidate_id && previous.candidate_commit === candidate.source.commit
@@ -215,6 +217,8 @@ export class WorkflowApprovalService {
       const rows = this.store.listMeasurements(experiment.experiment_id);
       assertRawEvidenceComplete(experiment, rows, bundle, facts.frozen.testpack);
       assertPerformanceEvidenceConsistent(experiment, rows, facts.frozen.testpack);
+      if (!existingApproval) assertMeasurementTrace({ candidate: facts.candidate, experiment, rows,
+        commands: this.store.listCommandExecutions(experiment.experiment_id), bundle });
     }
     const approval = this.runtime.approveCandidate({ taskId: facts.task.task_id, candidateId: facts.candidate.candidate_id,
       firstFormalExperimentId: snapshot.first_formal_experiment_id, revalidationExperimentId: snapshot.revalidation_experiment_id,
