@@ -61,6 +61,8 @@ Control SQLite 在 [SqliteTaskStore](../../src/storage/sqlite-task-store.ts) 中
 
 源码和正式优化的执行结束状态由同一事务写入 Workflow 与 Task；`NO_CANDIDATE` 和 `PERFORMANCE_THRESHOLD_NOT_MET` 对应 Task `COMPLETED`，其余执行终态保持相同语义。事务检查任务、工作流和现有候选的归属，不修改实验、Evidence 或批准。写入结果失败时尝试原子记录 `INTERRUPTED` 和诊断；持续失败时在条件事务中记录诊断，并保留此前状态供重启恢复。若诊断也无法写入且无法确认终态已提交，则向后台日志输出有界的工作流 ID 和操作提示，不输出原始异常或凭据。持久化错误不记成候选错误。此约束不自动修复旧版已留下的其他终态不一致，也不涵盖跨 Runner 或文件系统的原子性。
 
+正式优化将新 Candidate 与 Workflow 的候选引用写入同一事务，事务内核对父候选与序号。会话检查点落后时，只有源码提交、树、归档与文件身份、任务和假设均一致且没有已有实验，才复用原候选；身份冲突或历史重复保留现场并停止。实验创建与会话检查点尚有独立中断窗口，不能由候选事务推断远端执行状态。
+
 ### 优化与独立测试的已落地边界
 
 公开优化请求可显式选择 `verification_mode: source_only`。缺省仍为原有 `verified`，保留历史配置与行为。源码模式通过现有 WorkflowService、OptimizationRuntime、Pi 会话与源码工具生成冻结 Candidate，`Task.evaluator` 为 `null`，不伪造测试身份；终态 `CANDIDATE_READY` 表示代码待验证，报告分别标明构建、正确性和性能未执行。缺评价器或源码模式的候选不能通过正式实验、批准及交付门禁。
