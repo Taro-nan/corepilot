@@ -1,5 +1,5 @@
 import type { TaskStore } from '../storage/task-store.js';
-import type { OptimizationWorkflowRecord, WorkflowExecutionOutcomePatch } from '../contracts/workflow.js';
+import { taskStatusForExecutionOutcome, type OptimizationWorkflowRecord, type WorkflowExecutionOutcomePatch } from '../contracts/workflow.js';
 
 export interface OptimizationWorkflowStore {
   save(record: OptimizationWorkflowRecord): void;
@@ -33,22 +33,30 @@ export function finishWorkflowExecution(store: TaskStore, workflowId: string, ta
   try {
     store.finishOptimizationWorkflow(workflowId, taskId, patch);
   } catch (error) {
-    const message = clean(`保存优化结束状态失败：${(error as Error).message}。已保留已有候选和实验，请核对后继续。`);
+    const code = (error as NodeJS.ErrnoException)?.code;
+    const reason = typeof code === 'string' && /^[A-Z0-9_]{1,64}$/.test(code) ? `（${code}）` : '';
+    // Avoid serializing arbitrary database exceptions, which may contain SQL inputs or secrets.
+    const message = clean(`保存优化结束状态失败${reason}。已保留已有候选和实验，请核对后继续。`);
+    const interrupted: WorkflowExecutionOutcomePatch = { status: 'INTERRUPTED', error: message,
+      progress: { phase: 'INTERRUPTED', last_event: message } };
     try {
-      store.finishOptimizationWorkflow(workflowId, taskId, { status: 'INTERRUPTED', error: message,
-        progress: { phase: 'INTERRUPTED', last_event: message } });
+      store.finishOptimizationWorkflow(workflowId, taskId, interrupted);
     } catch {
       // Persistent DB errors may prevent even an interruption record. Keep the
       // prior state for startup reconciliation and show a diagnostic if possible.
+      try { if (store.recordWorkflowPersistenceFailure(workflowId, taskId, message)) return; } catch { /* Check persisted state below. */ }
       try {
-        const current = store.getOptimizationWorkflowJson(workflowId);
-        if (!current) return;
-        const record = JSON.parse(current) as OptimizationWorkflowRecord;
-        if (record.optimization_task_id === taskId && ['CREATED', 'GENERATING'].includes(record.status)) {
-          store.saveOptimizationWorkflowJson(workflowId, JSON.stringify({ ...record, error: message,
-            progress: { phase: 'PERSISTENCE_ERROR', last_event: message }, updated_at: new Date().toISOString() }));
-        }
-      } catch { /* A persistent storage outage also prevents saving diagnostics. */ }
+        const json = store.getOptimizationWorkflowJson(workflowId);
+        const workflow = json ? JSON.parse(json) as OptimizationWorkflowRecord : null;
+        const task = store.getOptimizationTask(taskId);
+        const matches = (outcome: WorkflowExecutionOutcomePatch) => workflow && task && workflow.optimization_task_id === taskId &&
+          task.status === taskStatusForExecutionOutcome(outcome.status) && Object.entries(outcome).every(([key, value]) =>
+            JSON.stringify(workflow[key as keyof OptimizationWorkflowRecord]) === JSON.stringify(value));
+        if (matches(patch) || matches(interrupted) || (workflow?.optimization_task_id === taskId &&
+          workflow.progress?.phase === 'PERSISTENCE_ERROR' && workflow.error === message)) return;
+      } catch { /* A persistent storage outage also prevents reading the committed outcome. */ }
+      const safeId = clean(workflowId).replace(/[\r\n\t\0]/g, ' ').slice(0, 160);
+      console.error(`[corepilot-workflow] ${safeId}: 无法确认优化终态或保存诊断；请检查数据库并在重启后核对。`);
     }
   }
 }

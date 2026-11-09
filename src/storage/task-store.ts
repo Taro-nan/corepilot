@@ -42,6 +42,8 @@ export interface TaskStore extends OptimizationStore {
   createOptimizationIntake(task: OptimizationTask, workflow: OptimizationWorkflowRecord): { workflowId: string; created: boolean };
   /** Commit the worker outcome and its Task status together without changing experiments or approval. */
   finishOptimizationWorkflow(workflowId: string, taskId: string, patch: WorkflowExecutionOutcomePatch): void;
+  /** Save a diagnostic only if this task is still the active workflow. */
+  recordWorkflowPersistenceFailure(workflowId: string, taskId: string, message: string): boolean;
   saveRecoveredWorkflow(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   /** Create a reproduction and its workflow reference in one transaction, if the workflow has not changed. */
   createReproductionExperiment(experiment: Experiment, expectedWorkflowJson: string, workflowJson: string): void;

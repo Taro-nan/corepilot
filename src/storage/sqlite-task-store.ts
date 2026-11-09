@@ -326,6 +326,18 @@ export class SqliteTaskStore implements TaskStore {
     });
   }
 
+  recordWorkflowPersistenceFailure(workflowId: string, taskId: string, message: string): boolean {
+    return this.transaction(() => {
+      const json = this.getOptimizationWorkflowJson(workflowId);
+      const workflow = json ? JSON.parse(json) as OptimizationWorkflowRecord : null;
+      if (!workflow || workflow.workflow_id !== workflowId || workflow.optimization_task_id !== taskId ||
+          !['CREATED', 'GENERATING'].includes(workflow.status)) return false;
+      this.saveOptimizationWorkflowJson(workflowId, JSON.stringify({ ...workflow, error: message,
+        progress: { phase: 'PERSISTENCE_ERROR', last_event: message }, updated_at: new Date().toISOString() }));
+      return true;
+    });
+  }
+
   saveRecoveredWorkflow(workflowId: string, workflowJson: string, task: OptimizationTask | null): void {
     this.transaction(() => {
       if (task) {

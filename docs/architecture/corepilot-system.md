@@ -59,7 +59,7 @@ Control SQLite 在 [SqliteTaskStore](../../src/storage/sqlite-task-store.ts) 中
 
 启动恢复将中断的 Workflow 和状态仍为 `CREATED`/`RUNNING` 的 OptimizationTask 在同一 SQLite 事务中标记为 `INTERRUPTED`；旧版已写入中断工作流、但领域任务仍在运行的记录也会对账。领域任务已经处于终态或等待审批时保留原状态和候选、审批事实；任务缺失或归属不符时记录错误，不阻止其他记录恢复。会话尚未保存时提示创建新任务，不声称能够恢复。复现的 `PREPARING`/`RUNNING` 只改为 `UNKNOWN` 并保留原实验 ID，继续复现时查询原 Runner；启动本身不会提交、取消或修改远端实验。旧版没有会话且领域任务仍为 `CREATED` 的工作流无法区分尚未启动与启动前崩溃，保持原状态。其余运行期 Workflow、Task 和跨 Runner 的状态写入仍非统一原子状态机。
 
-源码和正式优化的执行结束状态由同一事务写入 Workflow 与 Task；`NO_CANDIDATE` 和 `PERFORMANCE_THRESHOLD_NOT_MET` 对应 Task `COMPLETED`，其余执行终态保持相同语义。事务检查任务、工作流和现有候选的归属，不修改实验、Evidence 或批准。写入结果失败时尝试原子记录 `INTERRUPTED` 和诊断；若持续无法写入则保留此前状态，允许重启恢复，不把持久化错误记成候选错误。此约束不自动修复旧版已留下的其他终态不一致，也不涵盖跨 Runner 或文件系统的原子性。
+源码和正式优化的执行结束状态由同一事务写入 Workflow 与 Task；`NO_CANDIDATE` 和 `PERFORMANCE_THRESHOLD_NOT_MET` 对应 Task `COMPLETED`，其余执行终态保持相同语义。事务检查任务、工作流和现有候选的归属，不修改实验、Evidence 或批准。写入结果失败时尝试原子记录 `INTERRUPTED` 和诊断；持续失败时在条件事务中记录诊断，并保留此前状态供重启恢复。若诊断也无法写入且无法确认终态已提交，则向后台日志输出有界的工作流 ID 和操作提示，不输出原始异常或凭据。持久化错误不记成候选错误。此约束不自动修复旧版已留下的其他终态不一致，也不涵盖跨 Runner 或文件系统的原子性。
 
 ### 优化与独立测试的已落地边界
 

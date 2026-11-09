@@ -173,6 +173,8 @@ test('atomic outcome mapping covers failure, cancellation, budget and candidate 
 test('a lost acknowledgement after commit does not replace the saved outcome with an interruption', async () => {
   const f = await startWebFixture();
   const finish = f.store.finishOptimizationWorkflow.bind(f.store);
+  const diagnose = f.store.recordWorkflowPersistenceFailure.bind(f.store);
+  const stderr = console.error; const logs: string[] = [];
   try {
     const runtime = new OptimizationRuntime(f.store);
     const id = 'workflow:lost-finish-ack';
@@ -183,12 +185,41 @@ test('a lost acknowledgement after commit does not replace the saved outcome wit
     record.optimization_task_id = task.task_id; record.status = 'GENERATING';
     f.store.saveOptimizationWorkflowJson(id, JSON.stringify(record));
     f.store.finishOptimizationWorkflow = (...args) => { finish(...args); throw new Error('fixture lost response after commit'); };
+    f.store.recordWorkflowPersistenceFailure = () => { throw new Error('fixture diagnostic unavailable'); };
+    console.error = (...args) => { logs.push(args.join(' ')); };
     finishWorkflowExecution(f.store, id, task.task_id, { status: 'CANDIDATE_READY', error: null,
       progress: { phase: 'CANDIDATE_READY', last_event: 'saved outcome' } }, text => text);
     assert.equal(f.service.get(id)?.status, 'CANDIDATE_READY');
     assert.equal(f.service.get(id)?.progress?.last_event, 'saved outcome');
     assert.equal(f.store.getOptimizationTask(task.task_id)?.status, 'CANDIDATE_READY');
-  } finally { f.store.finishOptimizationWorkflow = finish; await f.close(); }
+    assert.deepEqual(logs, []);
+  } finally { f.store.finishOptimizationWorkflow = finish; f.store.recordWorkflowPersistenceFailure = diagnose; console.error = stderr; await f.close(); }
+});
+
+test('when all persistence attempts fail, the workflow ID is logged without raw exception secrets', async () => {
+  const f = await startWebFixture();
+  const finish = f.store.finishOptimizationWorkflow.bind(f.store);
+  const diagnose = f.store.recordWorkflowPersistenceFailure.bind(f.store);
+  const stderr = console.error; const logs: string[] = [];
+  try {
+    const runtime = new OptimizationRuntime(f.store), id = 'workflow:persistence-down';
+    const task = runtime.createTask({ workflowId: id, target: { kind: 'kernel', name: 'fixture', scope: {} },
+      sourceBaseline: { id: 'fixture' }, performanceBaseline: null, evaluator: null, declaredContext: {} });
+    runtime.setTaskStatus(task.task_id, 'RUNNING');
+    const record = initialOptimizationWorkflowRecord(id, { functionName: 'fixture', entryFile: null, configPath: 'fixture', repositoryRoot: f.repo });
+    record.optimization_task_id = task.task_id; record.status = 'GENERATING';
+    f.store.saveOptimizationWorkflowJson(id, JSON.stringify(record));
+    f.store.finishOptimizationWorkflow = () => { throw new Error('password=fixture-raw-secret'); };
+    f.store.recordWorkflowPersistenceFailure = () => { throw new Error('Bearer fixture-raw-secret'); };
+    console.error = (...args) => { logs.push(args.join(' ')); };
+    finishWorkflowExecution(f.store, id, task.task_id, { status: 'FAILED' }, text => text);
+    assert.equal(logs.length, 1);
+    assert.match(logs[0], /workflow:persistence-down/);
+    assert.doesNotMatch(logs[0], /fixture-raw-secret|password|Bearer/);
+    assert.ok(logs[0].length < 512);
+    assert.equal(f.service.get(id)?.status, 'GENERATING');
+    assert.equal(f.store.getOptimizationTask(task.task_id)?.status, 'RUNNING');
+  } finally { f.store.finishOptimizationWorkflow = finish; f.store.recordWorkflowPersistenceFailure = diagnose; console.error = stderr; await f.close(); }
 });
 
 test('an interrupted outcome leaves approval, evidence, candidate and UNKNOWN remote experiment untouched', async () => {
