@@ -88,6 +88,13 @@ for (const caller of ['src/report/customer-summary.ts', 'src/application/workflo
   if (!graph.get(caller)?.includes(verificationModule)) problems.push(`${caller} must use shared candidate verification`);
 }
 
+// The experiment and approval paths must apply the same frozen evaluator
+// contract; two copies could silently authorize different workload policies.
+const compatibilityModule = 'src/evaluator/testpack-compatibility.ts';
+for (const caller of ['src/core/rpc-experiment-transition-adapter.ts', 'src/application/workflow-approval-service.ts']) {
+  if (!graph.get(caller)?.includes(compatibilityModule)) problems.push(`${caller} must use shared evaluator compatibility`);
+}
+
 // Independent tests must use the shared measurement/statistics path. HTTP only
 // adapts input/output; it must not acquire Runner or storage responsibilities.
 const testingResults = 'src/application/testing-results.ts';
