@@ -36,7 +36,7 @@ export async function prepareReviewFixture(f: Awaited<ReturnType<typeof startWeb
     })) }));
     else if (req.url?.endsWith('/measurements')) res.end(JSON.stringify({ measurements: state.measurements }));
     else if (req.url?.endsWith('/output')) res.end(JSON.stringify({ stdout: '', stderr: '', truncated: false }));
-    else res.end(JSON.stringify({ status: state.status, current_step: null, started_at: now,
+    else res.end(JSON.stringify({ experiment_id: trialId, status: state.status, current_step: null, started_at: now,
       ended_at: state.status === 'SUCCEEDED' ? now : null, failure: null, observed_context: { machine } }));
   });
   await new Promise<void>(resolve => runner.listen(0, '127.0.0.1', resolve));

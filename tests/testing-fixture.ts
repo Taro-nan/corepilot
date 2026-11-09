@@ -55,16 +55,17 @@ export function createTestingFixture(options: { testPlan?: boolean } = {}) {
   const projects = new Map<string, ProjectRecord>();
   const plans: ExperimentExecutionPlan[] = [];
   let remoteStatus: ExperimentStatusResponse['status'] = 'RUNNING', cancelRequested = false, getCalls = 0;
-  let measurements: Measurement[] = [], failSubmit: Error | null = null, stagingGate: Promise<void> | null = null;
+  let measurements: Measurement[] = [], failSubmit: Error | null = null, failCancel: Error | null = null, acceptedOnFailure = true;
+  let stagingGate: Promise<void> | null = null, submitGate: Promise<void> | null = null;
   const uploads: Array<{ sha256: string; workspacePath: string }> = [];
   const runner: TestingRunner = {
     async probe() { return { health: { status: 'READY', runner_id: 'fixture-runner', protocol_version: RUNNER_PROTOCOL_VERSION, resource_enforcement: 'REQUIRED',
       capabilities: { controlled_validation: 1, source_archive_upload: 1, resource_matrix: 1 } },
       machine: { hostname: 'mock-cpu', architecture: 'aarch64', cpu_count: 4, machine_identity_sha256: 'a'.repeat(64), cpu_topology: { online_cpus: '0-3', node_cpu_lists: { node0: '0-3' } } } }; },
-    async submitExperiment(plan) { plans.push(plan); if (failSubmit) throw failSubmit; return { experiment_id: plan.experiment.experiment_id, status: 'PENDING' }; },
+    async submitExperiment(plan) { if (!failSubmit || acceptedOnFailure) plans.push(plan); await submitGate; if (failSubmit) throw failSubmit; return { experiment_id: plan.experiment.experiment_id, status: 'PENDING' }; },
     async getExperiment(id) { getCalls++; const experiment = plans.find(plan => plan.experiment.experiment_id === id)!.experiment;
       return { ...experiment, status: remoteStatus, current_step: remoteStatus === 'RUNNING' ? 'PERFORMANCE' : null, cancel_requested: cancelRequested, failure: null }; },
-    async cancelExperiment(id) { cancelRequested = true; return { experiment_id: id, status: remoteStatus, cancel_requested: true }; },
+    async cancelExperiment(id) { cancelRequested = true; if (failCancel) throw failCancel; return { experiment_id: id, status: remoteStatus, cancel_requested: true }; },
     async getCommandExecutions(id) { return { experiment_id: id, command_executions: [] }; },
     async getMeasurements(id) { return { experiment_id: id, measurements }; },
     async getExecutionOutput() { return { stdout: 'fixture output', stderr: '', stdout_path: '/runner/logs/stdout.log', stderr_path: '/runner/logs/stderr.log', truncated: false }; },
@@ -112,7 +113,8 @@ export function createTestingFixture(options: { testPlan?: boolean } = {}) {
   return { root, evaluatorRoot, packageRoot, service, options: serviceOptions, machine, projects, plans, uploads, binary, source, measurement, complete,
     setStatus(status: ExperimentStatusResponse['status']) { remoteStatus = status; },
     setMeasurements(value: Measurement[]) { measurements = value; },
-    failSubmit(error: Error) { failSubmit = error; }, setStagingGate(gate: Promise<void> | null) { stagingGate = gate; },
+    failSubmit(error: Error, accepted = true) { failSubmit = error; acceptedOnFailure = accepted; },
+    failCancel(error: Error | null) { failCancel = error; }, setSubmitGate(gate: Promise<void> | null) { submitGate = gate; }, setStagingGate(gate: Promise<void> | null) { stagingGate = gate; },
     get getCalls() { return getCalls; }, close() { fs.rmSync(root, { recursive: true, force: true }); } };
 }
 export async function waitTestingPreparation(service: TestingService, id: string) {

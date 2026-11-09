@@ -178,7 +178,7 @@ for (const matrix of [false, true]) test(`comparison pins ${matrix ? 'matrix' : 
         role: item!.role, subject_id: item!.subject_id, sample_index: item!.iteration_index,
         value: item!.phase === 'CORRECTNESS_CASE' ? 'PASS' : item!.role === 'BASELINE' ? 2 : 1,
         unit: item!.phase === 'CORRECTNESS_CASE' ? null : 'seconds', validity: 'VALID' })) }));
-    } else res.end(JSON.stringify({ status: runnerStatus, current_step: runnerStatus === 'RUNNING' ? 'CORRECTNESS' : null, failure: null }));
+    } else res.end(JSON.stringify({ experiment_id: submitted?.experiment.experiment_id, status: runnerStatus, current_step: runnerStatus === 'RUNNING' ? 'CORRECTNESS' : null, failure: null }));
   });
   await new Promise<void>(resolve => runner.listen(0, '127.0.0.1', resolve));
   try {

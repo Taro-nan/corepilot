@@ -334,6 +334,18 @@ test('branch baseline builds through Runner RPC, shows server directories and lo
     const record = f.projects.validationTrials.list(project)[0];
     expect(record.source_commit).toBe(f.git('rev-parse', 'HEAD'));
     expect(fs.existsSync(record.remote_workspace!.source_root)).toBe(true);
+    let lookupUnknown = true;
+    const trialUrl = `**/v1/projects/${project.project_id}/validation-trials/*`;
+    await page.route(trialUrl, async route => {
+      if (!lookupUnknown) { await route.fallback(); return; }
+      await route.fulfill({ json: { trial: record, status: { status: 'UNKNOWN', failure: { message: '请核对原构建' } }, commands: [], output: null } });
+    });
+    await expect(trial).toContainText('状态待核对');
+    lookupUnknown = false;
+    await trial.getByRole('button', { name: '核对原构建状态' }).click();
+    await expect(trial).toContainText('正在构建');
+    expect(f.projects.validationTrials.list(project)).toHaveLength(1);
+    await page.unroute(trialUrl);
     fs.writeFileSync(release, 'finish');
     await expect(trial).toContainText('构建完成');
     await expect(page.getByLabel('本次构建产物', { exact: true })).toHaveValue('build/libfixture.so');
@@ -882,9 +894,9 @@ test('comparison trial responds immediately, shows live stages and counts, and r
     const done = phase === 'succeeded';
     await route.fulfill({ json: { trial: { ...record, preparation: { state: phase === 'preparing' ? 'PREPARING' : 'READY',
       phase: phase === 'preparing' ? 'STAGING_BASELINE' : 'SUBMITTED', message: '正在上传并核验已固定的比较基线' } },
-      status: { status: phase === 'preparing' ? 'PREPARING' : done ? 'SUCCEEDED' : 'RUNNING',
+      status: { status: phase === 'preparing' ? 'PREPARING' : phase === 'unknown' ? 'UNKNOWN' : done ? 'SUCCEEDED' : 'RUNNING',
         current_step: phase === 'correctness' ? 'CORRECTNESS' : phase === 'performance' ? 'PERFORMANCE' : null,
-        ended_at: done ? new Date().toISOString() : null, failure: null }, commands: [],
+        ended_at: done ? new Date().toISOString() : null, failure: phase === 'unknown' ? { message: '请核对原试跑' } : null }, commands: [],
       summary: { correctness: { planned: 2, passed: phase === 'preparing' ? 0 : phase === 'correctness' ? 1 : 2, failed: 0, missing: [] },
         performance: { planned: 4, measured: done ? 4 : phase === 'performance' ? 1 : 0, missing: [] }, comparisons: [] },
       output: { stdout: 'Runner build completed\n', stderr: '', truncated: false }, passed: done } });
@@ -902,7 +914,10 @@ test('comparison trial responds immediately, shows live stages and counts, and r
     await expect(panel).toContainText('正在上传并核验已固定的比较基线');
     await expect(panel).toContainText('已用时');
     await expect(comparison).toBeDisabled();
+    phase = 'unknown';
+    await expect(panel).toContainText('执行状态待核对');
     phase = 'correctness';
+    await panel.getByRole('button', { name: '核对原试跑状态' }).click();
     await expect(panel).toContainText('正在执行正确性测试');
     await expect(panel).toContainText('正确性：1/2 通过');
     await expect(panel).not.toContainText('试运行通过');

@@ -6,6 +6,7 @@ import type { ProjectRecord } from '../contracts/project.js';
 import type { TargetConfig } from '../config/target-config.js';
 import type { RemoteValidationTransport } from '../workspace/validation-runner.js';
 import { ApiError } from '../core/api-error.js';
+import { isRunnerSubmissionRejected } from '../core/experiment-execution-backend.js';
 import { RunnerClient, RunnerClientError } from '../client/runner-client.js';
 import { resolveRunnerConfig } from '../config/optimization-config.js';
 import { AsyncSshTransport } from '../testpack/remote-transport.js';
@@ -105,7 +106,11 @@ export class TestingService {
       .catch(error => {
         this.store.updateTask(taskId, record => {
           const cancelled = (controller.signal.aborted || record.execution.cancel_requested) && !record.execution.submission_attempted;
-          const unknown = record.execution.submission_attempted && (!(error instanceof RunnerClientError) || error.status === null || error.status === 409);
+          // Only a documented rejection of the submit request proves that the
+          // Runner did not store it. A later cancellation error, or a proxy's
+          // HTTP response, cannot prove that an accepted job has stopped.
+          const rejected = record.execution.phase === 'SUBMITTING' && isRunnerSubmissionRejected(error);
+          const unknown = record.execution.submission_attempted && !rejected;
           record.execution.status = cancelled ? 'CANCELLED' : unknown ? 'UNKNOWN' : 'FAILED';
           record.execution.message = cancelled ? '准备已取消，未提交 Runner 实验。' : unknown ? 'Runner 提交结果未知，请查询原任务；系统不会自动重复提交。' : '测试准备失败，请查看原因并修改条件后创建新的测试。';
           record.execution.failure = cancelled ? null : { code: unknown ? 'TESTING_SUBMISSION_UNKNOWN' : 'TESTING_PREPARATION_FAILED', stage: record.execution.phase, message: this.diagnostic(error, machine) };

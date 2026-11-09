@@ -6,9 +6,11 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { TestingService } from '../src/application/testing-service.js';
 import { RunnerClientError } from '../src/client/runner-client.js';
+import { ApiClient } from '../src/client/api-client.js';
 import { ApiError } from '../src/core/api-error.js';
 import { summarizeTestingTask } from '../src/application/testing-results.js';
 import { createTestingFixture, testingPlanRef, waitTestingPreparation } from './testing-fixture.js';
+import { startWebFixture } from './web-fixture.js';
 
 test('file-file testing uses existing Runner without a project, fixed oracle or formal approval mutation', async () => {
   const f = createTestingFixture();
@@ -89,6 +91,105 @@ test('request id is persistent and submission timeout reconciles one experiment 
     f.complete(task); const reconciled = await restarted.get(task.task_id);
     assert.equal(reconciled.task.execution.status, 'SUCCEEDED'); assert.equal(f.plans.length, 1);
   } finally { f.close(); }
+});
+
+test('a proxy error or duplicate response after submit remains unknown and reconciles the accepted task', async () => {
+  for (const error of [new RunnerClientError(503, 'HTTP_ERROR', 'proxy failed after forwarding'),
+    new RunnerClientError(409, 'EXPERIMENT_ALREADY_EXISTS', 'duplicate id')]) {
+    const f = createTestingFixture();
+    try {
+      f.failSubmit(error);
+      const input = { machine_id: f.machine.identity.machine_id, plan: testingPlanRef, mode: 'correctness' as const, candidate: await f.binary('candidate') };
+      const task = await f.service.start(input, { requestId: 'accepted-before-error' });
+      const unknown = await waitTestingPreparation(f.service, task.task_id);
+      assert.equal(unknown.execution.status, 'UNKNOWN');
+      assert.equal(unknown.execution.failure?.code, 'TESTING_SUBMISSION_UNKNOWN');
+      const restarted = new TestingService(f.options);
+      assert.equal((await restarted.start(input, { requestId: 'accepted-before-error' })).task_id, task.task_id);
+      const reconciled = await restarted.get(task.task_id);
+      assert.equal(reconciled.task.execution.status, 'RUNNING');
+      assert.equal(f.plans.length, 1);
+      assert.ok(f.getCalls > 0);
+    } finally { f.close(); }
+  }
+});
+
+test('the testing HTTP API returns and reconciles the same task after an accepted submission gets a proxy error', async () => {
+  const f = createTestingFixture();
+  const web = await startWebFixture({ testingService: f.service });
+  try {
+    f.failSubmit(new RunnerClientError(503, 'HTTP_ERROR', 'fixture proxy error'));
+    const api = new ApiClient(web.url, { token: web.token });
+    const input = { machine_id: f.machine.identity.machine_id, plan: testingPlanRef,
+      mode: 'correctness' as const, candidate: await f.binary('candidate') };
+    const { task } = await api.testing.start(input, 'http-once');
+    assert.equal((await waitTestingPreparation(f.service, task.task_id)).execution.status, 'UNKNOWN');
+    assert.equal((await api.testing.start(input, 'http-once')).task.task_id, task.task_id);
+    const result = await api.testing.get(task.task_id);
+    assert.equal(result.task.execution.status, 'RUNNING');
+    assert.equal(f.plans.length, 1);
+  } finally { await web.close(); f.close(); }
+});
+
+test('a documented pre-submission rejection remains a failed preparation', async () => {
+  const f = createTestingFixture();
+  try {
+    f.failSubmit(new RunnerClientError(400, 'INVALID_EXPERIMENT_PLAN', 'invalid execution plan'), false);
+    const task = await f.service.start({ machine_id: f.machine.identity.machine_id, plan: testingPlanRef,
+      mode: 'correctness', candidate: await f.binary('candidate') });
+    const failed = await waitTestingPreparation(f.service, task.task_id);
+    assert.equal(failed.execution.status, 'FAILED');
+    assert.equal(failed.execution.failure?.code, 'TESTING_PREPARATION_FAILED');
+    assert.equal(f.plans.length, 0);
+    assert.equal((await f.service.get(task.task_id)).task.execution.status, 'FAILED');
+    assert.equal(f.getCalls, 0);
+  } finally { f.close(); }
+});
+
+test('a missing cancellation receipt and a 404 during reconciliation do not confirm stop', async () => {
+  const f = createTestingFixture();
+  try {
+    const task = await f.service.start({ machine_id: f.machine.identity.machine_id, plan: testingPlanRef,
+      mode: 'correctness', candidate: await f.binary('candidate') });
+    await waitTestingPreparation(f.service, task.task_id);
+    const originalFactory = f.options.runnerFactory!;
+    const runner = originalFactory(f.machine);
+    f.options.runnerFactory = () => ({ ...runner,
+      async cancelExperiment() { throw new RunnerClientError(404, 'EXPERIMENT_NOT_FOUND', 'missing cancellation receipt'); },
+      async getExperiment() { throw new RunnerClientError(404, 'EXPERIMENT_NOT_FOUND', 'not visible on this Runner'); },
+    });
+    const unknown = await f.service.cancel(task.task_id);
+    assert.equal(unknown.task.execution.status, 'UNKNOWN');
+    assert.equal(unknown.task.execution.cancel_requested, true);
+    assert.equal(f.plans.length, 1);
+    f.options.runnerFactory = originalFactory;
+    assert.equal((await f.service.get(task.task_id)).task.execution.status, 'RUNNING');
+    assert.equal(f.plans.length, 1);
+  } finally { f.close(); }
+});
+
+test('a rejected cancel response after the submission receipt does not turn an accepted job into a failed preparation', async () => {
+  const f = createTestingFixture(); let release!: () => void;
+  try {
+    f.setSubmitGate(new Promise<void>(resolve => { release = resolve; }));
+    f.failCancel(new RunnerClientError(400, 'INVALID_JSON', 'invalid cancel request'));
+    const task = await f.service.start({ machine_id: f.machine.identity.machine_id, plan: testingPlanRef,
+      mode: 'correctness', candidate: await f.binary('candidate') });
+    for (let i = 0; i < 100 && f.plans.length === 0; i++) await delay(10);
+    assert.equal(f.plans.length, 1);
+    await f.service.cancel(task.task_id);
+    release();
+    let result = f.service.list().find(row => row.task_id === task.task_id)!;
+    for (let i = 0; i < 100 && result.execution.phase !== 'SUBMITTED'; i++) {
+      await delay(10); result = f.service.list().find(row => row.task_id === task.task_id)!;
+    }
+    assert.equal(result.execution.phase, 'SUBMITTED');
+    assert.equal(result.execution.status, 'UNKNOWN');
+    assert.equal(result.execution.cancel_requested, true);
+    f.failCancel(null);
+    assert.equal((await f.service.get(task.task_id)).task.execution.status, 'RUNNING');
+    assert.equal(f.plans.length, 1);
+  } finally { release?.(); f.close(); }
 });
 
 test('cancellation during preparation never submits and running cancellation waits for the Runner receipt', async () => {

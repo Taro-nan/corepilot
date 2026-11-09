@@ -25,6 +25,7 @@ export function BaselinePicker({ projectId, packageId, version, targetId, baseli
   const [branch, setBranch] = useState('');
   const [trialId, setTrialId] = useState('');
   const [trial, setTrial] = useState<TrialStatus | null>(null);
+  const [trialRefresh, setTrialRefresh] = useState(0);
   const [history, setHistory] = useState<BuildRecord[]>([]);
   const [artifact, setArtifact] = useState('');
   const [buildSettings, setBuildSettings] = useState<ValidationPreparationContext | null>(null);
@@ -82,7 +83,7 @@ export function BaselinePicker({ projectId, packageId, version, targetId, baseli
     }
     void poll();
     return () => { active = false; if (timeout) clearTimeout(timeout); };
-  }, [projectId, trialId]);
+  }, [projectId, trialId, trialRefresh]);
   useEffect(() => {
     const artifacts = trial?.output?.artifacts ?? [];
     if (!artifact || !artifacts.some(item => item.relative_path === artifact)) setArtifact(artifacts.length === 1 ? artifacts[0].relative_path : '');
@@ -155,6 +156,7 @@ export function BaselinePicker({ projectId, packageId, version, targetId, baseli
         {trial.trial.build && <><dt>构建工作目录</dt><dd><code>{trial.trial.build.cwd}</code></dd><dt>实际构建命令</dt><dd><pre>{displayBuildCommand(trial.trial.build)}</pre></dd></>}
       </dl></div>}
       {trial?.status.failure && <Feedback text={trial.status.failure.message} bad />}
+      {trial?.status.status === 'UNKNOWN' && <><p className="hint">原构建可能仍在占用机器，请先核对原作业，再决定是否发起新的构建。</p><button type="button" onClick={() => { setTrial(null); setTrialRefresh(value => value + 1); }}>核对原构建状态</button></>}
       {trial?.output && <details open={trial.status.status === 'RUNNING' || trial.status.status === 'FAILED'}><summary>实时构建日志{trial.output.truncated ? '（最近部分，完整日志保存在服务器）' : ''}</summary><pre>{trial.output.stdout}{trial.output.stderr ? `\n[stderr]\n${trial.output.stderr}` : ''}</pre></details>}
       {trial?.commands.map((item, index) => <details key={index} open={item.exit_code !== 0}><summary>{item.step} · 退出码 {item.exit_code ?? '未知'}</summary><pre>{item.stdout}{item.stderr ? `\n[stderr]\n${item.stderr}` : ''}</pre></details>)}
       {!!trial?.output?.artifacts?.length && <Field label="本次构建产物"><select aria-label="本次构建产物" value={artifact} onChange={event => setArtifact(event.target.value)}><option value="" hidden disabled>选择比较用的库文件</option>{trial.output.artifacts.map(item => <option key={item.relative_path} value={item.relative_path}>{item.relative_path} · {(item.bytes / 1024 ** 2).toFixed(2)} MB · {item.sha256.slice(0, 12)}</option>)}</select></Field>}

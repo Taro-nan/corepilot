@@ -9,6 +9,7 @@ import type { ValidationTestPlan } from '../contracts/validation-assets.js';
 import { loadOptimizationConfig, resolveRunnerConfig } from '../config/optimization-config.js';
 import { commandBuild, isolatedWorkspaceBuild, isolatedCmakeArtifact } from '../config/build-command.js';
 import { ApiError } from '../core/api-error.js';
+import { isRunnerSubmissionRejected } from '../core/experiment-execution-backend.js';
 import { isRegisteredRunner } from '../config/runner-config.js';
 import { LibraryPackageLoader } from '../library-package/loader.js';
 import { RunnerClient, RunnerClientError } from '../client/runner-client.js';
@@ -246,11 +247,13 @@ export class ValidationTrialService {
           steps, output_directory: layout.logs_root, build_directory: layout.build_root };
         record.preparation = { state: 'PREPARING', phase: 'SUBMITTING', message: '正在向 Runner 提交构建与测试计划' }; saveRecord();
         submitting = true;
-        await client.submitExperiment(plan);
+        const submitted = await client.submitExperiment(plan);
+        if (submitted.experiment_id !== trialId) throw new Error('Runner 提交回执与本次试跑身份不一致');
         record.preparation = { state: 'READY', phase: 'SUBMITTED', message: null };
       } catch (error) {
-        const unknown = submitting && !(error instanceof RunnerClientError && error.status !== null);
+        const unknown = submitting && !isRunnerSubmissionRejected(error);
         record.preparation = { state: unknown ? 'UNKNOWN' : 'FAILED',
+          ...(submitting ? { phase: 'SUBMITTING' } : {}),
           message: `${unknown ? 'Runner 提交结果未知，请查询原试跑 ID。' : '试跑准备或提交失败：'}${(error as Error).message}` };
       } finally {
         saveRecord();
@@ -291,20 +294,38 @@ export class ValidationTrialService {
     const record = JSON.parse(fs.readFileSync(filename, 'utf8')) as TrialRecord;
     if (record.project_id !== project.project_id || record.trial_id !== trialId) throw new Error('validation trial identity mismatch');
     const preparation = record.preparation;
-    if (preparation && preparation.state !== 'READY' && preparation.state !== 'UNKNOWN') {
+    const interruptedSubmission = preparation?.state === 'PREPARING' && preparation.phase === 'SUBMITTING' && !this.preparing.has(trialId);
+    if (preparation && preparation.state !== 'READY' && preparation.state !== 'UNKNOWN' && !interruptedSubmission) {
       const status = preparation.state === 'PREPARING' && !this.preparing.has(trialId) ? 'UNKNOWN' : preparation.state;
       return { trial: record, status: { status, failure: status === 'PREPARING' ? null : {
         message: status === 'UNKNOWN' ? 'Control 服务在准备期间中断，请核对原试跑 ID；系统不会自动重复提交。' : preparation.message } },
         commands: [], measurements: [], summary: trialSummary(record, []), passed: false, formal_evidence: false };
     }
-    const connection = this.connection(project, record.machine_id);
-    const client = new RunnerClient({ baseUrl: connection.runner.endpoint, token: connection.runner.token,
-      requestTimeoutMs: connection.runner.requestTimeoutMs });
-    const status = await client.getExperiment(trialId);
-    const [commandResult, measurementResult, output] = await Promise.all([
-      client.getCommandExecutions(trialId), client.getMeasurements(trialId),
-      record.remote_workspace ? client.getExecutionOutput(trialId).catch(() => null) : Promise.resolve(null),
-    ]);
+    let status: Awaited<ReturnType<RunnerClient['getExperiment']>>;
+    let commandResult: Awaited<ReturnType<RunnerClient['getCommandExecutions']>>;
+    let measurementResult: Awaited<ReturnType<RunnerClient['getMeasurements']>>;
+    let output: Awaited<ReturnType<RunnerClient['getExecutionOutput']>>;
+    try {
+      const connection = this.connection(project, record.machine_id);
+      const client = new RunnerClient({ baseUrl: connection.runner.endpoint, token: connection.runner.token,
+        requestTimeoutMs: connection.runner.requestTimeoutMs });
+      status = await client.getExperiment(trialId);
+      if (status.experiment_id !== trialId) throw new ApiError(409, 'TRIAL_RUNNER_IDENTITY_MISMATCH', 'Runner 返回了其他实验的状态');
+      [commandResult, measurementResult, output] = await Promise.all([
+        client.getCommandExecutions(trialId), client.getMeasurements(trialId),
+        record.remote_workspace ? client.getExecutionOutput(trialId).catch(() => null) : Promise.resolve(null),
+      ]);
+    } catch (error) {
+      const rawCode = error instanceof RunnerClientError || error instanceof ApiError ? error.code : '';
+      const code = /^[A-Z0-9_]{1,100}$/.test(rawCode) ? rawCode : 'TRIAL_RECONCILIATION_FAILED';
+      const reason = error instanceof RunnerClientError && error.status === 404
+        ? 'Runner 未找到原试跑，不能据此认定未执行；请核对原机器、Runner 和作业 ID。'
+        : code === 'TRIAL_RUNNER_IDENTITY_MISMATCH' ? 'Runner 返回的作业身份不匹配，请核对原机器和 Runner。'
+          : '无法确认 Runner 中原试跑的状态，请检查原机器和作业后继续查询。';
+      return { trial: record, status: { status: 'UNKNOWN', failure: {
+        code, message: `${reason}系统不会自动重复提交。` } },
+        commands: [], measurements: [], summary: trialSummary(record, []), passed: false, formal_evidence: false };
+    }
     const commands = commandResult.command_executions;
     const measurements = measurementResult.measurements;
     const summary = trialSummary(record, measurements);
