@@ -8,15 +8,20 @@ import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
 import { evaluatorContentSha256 } from '../src/evaluator/formal-evaluator.js';
 import { freezeValidationTestpack } from '../src/testpack/validation-freeze.js';
 import { createFormalEvaluatorFixture } from './formal-evaluator-fixture.js';
-import type { CommandRunResult, PerformanceGateResult, ValidationCycleResult } from '../src/workspace/validation-runner.js';
+import { evaluatePerformanceGate, type CommandRunResult, type ValidationCycleResult } from '../src/workspace/validation-runner.js';
+import { DEFAULT_STATISTICS } from '../src/contracts/performance-statistics.js';
 
 /** Simulated evaluator and measurements for public API/browser tests, never hardware evidence. */
-export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>, workflowId: string, options: { omitRevalidationSamples?: boolean; omitRevalidationCandidateSample?: number; extraUnobservedWorkload?: boolean } = {}) {
+export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>, workflowId: string, options: {
+  omitRevalidationSamples?: boolean; omitRevalidationCandidateSample?: number; extraUnobservedWorkload?: boolean;
+  statisticalGate?: boolean; distinctRevalidation?: boolean; revalidationCandidateSamples?: number[];
+} = {}) {
   const workflow = f.service.get(workflowId)!;
   const task = f.store.getOptimizationTask(workflow.optimization_task_id!)!;
   const candidate = f.store.getCandidate(workflow.candidate_id!)!;
   const root = path.join(f.root, `evaluator-${randomUUID()}`);
-  createFormalEvaluatorFixture(root);
+  const sampleCount = options.statisticalGate ? 9 : 3;
+  createFormalEvaluatorFixture(root, { sampleCount });
   const manifestPath = path.join(root, 'manifest.json'), qualificationPath = path.join(root, 'qualification.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   manifest.domain.api = workflow.function_name;
@@ -36,6 +41,13 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
   fs.writeFileSync(qualificationPath, JSON.stringify(qualification));
   const testpack = JSON.parse(fs.readFileSync(path.join(f.root, 'testpack.json'), 'utf8')) as ValidationTestpack;
   testpack.evaluator = { id: manifest.evaluator_id, version: manifest.version, owner: manifest.owner, root, sha256: digest };
+  testpack.correctness.cases[0].case_id = 'case-1';
+  testpack.correctness.cases[0].parameters = { n: 1 };
+  testpack.performance.cases[0].case_id = 'workload-1';
+  testpack.performance.cases[0].parameters = { m: 2, n: 3 };
+  testpack.performance.key_cases = ['workload-1'];
+  testpack.performance.sampling.samples = sampleCount;
+  if (options.statisticalGate) testpack.performance.statistics = DEFAULT_STATISTICS;
   const snapshotDir = path.join(f.root, `frozen-${randomUUID()}`);
   const frozen = freezeValidationTestpack(testpack, snapshotDir);
   f.store.saveOptimizationTask({ ...task, source_baseline: { ...task.source_baseline, digest: workflow.baseline_commit },
@@ -48,15 +60,21 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
     correctness_cases: [{ case_id: 'case-1', parameters: { n: 1 }, status: 'PASSED', error: null, command }],
     correctness_coverage: { planned: 1, executed: 1, passed: 1, failed: 0, complete: true }, formal_correctness_complete: true,
     performance: command, passed: true };
-  const performance: PerformanceGateResult = { passed: true, weighted_geomean: 2, overall_ci_lower: 1.5, key_case_ci_lower: 1.5,
-    case_ratios: { 'workload-1': 2 }, workloads: [{ case_id: 'workload-1', baseline_samples: [10, 11, 9], candidate_samples: [5, 5.5, 4.5],
-      baseline_median: 10, candidate_median: 5, speedup: 2, critical: true, regression: false }], reason: 'simulated acceptance' };
+  const baseline = Array.from({ length: sampleCount }, (_, i) => [10, 11, 9][i % 3]);
+  const candidateSamples = baseline.map(value => value / 2);
+  const performance = evaluatePerformanceGate(testpack, [{ case_id: 'workload-1', baseline_samples: baseline, candidate_samples: candidateSamples,
+    ...(options.statisticalGate ? {} : { ci_lower: 1.5 }) }]);
+  assert.equal(performance.passed, true);
+  const repeatedCandidate = options.distinctRevalidation ? baseline.map(value => value / 2.2) : candidateSamples;
+  const repeatedPerformance = evaluatePerformanceGate(testpack, [{ case_id: 'workload-1', baseline_samples: baseline, candidate_samples: repeatedCandidate,
+    ...(options.statisticalGate ? { sample_indices: { baseline: baseline.map((_, index) => index), candidate: baseline.map((_, index) => index) } } : { ci_lower: 1.5 }) }]);
+  assert.equal(repeatedPerformance.passed, true);
   const observed = { machine: { machine_identity_sha256: 'a'.repeat(64), fixture: true }, resource_policy: { validity: 'VALID', fixture: true } };
   const first = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'FORMAL_EVALUATION' });
   runtime.completeValidationExperiment({ experimentId: first.experiment_id, validation, performance, observedContext: observed });
   const repeated = runtime.startExperiment({ taskId: task.task_id, candidateId: candidate.candidate_id, type: 'REVALIDATION' });
-  runtime.completeRevalidationExperiment({ experimentId: repeated.experiment_id, revalidation: { formal: validation, independent: null, performance_gate: performance, passed: true }, observedContext: observed });
-  if (!options.omitRevalidationSamples) for (const [role, samples] of [['BASELINE', [10, 11, 9]], ['CANDIDATE', [5, 5.5, 4.5]]] as const) for (const [index, value] of samples.entries()) {
+  runtime.completeRevalidationExperiment({ experimentId: repeated.experiment_id, revalidation: { formal: validation, independent: null, performance_gate: repeatedPerformance, passed: true }, observedContext: observed });
+  if (!options.omitRevalidationSamples) for (const [role, samples] of [['BASELINE', baseline], ['CANDIDATE', options.revalidationCandidateSamples ?? repeatedCandidate]] as const) for (const [index, value] of samples.entries()) {
     if (role === 'CANDIDATE' && index === options.omitRevalidationCandidateSample) continue;
     f.store.appendMeasurement({ schema_version: 1, measurement_id: `measurement:${randomUUID()}`, experiment_id: repeated.experiment_id,
       evaluator: { id: manifest.evaluator_id, version: manifest.version, digest }, kind: 'PERFORMANCE_SAMPLE', role,

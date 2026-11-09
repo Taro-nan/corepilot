@@ -6,20 +6,23 @@ import type { CandidateVerificationSummary } from '../contracts/candidate-verifi
 import type { WorkflowEvidenceSnapshot } from '../contracts/optimization-approval.js';
 import type { Candidate, OptimizationTask, Experiment, Measurement } from '../contracts/optimization-domain.js';
 import type { LoadedFormalEvaluatorBundle } from '../contracts/formal-evaluator.js';
-import type { FrozenValidationTestpack } from '../contracts/validation-testpack.js';
+import type { FrozenValidationTestpack, ValidationTestpack } from '../contracts/validation-testpack.js';
 import type { TaskStore } from '../storage/task-store.js';
 import type { OptimizationWorkflowStore } from '../workflow/optimization-workflow.js';
 import { assessCandidateVerification } from '../core/candidate-verification.js';
 import { OptimizationRuntime } from '../core/optimization-runtime.js';
 import { listFormalEvaluatorFiles, loadFormalEvaluatorBundle } from '../evaluator/formal-evaluator.js';
+import { formalCaseParameters, formalWorkloadParameters } from '../evaluator/formal-arguments.js';
 import { readFrozenValidationTestpack } from '../testpack/validation-freeze.js';
+import { parametersAreSubset, validationCaseParameters } from '../testpack/validation-parameters.js';
 import { freezeEvidenceFiles } from '../workspace/freeze-evidence.js';
 import { verifyFrozenEvidenceArtifact } from '../workspace/frozen-evidence.js';
+import { assertPerformanceEvidenceConsistent } from './workflow-evidence-performance.js';
 
 const jsonBytes = (value: unknown) => Buffer.from(JSON.stringify(value, null, 2) + '\n');
 
 /** Check persisted facts again: a completed Runner result may have been only partly synchronized. */
-function assertRawEvidenceComplete(experiment: Experiment, rows: readonly Measurement[], bundle: LoadedFormalEvaluatorBundle): void {
+function assertRawEvidenceComplete(experiment: Experiment, rows: readonly Measurement[], bundle: LoadedFormalEvaluatorBundle, testpack: ValidationTestpack): void {
   const fail = (detail: string): never => {
     throw new Error(`正式实验或复验缺少完整的原始正确性记录、基线或候选性能样本：${detail}。请核对实验记录并重新同步。`);
   };
@@ -28,6 +31,12 @@ function assertRawEvidenceComplete(experiment: Experiment, rows: readonly Measur
     && row.evaluator.digest === experiment.evaluator.digest;
   const coverage = experiment.evaluation?.correctness_coverage;
   const correctness = rows.filter(row => row.kind === 'CORRECTNESS_CASE');
+  if (JSON.stringify(testpack.correctness.cases.map(item => item.case_id)) !== JSON.stringify(bundle.manifest.correctness.case_ids)) {
+    fail(`${experiment.type} 的冻结测试方案与评价器正确性用例不一致`);
+  }
+  if (testpack.correctness.cases.some((item, index) => !parametersAreSubset(validationCaseParameters(item), formalCaseParameters(bundle.correctness.cases[index])))) {
+    fail(`${experiment.type} 的冻结测试方案与评价器正确性参数不一致`);
+  }
   if (!coverage || correctness.length !== coverage.planned || correctness.some(row => row.role !== 'EVALUATOR'
     || row.sample_index !== null || row.validity !== 'VALID' || (row.value !== true && row.value !== 'PASS') || !sameEvaluator(row))) {
     fail(`${experiment.type} 的正确性记录数量、状态或评价器身份不一致`);
@@ -42,6 +51,13 @@ function assertRawEvidenceComplete(experiment: Experiment, rows: readonly Measur
 
   const samples = rows.filter(row => row.kind === 'PERFORMANCE_SAMPLE');
   const expectedCount = bundle.manifest.performance.sampling.sample_count;
+  if (testpack.performance.sampling.samples !== expectedCount ||
+      JSON.stringify(testpack.performance.cases.map(item => item.case_id)) !== JSON.stringify(bundle.manifest.performance.workload_ids)) {
+    fail(`${experiment.type} 的冻结测试方案与评价器负载或采样数量不一致`);
+  }
+  if (testpack.performance.cases.some((item, index) => !parametersAreSubset(validationCaseParameters(item), formalWorkloadParameters(bundle.workloads.workloads[index])))) {
+    fail(`${experiment.type} 的冻结测试方案与评价器负载参数不一致`);
+  }
   const samplingComplete = prefixes.some(prefix => bundle.manifest.performance.workload_ids.every(id =>
     (['BASELINE', 'CANDIDATE'] as const).every(role => {
       const selected = samples.filter(row => row.subject_id === prefix + id && row.role === role)
@@ -132,8 +148,10 @@ export class WorkflowApprovalService {
     const inspected = this.runtime.inspectCandidateApproval(input);
     const firstMeasurements = this.store.listMeasurements(inspected.first.experiment_id);
     const repeatedMeasurements = this.store.listMeasurements(inspected.repeated.experiment_id);
-    for (const [experiment, rows] of [[inspected.first, firstMeasurements], [inspected.repeated, repeatedMeasurements]] as const)
-      assertRawEvidenceComplete(experiment, rows, inspected.evaluatorBundle);
+    for (const [experiment, rows] of [[inspected.first, firstMeasurements], [inspected.repeated, repeatedMeasurements]] as const) {
+      assertRawEvidenceComplete(experiment, rows, inspected.evaluatorBundle, frozen.testpack);
+      assertPerformanceEvidenceConsistent(experiment, rows, frozen.testpack);
+    }
     const previous = workflow.review_evidence;
     if (previous && previous.candidate_id === candidate.candidate_id && previous.candidate_commit === candidate.source.commit
       && previous.first_formal_experiment_id === inspected.first.experiment_id && previous.revalidation_experiment_id === inspected.repeated.experiment_id) {
@@ -189,11 +207,18 @@ export class WorkflowApprovalService {
       || snapshot.candidate_commit !== facts.candidate.source.commit || snapshot.first_formal_experiment_id !== facts.verification.formal_experiment_id
       || snapshot.revalidation_experiment_id !== facts.verification.revalidation_experiment_id) throw new Error('冻结证据已变化，请重新准备并审阅。');
     const existingApproval = this.store.getCandidateApproval(facts.candidate.candidate_id);
+    const first = this.runtime.getExperiment(snapshot.first_formal_experiment_id);
+    const repeated = this.runtime.getExperiment(snapshot.revalidation_experiment_id);
     this.assertSnapshotMatches(snapshot, { task: facts.task, candidate: existingApproval?.candidate_before ?? facts.candidate,
-      first: this.runtime.getExperiment(snapshot.first_formal_experiment_id), repeated: this.runtime.getExperiment(snapshot.revalidation_experiment_id), frozen: facts.frozen });
+      first, repeated, frozen: facts.frozen });
     // The current qualification and the archived copy must both remain valid.
-    loadFormalEvaluatorBundle(facts.evaluatorRoot, { requireQualified: true,
+    const bundle = loadFormalEvaluatorBundle(facts.evaluatorRoot, { requireQualified: true,
       expected: { evaluatorId: facts.task.evaluator.id, version: facts.task.evaluator.version!, digest: facts.task.evaluator.digest! } });
+    for (const experiment of [first, repeated]) {
+      const rows = this.store.listMeasurements(experiment.experiment_id);
+      assertRawEvidenceComplete(experiment, rows, bundle, facts.frozen.testpack);
+      assertPerformanceEvidenceConsistent(experiment, rows, facts.frozen.testpack);
+    }
     const approval = this.runtime.approveCandidate({ taskId: facts.task.task_id, candidateId: facts.candidate.candidate_id,
       firstFormalExperimentId: snapshot.first_formal_experiment_id, revalidationExperimentId: snapshot.revalidation_experiment_id,
       evaluatorRoot: path.join(path.dirname(snapshot.artifact.manifest_path), 'evaluator'), evidence: snapshot.artifact,
@@ -229,8 +254,13 @@ export class WorkflowApprovalService {
       throw new Error('缺少批准记录关联的冻结证据，请核对原记录。');
     }
     this.assertSnapshotMatches(workflow.review_evidence, { task, candidate: approval.candidate_before, first, repeated, frozen: testpack });
-    loadFormalEvaluatorBundle(testpack.testpack.evaluator.root, { requireQualified: true,
+    const bundle = loadFormalEvaluatorBundle(testpack.testpack.evaluator.root, { requireQualified: true,
       expected: { evaluatorId: approval.evaluator_identity.id, version: approval.evaluator_identity.version!, digest: approval.evaluator_digest } });
+    for (const experiment of [first, repeated]) {
+      const rows = this.store.listMeasurements(experiment.experiment_id);
+      assertRawEvidenceComplete(experiment, rows, bundle, testpack.testpack);
+      assertPerformanceEvidenceConsistent(experiment, rows, testpack.testpack);
+    }
     return approval;
   }
 }
