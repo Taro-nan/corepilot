@@ -18,6 +18,7 @@
 | P1 | Application/Core/Runner/Evaluator/Storage/Agent 边界和实际状态所有权。 | IMPLEMENTED：现有架构图见 [系统架构](../architecture/corepilot-system.md)；部分 `core/` 仍依赖具体适配器，工作流、领域记录和 Runner 并非原子状态机，不能声明全仓治理完成。 |
 | P1 | 进程中断、重启、重复请求、远端未知、资源释放和状态一致性。 | IMPLEMENTED：启动恢复按状态查全量待处理记录；创建任务、执行终态、创建复现和恢复时的关联状态使用 SQLite 事务。Runner、Git、数据库跨资源一致性仍按原操作 ID 对账，其他状态转换尚未全面原子化。 |
 | P1 | Agent 读写必须受候选工作区和源码范围约束。 | IMPLEMENTED：Package 模式执行候选范围检查，本轮补上终点符号链接检查；`source_only` 尚无由用户确认的文件白名单，假设中的范围由 Agent 提出。这不等于对任意构建脚本或并发进程提供操作系统级沙箱。 |
+| P1 | 不可信候选的操作系统级隔离。 | NOT STARTED：Runner 目前以执行账户运行构建和评价命令，资源绑定及前后摘要检查不能阻止同账户进程临时篡改后恢复文件；需按部署信任模型设计进程权限和文件隔离。 |
 | P2 | Candidate、Baseline、Evaluator、机器、原始测量、Evidence、Approval、Delivery 的绑定和完整性。 | IMPLEMENTED：冻结包保存摘要和原始记录，新批准会重算统计并核对 RPC 计划、样本、命令与基线身份。未保存的候选二进制及自报评价程序摘要无法由控制端事后独立核验。 |
 | P2 | 不依赖原服务端目录的归档完整性核验。 | IMPLEMENTED：`corepilot evidence verify <归档> --sha256 <可信摘要> --json` 校验 V1 归档、文件清单和部分身份关联；不能证明来源、统计、审批、交付或公开安全。 |
 | P2 | 可公开归档的脱敏导出与原始数据离线重算。 | NOT STARTED：当前冻结包包含私有路径和源码等信息，不能直接视为公开数据；需要独立的脱敏导出与离线复算设计。 |
