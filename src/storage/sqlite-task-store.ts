@@ -18,6 +18,7 @@ import type { OptimizationApprovalRecord } from '../contracts/optimization-appro
 import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
 import { taskStatusForExecutionOutcome, type OptimizationWorkflowRecord, type WorkflowExecutionOutcomePatch, type WorkflowExperimentIntent } from '../contracts/workflow.js';
+import { OptimizationIntakeAmbiguousError, OptimizationIntakeClosedError, OptimizationIntakeConflictError, type OptimizationIntakeStatus } from '../contracts/optimization-intake.js';
 
 interface TaskRow {
   task_id: string; request_id: string; status: string; target_json: string; schema_version: number; is_mock: number;
@@ -103,6 +104,9 @@ export class SqliteTaskStore implements TaskStore {
       );
       CREATE INDEX IF NOT EXISTS optimization_workflows_request
         ON optimization_workflows(json_extract(workflow_json, '$.request_id'));
+      CREATE TABLE IF NOT EXISTS optimization_intake_closures (
+        request_id TEXT PRIMARY KEY, closed_at TEXT NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS optimization_workflows_delivery_state
         ON optimization_workflows(json_extract(workflow_json, '$.delivery_operation.status'));
       CREATE TABLE IF NOT EXISTS optimization_tasks (
@@ -299,10 +303,13 @@ export class SqliteTaskStore implements TaskStore {
     }
     return this.transaction(() => {
       if (workflow.request_id) {
+        if (this.getOptimizationIntakeStatus(workflow.request_id).status === 'CLOSED') throw new OptimizationIntakeClosedError();
         const previous = this.getOptimizationWorkflowByRequestId(workflow.request_id);
         if (previous) {
           const existing = JSON.parse(previous) as OptimizationWorkflowRecord;
-          if (existing.request_digest !== workflow.request_digest) throw new Error('Idempotency-Key already used with different optimization inputs');
+          const matches = existing.request_input_digest && workflow.request_input_digest
+            ? existing.request_input_digest === workflow.request_input_digest : existing.request_digest === workflow.request_digest;
+          if (!matches) throw new OptimizationIntakeConflictError();
           return { workflowId: existing.workflow_id, created: false };
         }
       }
@@ -575,8 +582,25 @@ export class SqliteTaskStore implements TaskStore {
 
   getOptimizationWorkflowByRequestId(requestId: string): string | null {
     const rows = this.db.prepare("SELECT workflow_json FROM optimization_workflows WHERE json_extract(workflow_json, '$.request_id') = ? LIMIT 2").all(requestId) as Array<{ workflow_json: string }>;
-    if (rows.length > 1) throw new Error('Idempotency-Key 对应多条历史工作流记录，无法确认应复用哪条；请联系维护者核对，原记录均已保留。');
+    if (rows.length > 1) throw new OptimizationIntakeAmbiguousError();
     return rows[0]?.workflow_json ?? null;
+  }
+
+  getOptimizationIntakeStatus(requestId: string): OptimizationIntakeStatus {
+    const json = this.getOptimizationWorkflowByRequestId(requestId);
+    const closed = this.db.prepare('SELECT 1 FROM optimization_intake_closures WHERE request_id = ?').get(requestId);
+    if (json && closed) throw new OptimizationIntakeAmbiguousError();
+    if (json) return { status: 'CREATED', workflow_id: (JSON.parse(json) as OptimizationWorkflowRecord).workflow_id };
+    return closed ? { status: 'CLOSED' } : { status: 'NOT_FOUND' };
+  }
+
+  closeOptimizationIntake(requestId: string): Exclude<OptimizationIntakeStatus, { status: 'NOT_FOUND' }> {
+    return this.transaction(() => {
+      const current = this.getOptimizationIntakeStatus(requestId);
+      if (current.status !== 'NOT_FOUND') return current;
+      this.db.prepare('INSERT INTO optimization_intake_closures (request_id, closed_at) VALUES (?, ?)').run(requestId, new Date().toISOString());
+      return { status: 'CLOSED' };
+    });
   }
 
   listProjects(): ProjectRecord[] {

@@ -72,6 +72,8 @@ export interface OptimizationWorkflowRecord {
   workflow_id: string;
   request_id?: string;
   request_digest?: string;
+  /** Digest of the submitted intent before resolving mutable project defaults. */
+  request_input_digest?: string;
   /** Compatibility links to the append-oriented domain records. */
   optimization_task_id?: string;
   candidate_id?: string;

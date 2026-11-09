@@ -18,6 +18,8 @@ import { testingRoutes } from './testing-routes.js';
 import type { TestingService } from '../application/testing-service.js';
 import type { ProjectService } from '../application/project-service.js';
 import { redactRecord, redactReportText } from '../report/optimization-report.js';
+import { OptimizationIntakeAmbiguousError, OptimizationIntakeClosedError, OptimizationIntakeConflictError } from '../contracts/optimization-intake.js';
+import { optimizationInputDigest } from '../workflow/optimization-intake.js';
 
 export interface HttpServerOptions {
   host: string;
@@ -40,6 +42,31 @@ function safeToken(actual: string | string[] | undefined, expected: string): boo
   const left = Buffer.from(actual);
   const right = Buffer.from(expected);
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function intakeError(error: unknown): ApiError {
+  if (error instanceof ApiError) return error;
+  if (error instanceof OptimizationIntakeConflictError) return new ApiError(409, 'WORKFLOW_REQUEST_CONFLICT', error.message);
+  if (error instanceof OptimizationIntakeClosedError) return new ApiError(409, 'WORKFLOW_REQUEST_CLOSED', error.message);
+  if (error instanceof OptimizationIntakeAmbiguousError) return new ApiError(409, 'WORKFLOW_REQUEST_AMBIGUOUS', error.message);
+  const failure = error as { code?: string; message?: string };
+  if (typeof failure?.code === 'string' && failure.code.startsWith('ERR_SQLITE') && /\b(?:locked|busy)\b/i.test(failure.message ?? '')) {
+    return new ApiError(503, 'WORKFLOW_REQUEST_BUSY', '任务数据库正忙，请稍后使用原请求重新核对。');
+  }
+  if (error instanceof PublicWorkflowRequestError) return new ApiError(400, 'INVALID_ARGUMENT', error.message);
+  return new ApiError(400, 'INVALID_WORKFLOW_CONFIG', failure?.message ?? '任务请求未完成');
+}
+
+function intakeRequestId(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 200) throw new ApiError(400, 'INVALID_ARGUMENT', 'invalid Idempotency-Key');
+  return value;
+}
+
+function sendIntakeReceipt(res: http.ServerResponse, service: OptimizationWorkflowService, workflowId: string): void {
+  const record = service.get(workflowId);
+  if (!record) throw new ApiError(503, 'WORKFLOW_REQUEST_UNCERTAIN', '任务记录暂时无法读取，请使用原请求重新核对。');
+  sendJson(res, 202, { workflow_id: workflowId, status: record.status, function_name: record.function_name,
+    entry_file: record.entry_file, enable_performance: record.enable_performance });
 }
 
 /** 同时承载通用任务 API 和新的 public optimize workflow API。 */
@@ -81,18 +108,30 @@ async function handle(host: TaskHost, req: http.IncomingMessage, res: http.Serve
   if (method === 'POST' && pathname === '/v1/workflows') {
     try {
       const body = await readJson(req);
+      const header = req.headers[COREPILOT_MODEL_API_KEY_HEADER];
+      const requestId = req.headers['idempotency-key'] === undefined ? undefined : intakeRequestId(req.headers['idempotency-key']);
+      const inputDigest = requestId ? optimizationInputDigest(body) : undefined;
+      const replay = requestId && inputDigest ? options.workflowService.replayIntake(requestId, inputDigest) : null;
+      if (replay) {
+        sendIntakeReceipt(res, options.workflowService, replay);
+        return;
+      }
       const resolved = typeof body.project_id === 'string' && options.projectService
         ? options.projectService.request(body.project_id, body) : body;
       const request = parsePublicWorkflowRequest(resolved);
-      const header = req.headers[COREPILOT_MODEL_API_KEY_HEADER];
-      const requestId = req.headers['idempotency-key'];
-      if (requestId && (typeof requestId !== 'string' || requestId.length > 200)) throw new Error('invalid Idempotency-Key');
-      const submitted = options.workflowService.submitPublic(request, { ...(typeof header === 'string' ? { cliApiKey: header } : {}), ...(typeof requestId === 'string' ? { requestId } : {}), packageLoader: options.projectService?.packageLoader });
-      sendJson(res, 202, { workflow_id: submitted.workflowId, status: options.workflowService.get(submitted.workflowId)?.status ?? 'CREATED', function_name: request.function_name, entry_file: request.entry_file, ...(request.enable_performance === undefined ? {} : { enable_performance: request.enable_performance }) });
+      const submitted = options.workflowService.submitPublic(request, { ...(typeof header === 'string' ? { cliApiKey: header } : {}), ...(requestId ? { requestId, requestInputDigest: inputDigest } : {}), packageLoader: options.projectService?.packageLoader });
+      sendIntakeReceipt(res, options.workflowService, submitted.workflowId);
     } catch (error) {
-      if (error instanceof PublicWorkflowRequestError) throw new ApiError(400, 'INVALID_ARGUMENT', error.message);
-      throw new ApiError(400, 'INVALID_WORKFLOW_CONFIG', (error as Error).message);
+      throw intakeError(error);
     }
+    return;
+  }
+  const intake = pathname.match(/^\/v1\/workflow-requests\/([^/]+)(?:\/(close))?$/);
+  if (intake && (method === 'GET' && !intake[2] || method === 'POST' && intake[2] === 'close')) {
+    try {
+      const id = intakeRequestId(decodeURIComponent(intake[1]));
+      sendJson(res, 200, method === 'GET' ? options.workflowService.intakeStatus(id) : options.workflowService.closeIntake(id));
+    } catch (error) { throw intakeError(error); }
     return;
   }
   if (options.testingService && await testingRoutes(req, res, url, options.testingService)) return;

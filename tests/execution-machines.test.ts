@@ -114,7 +114,9 @@ test('public submissions freeze the registered RPC connection and deployment ide
     assert.match(report.markdown, /Execution A/); assert.doesNotMatch(JSON.stringify(report), /snapshot-token-a|snapshot-token-b/);
     const other = registry.save({ name: 'Execution B', runner: { mode: 'rpc', endpoint: 'http://127.0.0.1:4329', token: 'other-secret' } });
     f.projects.bindMachine(project.project_id, other.machine_id);
-    await assert.rejects(api.submitOptimizationWorkflow({ project_id: project.project_id }, { requestId: 'machine-snapshot' }), /different optimization inputs/);
+    const afterDefaultChange = await api.submitOptimizationWorkflow({ project_id: project.project_id }, { requestId: 'machine-snapshot' }) as { workflow_id: string };
+    assert.equal(afterDefaultChange.workflow_id, first.workflow_id);
+    await assert.rejects(api.submitOptimizationWorkflow({ project_id: project.project_id, machine_id: other.machine_id }, { requestId: 'machine-snapshot' }), /different optimization inputs/);
     await assert.rejects(api.submitOptimizationWorkflow({ project_id: project.project_id }), /尚未完成部署环境/);
     assert.equal(f.modelRequests.inference, 0);
   } finally { await f.close(); }

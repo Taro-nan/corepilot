@@ -2,6 +2,7 @@ import type { OptimizationReportResponse } from '../contracts/optimization-repor
 import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { OptimizationSessionBudget, OptimizationSessionEvents } from '../contracts/optimization-session.js';
+import type { OptimizationIntakeStatus } from '../contracts/optimization-intake.js';
 import { TestingClient } from './testing-client.js';
 
 export class ApiClientError extends Error {
@@ -56,6 +57,14 @@ export class ApiClient {
 
   submitOptimizationWorkflow(payload: Record<string, unknown>, options: { apiKey?: string; requestId?: string } = {}): Promise<unknown> {
     return this.request('POST', '/v1/workflows', payload, { ...(options.apiKey ? { 'x-corepilot-model-api-key': options.apiKey } : {}), ...(options.requestId ? { 'idempotency-key': options.requestId } : {}) });
+  }
+
+  getOptimizationIntake(requestId: string): Promise<OptimizationIntakeStatus> {
+    return this.request('GET', `/v1/workflow-requests/${encodeURIComponent(requestId)}`) as Promise<OptimizationIntakeStatus>;
+  }
+
+  closeOptimizationIntake(requestId: string): Promise<Exclude<OptimizationIntakeStatus, { status: 'NOT_FOUND' }>> {
+    return this.request('POST', `/v1/workflow-requests/${encodeURIComponent(requestId)}/close`, {}) as Promise<Exclude<OptimizationIntakeStatus, { status: 'NOT_FOUND' }>>;
   }
 
   getOptimizationWorkflow(workflowId: string, signal?: AbortSignal): Promise<unknown> {

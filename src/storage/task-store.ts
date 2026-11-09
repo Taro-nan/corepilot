@@ -5,6 +5,7 @@ import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
 import type { Candidate, Experiment, OptimizationTask } from '../contracts/optimization-domain.js';
 import type { OptimizationWorkflowRecord, WorkflowExecutionOutcomePatch, WorkflowExperimentIntent } from '../contracts/workflow.js';
+import type { OptimizationIntakeStatus } from '../contracts/optimization-intake.js';
 
 export interface LeaseRecord {
   owner_id: string;
@@ -40,6 +41,10 @@ export interface TaskStore extends OptimizationStore {
   saveOptimizationWorkflowJson(workflowId: string, workflowJson: string): void;
   /** Atomically create the task and workflow, or return the existing matching request. */
   createOptimizationIntake(task: OptimizationTask, workflow: OptimizationWorkflowRecord): { workflowId: string; created: boolean };
+  /** A read can return NOT_FOUND while an earlier submission is still in flight. */
+  getOptimizationIntakeStatus(requestId: string): OptimizationIntakeStatus;
+  /** Atomically close an uncreated request or return the task that won the race. */
+  closeOptimizationIntake(requestId: string): Exclude<OptimizationIntakeStatus, { status: 'NOT_FOUND' }>;
   /** Atomically attach a verified workflow checkpoint, reconciling a recovered candidate identity. */
   attachOptimizationCandidate(workflowId: string, candidate: Candidate): Candidate;
   /** Create and link one fixed formal/independent-validation intent atomically. */

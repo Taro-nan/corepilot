@@ -49,6 +49,7 @@ import { WorkflowApprovalService } from '../application/workflow-approval-servic
 import { localWorktreeRoot } from './optimization-workflow-paths.js';
 import { loadSourceOptimizationPreflight, sourceOptimizationContractDigest, sourceOptimizationIntake, type SourceOptimizationPreflight } from './source-optimization.js';
 import { executeSourceOptimization } from './source-optimization-execution.js';
+import { OptimizationIntakeClosedError, OptimizationIntakeConflictError } from '../contracts/optimization-intake.js';
 
 export interface OptimizationWorkflowServiceOptions {
   /** 保留 host 参数仅用于已有服务装配；public workflow 不依赖旧 task runner。 */
@@ -150,6 +151,21 @@ export class OptimizationWorkflowService {
   /** Process attachment is an observation, never a persisted Experiment outcome. */
   activeWorkflowIds(): string[] { return [...this.controllers.keys()]; }
 
+  intakeStatus(requestId: string) { return this.options.store.getOptimizationIntakeStatus(requestId); }
+
+  closeIntake(requestId: string) { return this.options.store.closeOptimizationIntake(requestId); }
+
+  /** New records can be replayed without reading the project's mutable defaults. */
+  replayIntake(requestId: string, inputDigest: string): string | null {
+    const state = this.intakeStatus(requestId);
+    if (state.status === 'CLOSED') throw new OptimizationIntakeClosedError();
+    if (state.status !== 'CREATED') return null;
+    const record = this.records.get(state.workflow_id)!;
+    if (!record.request_input_digest) return null; // Historical records retain their original digest semantics.
+    if (record.request_input_digest !== inputDigest) throw new OptimizationIntakeConflictError();
+    return record.workflow_id;
+  }
+
   report(workflowId: string): OptimizationReportResponse | null {
     const workflow = this.records.get(workflowId);
     if (!workflow) return null;
@@ -168,7 +184,7 @@ export class OptimizationWorkflowService {
     return this.options.store.createOptimizationIntake(task, record);
   }
 
-  submitPublic(request: PublicWorkflowRequest, options: { cliApiKey?: string; requestId?: string; packageLoader?: LibraryPackageLoader } = {}): { workflowId: string } {
+  submitPublic(request: PublicWorkflowRequest, options: { cliApiKey?: string; requestId?: string; requestInputDigest?: string; packageLoader?: LibraryPackageLoader } = {}): { workflowId: string } {
     if (this.stopping) throw new Error('后台正在停止，请稍后重试。');
     if (request.verification_mode === 'source_only' && request.enable_performance === true) throw new Error('仅优化源码不执行性能测试，请选择优化并验证。');
     if (request.candidate_scope) {
@@ -188,10 +204,13 @@ export class OptimizationWorkflowService {
       ...(request.budget ? { budget: request.budget } : {}),
     })).digest('hex');
     if (options.requestId) {
+      if (this.intakeStatus(options.requestId).status === 'CLOSED') throw new OptimizationIntakeClosedError();
       const previous = this.options.store.getOptimizationWorkflowByRequestId(options.requestId);
       if (previous) {
         const record = JSON.parse(previous) as OptimizationWorkflowRecord;
-        if (record.request_digest !== requestDigest) throw new Error('Idempotency-Key already used with different optimization inputs');
+        const matches = record.request_input_digest && options.requestInputDigest
+          ? record.request_input_digest === options.requestInputDigest : record.request_digest === requestDigest;
+        if (!matches) throw new OptimizationIntakeConflictError();
         return { workflowId: record.workflow_id };
       }
     }
@@ -199,7 +218,7 @@ export class OptimizationWorkflowService {
       const preflight = loadSourceOptimizationPreflight(request, { ...options, readMachine: id => this.options.store.getExecutionMachine(id) });
       const { record, task: taskInput } = sourceOptimizationIntake(`workflow:${randomUUID()}`, preflight);
       const task = this.runtime.prepareTask(taskInput);
-      if (options.requestId) { record.request_id = options.requestId; record.request_digest = requestDigest; }
+      if (options.requestId) { record.request_id = options.requestId; record.request_digest = requestDigest; record.request_input_digest = options.requestInputDigest; }
       const saved = this.createIntake(record, task);
       if (!saved.created) return { workflowId: saved.workflowId };
       if (this.options.publicExecution === true) this.launchSourceWorkflow(record.workflow_id, preflight);
@@ -221,7 +240,7 @@ export class OptimizationWorkflowService {
     record.execution_contract_digest = executionContractDigest(preflight);
     if (preflight.executionMachine) record.execution_machine = { ...preflight.executionMachine };
     if (preflight.source) { record.source_branch = preflight.source.branch; record.baseline_commit = preflight.source.commit; }
-    if (options.requestId) { record.request_id = options.requestId; record.request_digest = requestDigest; }
+    if (options.requestId) { record.request_id = options.requestId; record.request_digest = requestDigest; record.request_input_digest = options.requestInputDigest; }
     const taskInput = {
       workflowId,
       target: {

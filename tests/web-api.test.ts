@@ -49,7 +49,8 @@ test('browser session and CLI Bearer share projects, config, workflow IDs, repor
     const recreated = new OptimizationWorkflowService({ store: f.store, transportFactory: () => { throw new Error('must not execute on replay'); } });
     assert.equal(recreated.submitPublic(f.projects.request(project.project_id, { enable_performance: true }), { requestId: 'shared-retry' }).workflowId, id);
     const mismatch = await browser('/v1/workflows', 'POST', { ...payload, enable_performance: false }, { 'idempotency-key': 'shared-retry' });
-    assert.equal(mismatch.status, 400);
+    assert.equal(mismatch.status, 409);
+    assert.equal((await mismatch.json()).error.code, 'WORKFLOW_REQUEST_CONFLICT');
     const cliReport = await runFixtureCli(f.url, f.token, ['workflow', 'report', id, '--json']); assert.equal(cliReport.code, 0, cliReport.stderr);
     const webReport = await (await browser(`/v1/workflows/${encodeURIComponent(id)}/report`)).json();
     assert.deepEqual(JSON.parse(cliReport.stdout).workflow, webReport.report.workflow);
