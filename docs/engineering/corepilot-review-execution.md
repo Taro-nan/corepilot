@@ -74,6 +74,7 @@
 - 隔离 Windows 工作区使用本机 Node 22.22.2 执行 `npm ci`，锁文件未变化；对源码授权、离线复算和试跑汇总合入后的 `312dd9d` 执行 `npm run build`、`npm run typecheck`、`npm run check:repo` 和 `npm test`，Node 测试 330/330 通过。相同代码的 Node 24 浏览器全量测试 59/59 通过。此后预检和候选恢复有新的增量，需另行验证。
 - 隔离 Windows 工作区的 Node 22.22.2 对 `633c27b` 运行 `npm run build` 和 `npm run test:web`，浏览器测试 60/60 通过；测试使用本地 HTTP、Git、模型和 Runner 夹具。此后又合入终态事实与依赖修复，最终版本须另行验证。
 - 对 `16a0045` 在 Node 22.22.2 干净工作区运行构建、类型检查、仓库检查和 Node 测试，385/385 通过。浏览器 59/60：跨分支交付测试在公开记录的 `cleanup=PENDING` 时立即断言工作树已删除；断线截图产生于失败后的夹具清理。测试现等待 `cleanup=DONE` 后继续检查，遇清理失败、断连或超时仍失败；集成后 Node 22 下该测试及另外两项相关网页测试 3/3 通过。后续还有新的恢复修复，最终版本须另行验证。
+- 对 `200bc57` 在 Node 22.22.2 的两个隔离 Windows 工作区以同一锁文件执行 `npm ci`，重新运行 `npm run build`、`npm run typecheck`、`npm run check:repo`、`npm test` 和 `npm run test:web`：Node 410/410、网页 60/60 通过；编译后 CLI `--help` 也可运行。网页覆盖上述清理状态及新增原作业核对入口；模拟数据、本机 Runner 和临时 Git 夹具不代表真实目标机实验。
 - 限制：GitHub Actions 尚未实际运行。最低 Node 22.19.0 的本机下载因网络超时未能验证，也未在 Linux 验证，不宣称最低版本或跨平台通过。
 
 ### 测试方案试跑的测量清单
