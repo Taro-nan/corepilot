@@ -174,7 +174,7 @@ for (const matrix of [false, true]) test(`comparison pins ${matrix ? 'matrix' : 
     } else if (req.url?.endsWith('/commands')) res.end(JSON.stringify({ command_executions: [] }));
     else if (req.url?.endsWith('/measurements')) {
       const contexts = submitted!.steps.map(item => item.formal_context).filter(item => item && item.phase !== 'PERFORMANCE_WARMUP');
-      res.end(JSON.stringify({ measurements: contexts.slice(0, completedMeasurements).map(item => ({ kind: item!.phase === 'CORRECTNESS_CASE' ? 'CORRECTNESS_CASE' : 'PERFORMANCE_SAMPLE',
+      res.end(JSON.stringify({ measurements: contexts.slice(0, completedMeasurements).map(item => ({ experiment_id: submitted!.experiment.experiment_id, kind: item!.phase === 'CORRECTNESS_CASE' ? 'CORRECTNESS_CASE' : 'PERFORMANCE_SAMPLE',
         role: item!.role, subject_id: item!.subject_id, sample_index: item!.iteration_index,
         value: item!.phase === 'CORRECTNESS_CASE' ? 'PASS' : item!.role === 'BASELINE' ? 2 : 1,
         unit: item!.phase === 'CORRECTNESS_CASE' ? null : 'seconds', validity: 'VALID' })) }));

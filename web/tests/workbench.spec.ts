@@ -927,6 +927,25 @@ test('comparison trial responds immediately, shows live stages and counts, and r
   } finally { release(); }
 });
 
+test('duplicate trial samples remain visible and block evaluation review', async ({ page }) => {
+  const f = fixture, r = await prepareReviewFixture(f);
+  try {
+    const duplicate = structuredClone(r.state.measurements[1]);
+    if (typeof duplicate.value !== 'number') throw new Error('fixture sample is not numeric');
+    duplicate.value = 99;
+    r.state.measurements.push(duplicate);
+    await login(page); await openTaskPreparation(page);
+    await page.getByRole('tab', { name: '3 试运行与对比' }).click();
+    const panel = page.locator('.validation-trial');
+    await expect(panel).toContainText('试运行测量不能用于审阅');
+    await expect(panel).toContainText('性能样本无效、重复或实验身份不匹配');
+    await expect(panel).not.toContainText('试运行通过。请在下方审阅');
+    await panel.getByText('查看原始性能样本', { exact: true }).click();
+    await expect(panel.locator('details pre').filter({ hasText: '99' })).toBeVisible();
+    expect(f.projects.validationAssets.get(r.project, r.pkg, r.version, r.target).qualification).toBe('DRAFT');
+  } finally { await r.close(); }
+});
+
 test('a passed comparison leads to explicit human adoption and a working preflight without regenerating or rerunning tests', async ({ page }) => {
   const f = fixture, r = await prepareReviewFixture(f);
   try {

@@ -90,6 +90,6 @@ export function calibratePerformance(testpack: StatisticalInput, samples: readon
   const intervals = result.workloads.map(row => ({ workload_id: row.case_id, speedup: row.speedup,
     interval: row.ci_lower === undefined || row.ci_upper === undefined ? null : { lower: row.ci_lower, upper: row.ci_upper } }));
   return { kind: 'AA_SAME_ARTIFACT', statistics, overall_speedup: result.weighted_geomean, workloads: intervals,
-    status: !statistics.overall_interval ? 'INSUFFICIENT' : excludesEquality(statistics.overall_interval) || intervals.some(row => row.interval && excludesEquality(row.interval)) ? 'BIAS_DETECTED' : 'COMPATIBLE_WITH_EQUALITY',
+    status: statistics.verdict === 'INVALID' ? 'INVALID' : !statistics.overall_interval ? 'INSUFFICIENT' : excludesEquality(statistics.overall_interval) || intervals.some(row => row.interval && excludesEquality(row.interval)) ? 'BIAS_DETECTED' : 'COMPATIBLE_WITH_EQUALITY',
     note: '同一产物在两端重复测量；区间应兼容 1×。区间很宽仍表示测量不稳定。单次 A/A 不给出经验误报率，也不构成优化收益或两库资格证据。' };
 }

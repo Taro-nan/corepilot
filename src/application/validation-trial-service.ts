@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ProjectRecord } from '../contracts/project.js';
-import type { Experiment, Measurement } from '../contracts/optimization-domain.js';
+import type { Experiment } from '../contracts/optimization-domain.js';
 import { OPTIMIZATION_DOMAIN_SCHEMA_VERSION } from '../contracts/optimization-domain.js';
 import type { ExperimentExecutionPlan, ExperimentExecutionStep } from '../contracts/runner-rpc.js';
 import type { ValidationTestPlan } from '../contracts/validation-assets.js';
@@ -27,10 +27,10 @@ import { createFormalEvaluatorSteps } from '../evaluator/formal-plan.js';
 import { snapshotValidationAssets, archiveValidationAssets, validationAssetFiles } from './validation-asset-files.js';
 import { packageBaselineBinding } from '../library-package/task-definition.js';
 import { stageVerifiedBinaryBaseline } from '../workspace/baseline-bundle-staging.js';
-import { readValidationQuality, qualityProbeSteps, validationQualityResult } from '../evaluator/validation-quality.js';
+import { readValidationQuality, qualityProbeSteps } from '../evaluator/validation-quality.js';
 import type { ValidationQualityPlan } from '../contracts/validation-quality.js';
-import { calibratePerformance } from '../evaluator/performance-statistics.js';
 import type { ValidationCase } from '../contracts/validation-testpack.js';
+import { trialSummary } from './validation-trial-summary.js';
 
 interface TrialRecord {
   schema_version: 1;
@@ -64,43 +64,6 @@ interface TrialRecord {
   quality?: ValidationQualityPlan;
   correctness_inputs?: Array<{ input_id: string }>;
   workload_specs?: ValidationCase[];
-}
-
-function trialSummary(record: TrialRecord, measurements: Measurement[]) {
-  const correctness = record.case_ids.map(id => ({ id, observation: measurements.find(item => item.kind === 'CORRECTNESS_CASE' &&
-    item.subject_id === id && item.role === 'EVALUATOR' && item.sample_index === null) ?? null }));
-  const sampleCount = record.test_plan?.sampling.sample_count ?? 1;
-  const roles = record.mode === 'comparison' || record.mode === 'calibration' ? ['BASELINE', 'CANDIDATE'] : ['CANDIDATE'];
-  const performance = record.workload_ids.flatMap(id => roles.flatMap(role => Array.from({ length: sampleCount }, (_, index) => ({
-    id: `${id}/${role}/${index}`, observation: measurements.find(item => item.kind === 'PERFORMANCE_SAMPLE' &&
-      item.subject_id === id && item.role === role && item.sample_index === index) ?? null }))));
-  const median = (values: number[]) => { values.sort((a, b) => a - b); const i = Math.floor(values.length / 2); return values.length % 2 ? values[i] : (values[i - 1] + values[i]) / 2; };
-  const comparisons = record.mode === 'comparison' || record.mode === 'calibration' ? record.workload_ids.map(id => {
-    const samples = (role: string) => measurements.filter(item => item.kind === 'PERFORMANCE_SAMPLE' && item.role === role && item.subject_id === id &&
-      item.validity === 'VALID' && item.unit === 'seconds' && typeof item.value === 'number' && item.value > 0).sort((a,b) => (a.sample_index ?? -1) - (b.sample_index ?? -1)).map(item => item.value as number);
-    const baseline = samples('BASELINE'), candidate = samples('CANDIDATE');
-    const complete = baseline.length === sampleCount && candidate.length === sampleCount;
-    return { workload_id: id, ...record.workload_conditions?.find(item => item.workload_id === id), baseline_samples: baseline, candidate_samples: candidate,
-      baseline_median: complete ? median([...baseline]) : null, candidate_median: complete ? median([...candidate]) : null,
-      speedup: complete ? median([...baseline]) / median([...candidate]) : null };
-  }) : [];
-  return {
-    correctness: { planned: correctness.length, passed: correctness.filter(item => item.observation?.value === 'PASS' && item.observation.validity === 'VALID' && item.observation.unit === null).length,
-      failed: correctness.filter(item => item.observation?.value === 'FAIL' || item.observation?.validity === 'INVALID').length,
-      missing: correctness.filter(item => !item.observation).map(item => item.id) },
-    performance: { planned: performance.length, measured: performance.filter(item => typeof item.observation?.value === 'number' &&
-      item.observation.value > 0 && item.observation.unit === 'seconds' && item.observation.validity === 'VALID').length,
-      missing: performance.filter(item => !item.observation).map(item => item.id) },
-    comparisons,
-    ...(record.mode === 'calibration' && record.test_plan?.statistics && record.workload_specs ? { calibration: calibratePerformance({ performance: {
-      statistics: record.test_plan.statistics, cases: record.workload_specs, sampling: { warmup: record.test_plan.sampling.warmup_count,
-        samples: record.test_plan.sampling.sample_count, interleave_seed: record.test_plan.seed, bootstrap_iterations: record.test_plan.statistics.iterations },
-      thresholds: { weighted_geomean_min: 1, overall_ci_lower_min: 1, key_case_ci_lower_min: 1, confidence_level: record.test_plan.statistics.confidence_level }, key_cases: [],
-    } }, comparisons.map(row => ({ case_id: row.workload_id, baseline_samples: row.baseline_samples, candidate_samples: row.candidate_samples,
-      sample_indices: { baseline: measurements.filter(m => m.kind === 'PERFORMANCE_SAMPLE' && m.subject_id === row.workload_id && m.role === 'BASELINE').map(m => m.sample_index!).sort((a,b) => a-b),
-        candidate: measurements.filter(m => m.kind === 'PERFORMANCE_SAMPLE' && m.subject_id === row.workload_id && m.role === 'CANDIDATE').map(m => m.sample_index!).sort((a,b) => a-b) } }))) } : {}),
-    quality: validationQualityResult(record.quality, record.correctness_inputs ?? record.case_ids.map(input_id => ({ input_id })), measurements),
-  };
 }
 
 /** Draft smoke runs use the existing Runner DEVELOPMENT_FEEDBACK experiment protocol. */
@@ -347,7 +310,8 @@ export class ValidationTrialService {
     const summary = trialSummary(record, measurements);
     return { trial: record, status, commands, measurements, summary, output,
       passed: status.status === 'SUCCEEDED' && summary.correctness.passed === summary.correctness.planned &&
-        summary.performance.measured === summary.performance.planned && ['NOT_CONFIGURED', 'PASSED'].includes(summary.quality.status),
+        summary.performance.measured === summary.performance.planned && summary.issues.length === 0 &&
+        ['NOT_CONFIGURED', 'PASSED'].includes(summary.quality.status),
       formal_evidence: false };
   }
 

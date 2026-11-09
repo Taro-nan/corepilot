@@ -9,7 +9,7 @@ export interface PerformanceStatisticsPolicy {
 export interface ConfidenceInterval { lower: number; upper: number }
 export interface PerformanceCalibration {
   kind: 'AA_SAME_ARTIFACT';
-  status: 'COMPATIBLE_WITH_EQUALITY' | 'BIAS_DETECTED' | 'INSUFFICIENT';
+  status: 'COMPATIBLE_WITH_EQUALITY' | 'BIAS_DETECTED' | 'INSUFFICIENT' | 'INVALID';
   statistics: PerformanceStatistics;
   overall_speedup: number;
   workloads: Array<{ workload_id: string; speedup: number; interval: ConfidenceInterval | null }>;

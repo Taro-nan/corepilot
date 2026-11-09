@@ -55,7 +55,14 @@
 - 新增 `.github/workflows/ci.yml`，安装 ripgrep 并覆盖 Linux Node 22.19/24、Windows Node 24；Node 24 两个平台含浏览器测试。安装与贡献文档说明 Node、Git、Python、ripgrep 和浏览器要求。
 - 报告中的 `testing-service.js` 是 NodeNext 导入：Git 跟踪 `src/application/testing-service.ts`，干净构建生成相应 `.js`；不是缺失源码。
 - 后续集成版本在新的隔离工作区再次 `npm ci`，`npm run build`、`npm run typecheck`、`npm run check:repo` 和 `npm test` 301/301 通过；编译后的 `web` 入口使用临时空数据目录启动，网页及 `/v1/health` 均返回 200。后续证据与终态切片分别追加针对性回归。
-- 限制：以上安装和全量测试针对本轮最初基线，集成后须重新回归；GitHub Actions 尚未实际运行。最低 Node 22 的本机下载因网络超时未能验证，不宣称跨平台通过。
+- 隔离工作区对 `b57c802` 再次运行完整测试：Node 321/321、浏览器 57/57 通过；测试使用本机夹具和 Chrome。此后仍有新的试跑汇总修改，须再次验证最终集成版本。
+- 限制：GitHub Actions 尚未实际运行。最低 Node 22 的本机下载因网络超时未能验证，不宣称跨平台通过。
+
+### 测试方案试跑的测量清单
+
+- **问题**：试跑汇总以第一条匹配记录计数，重复的 PASS/FAIL 或性能样本可能被忽略，进而影响测试方案的人工启用预检。Runner 对单条正式上下文有校验，但审阅端仍需核对实际收到的完整清单。
+- **修改**：试跑汇总按实验 ID 和固定计划核对唯一的正确性记录及性能样本；重复、无效、计划外或跨实验记录会阻断试跑通过。原始测量保留在 API 与网页详情，A/A 明确区分无效记录和有效样本不足。既有人工资格记录不被回写。
+- **验证**：`node --import tsx --test --test-concurrency=1 tests/performance-statistics.test.ts tests/validation-review.test.ts tests/validation-trial.test.ts` 14/14；`tests/validation-trial-summary.test.ts` 1/1；API 夹具覆盖矛盾、重复、错实验 ID、计划外记录和审阅阻断。浏览器夹具验证告警和原始样本可见；`npm run build`、`npm run typecheck`、`npm run check:repo` 通过。此处未运行真实 Runner 测试或修改既有正式批准。
 
 ### 实验结果与统计规则的核对
 

@@ -56,6 +56,44 @@ test('missing samples, invalid resource observations and edits after a trial rem
   } finally { await r.close(); await f.close(); }
 });
 
+test('review refuses conflicting, duplicate, foreign and unplanned trial measurements', async () => {
+  const f = await startWebFixture(); const r = await prepareReviewFixture(f).catch(async error => { await f.close(); throw error; });
+  try {
+    const api = new ApiClient(f.url, { token: f.token });
+    const preview = () => api.projectAction(r.project.project_id, r.endpoint) as Promise<ValidationReview>;
+    const status = () => api.projectAction(r.project.project_id, `validation-trials/${encodeURIComponent(r.trialId)}`) as Promise<{
+      passed: boolean; summary: { issues: string[]; comparisons: Array<{ speedup: number | null }> }; measurements: unknown[] }>;
+    const initial = await preview();
+    assert.equal(initial.state, 'READY_FOR_REVIEW');
+    const original = structuredClone(r.state.measurements);
+    const check = async (message: RegExp) => {
+      const result = await status();
+      assert.equal(result.passed, false);
+      assert.match(result.summary.issues.join(' '), message);
+      assert.equal(result.measurements.length, r.state.measurements.length, 'raw records remain available');
+      const review = await preview();
+      assert.equal(review.state, 'BLOCKED');
+      await assert.rejects(api.projectAction(r.project.project_id, r.endpoint, { expected_digest: initial.evaluator_digest,
+        expected_package_digest: initial.package_digest, trial_id: r.trialId, reviewer: 'Fixture maintainer', confirm: true }), /尚未完整通过/);
+      assert.equal(f.projects.validationAssets.get(r.project, r.pkg, r.version, r.target).qualification, 'DRAFT');
+    };
+    r.state.measurements.push({ ...original[0], value: 'FAIL' });
+    await check(/正确性测量无效、重复/);
+    r.state.measurements = structuredClone(original);
+    r.state.measurements.push({ ...original[1], value: 99 });
+    await check(/性能样本无效、重复/);
+    assert.equal((await status()).summary.comparisons[0].speedup, null, 'a duplicate cannot be hidden by a selected subset');
+    r.state.measurements = structuredClone(original);
+    r.state.measurements[1].experiment_id = 'validation:other';
+    await check(/实验身份不匹配/);
+    r.state.measurements = structuredClone(original);
+    r.state.measurements.push({ ...original[1], sample_index: 99 });
+    await check(/不属于本次固定测试计划/);
+    r.state.measurements = structuredClone(original);
+    assert.equal((await preview()).state, 'READY_FOR_REVIEW', 'no history or qualification is rewritten');
+  } finally { await r.close(); await f.close(); }
+});
+
 test('reviewing one function leaves other functions editable and unqualified', async () => {
   const f = await startWebFixture(); const r = await prepareReviewFixture(f, true).catch(async error => { await f.close(); throw error; });
   try {

@@ -68,4 +68,6 @@ test('A/A calibration describes equality and bias separately from optimization a
   assert.deepEqual(equal.statistics.overall_interval, { lower: 1, upper: 1 });
   assert.equal(calibratePerformance(pack(), measurements(12, 1.1)).status, 'BIAS_DETECTED');
   assert.equal(calibratePerformance(pack(3), measurements(3, 1)).status, 'INSUFFICIENT');
+  const invalid = measurements(12, 1); invalid[0].candidate_samples.pop();
+  assert.equal(calibratePerformance(pack(), invalid).status, 'INVALID');
 });

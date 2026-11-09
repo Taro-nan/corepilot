@@ -19,9 +19,10 @@ export async function prepareReviewFixture(f: Awaited<ReturnType<typeof startWeb
     observed: { cpu_set: '0', max_runtime_threads: 1, numa_policy: { policy: 'bind', cpu_nodes: '0', memory_nodes: '0' } },
     enforcement: { cpu_set: 'ENFORCED', numa_node: 'ENFORCED', threads: 'ENFORCED' }, errors: [] };
   const now = new Date().toISOString();
+  const trialId = `validation:${randomUUID()}`;
   const state = { status: 'SUCCEEDED', commandValidity: 'VALID', measurements: [
-    { kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', subject_id: 'kernel-check', sample_index: null, value: 'PASS', unit: null, validity: 'VALID' },
-    ...(['BASELINE', 'CANDIDATE'] as const).flatMap(role => [0, 1].map(index => ({ kind: 'PERFORMANCE_SAMPLE', role,
+    { experiment_id: trialId, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', subject_id: 'kernel-check', sample_index: null, value: 'PASS', unit: null, validity: 'VALID' },
+    ...(['BASELINE', 'CANDIDATE'] as const).flatMap(role => [0, 1].map(index => ({ experiment_id: trialId, kind: 'PERFORMANCE_SAMPLE', role,
       subject_id: 'small', sample_index: index, value: role === 'BASELINE' ? 2 : 1, unit: 'seconds', validity: 'VALID' }))),
   ] };
   const runner = http.createServer((req, res) => {
@@ -55,7 +56,6 @@ export async function prepareReviewFixture(f: Awaited<ReturnType<typeof startWeb
     f.projects.saveConfig(project.project_id, { ...f.projects.config(project.project_id), runner: { mode: 'rpc', endpoint: `http://127.0.0.1:${address.port}`, token: 'review-fixture' },
       validation: { testpack: '', library_package: { package_id: pkg, package_version: version, target_id: target }, baseline_artifact: baseline } });
     const resolved = f.projects.packageLoader.resolveSelection({ package_id: pkg, package_version: version, target_id: target });
-    const trialId = `validation:${randomUUID()}`;
     const record = { schema_version: 1, trial_id: trialId, purpose: 'VALIDATION_DRAFT', project_id: project.project_id,
       package_id: pkg, package_version: version, target_id: target, evaluator_digest: resolved.bundle.content_digest,
       source_commit: f.git('rev-parse', 'HEAD'), source_branch: 'main', machine_id: null, machine_name: 'Review fixture CPU',
