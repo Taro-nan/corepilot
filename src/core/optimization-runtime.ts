@@ -528,15 +528,35 @@ export class OptimizationRuntime {
       if (!isConfirmedTerminal(status.status)) return experiment;
       if (experiment.status !== status.status) throw new Error(`conflicting terminal state for experiment '${status.experiment_id}'`);
       if (experiment.runner_terminal_facts) {
-        if (!isDeepStrictEqual(experiment.runner_terminal_facts, terminalRunnerFacts(status))) {
+        const previous = experiment.runner_terminal_facts;
+        const incoming = terminalRunnerFacts(status);
+        const { observed_context: previousContext, ...previousFacts } = previous;
+        const { observed_context: incomingContext, ...incomingFacts } = incoming;
+        const context = mergeTerminalContext(previousContext, incomingContext);
+        if (!isDeepStrictEqual(previousFacts, incomingFacts) || context === 'conflict') {
           throw new Error(`conflicting Runner terminal facts for experiment '${status.experiment_id}'`);
+        }
+        if (context === 'released') {
+          const updated = { ...experiment, runner_terminal_facts: incoming,
+            observed_context: withReleasedQueue(experiment.observed_context, incomingContext!), updated_at: this.timestamp() };
+          this.store.saveExperiment(updated);
+          return updated;
         }
       } else {
         // Old records mix Runner and Control validity/failure fields. Compare only
         // known execution facts, preserving unknowns and all existing results.
-        for (const key of ['started_at', 'ended_at', 'observed_context'] as const) {
+        for (const key of ['started_at', 'ended_at'] as const) {
           if (experiment[key] !== null && status[key] !== null && !isDeepStrictEqual(experiment[key], status[key])) {
             throw new Error(`conflicting historical Runner ${key} for experiment '${status.experiment_id}'`);
+          }
+        }
+        if (experiment.observed_context !== null && status.observed_context !== null) {
+          const context = mergeTerminalContext(experiment.observed_context, status.observed_context);
+          if (context === 'conflict') throw new Error(`conflicting historical Runner observed_context for experiment '${status.experiment_id}'`);
+          if (context === 'released') {
+            const updated = { ...experiment, observed_context: withReleasedQueue(experiment.observed_context, status.observed_context), updated_at: this.timestamp() };
+            this.store.saveExperiment(updated);
+            return updated;
           }
         }
       }
@@ -818,6 +838,26 @@ function terminalRunnerFacts(status: ExperimentStatusResponse): RunnerTerminalFa
   return { status: status.status, validity: status.validity, failure_category: status.failure_category,
     failure: structuredClone(status.failure), observed_context: structuredClone(status.observed_context),
     started_at: status.started_at, ended_at: status.ended_at };
+}
+
+/** The Runner records terminal state just before its FIFO lease is released. */
+function mergeTerminalContext(previous: Record<string, unknown> | null, incoming: Record<string, unknown> | null): 'same' | 'released' | 'conflict' {
+  if (isDeepStrictEqual(previous, incoming)) return 'same';
+  if (!previous || !incoming) return 'conflict';
+  const { runner_queue: oldQueue, ...oldContext } = previous;
+  const { runner_queue: newQueue, ...newContext } = incoming;
+  if (!isDeepStrictEqual(oldContext, newContext) || !oldQueue || !newQueue ||
+      typeof oldQueue !== 'object' || typeof newQueue !== 'object' || Array.isArray(oldQueue) || Array.isArray(newQueue)) return 'conflict';
+  const { released_at: oldRelease, ...oldRest } = oldQueue as Record<string, unknown>;
+  const { released_at: newRelease, ...newRest } = newQueue as Record<string, unknown>;
+  if (!isDeepStrictEqual(oldRest, newRest)) return 'conflict';
+  if (oldRelease === null && typeof newRelease === 'string' && Number.isFinite(Date.parse(newRelease))) return 'released';
+  if (typeof oldRelease === 'string' && newRelease === null) return 'same'; // A stale poll cannot revoke a recorded release.
+  return 'conflict';
+}
+
+function withReleasedQueue(previous: Record<string, unknown> | null, incoming: Record<string, unknown>): Record<string, unknown> {
+  return { ...previous, runner_queue: structuredClone(incoming.runner_queue) };
 }
 
 function sameFact(left: CommandExecution | Measurement, right: CommandExecution | Measurement): boolean {

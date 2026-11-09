@@ -6,6 +6,8 @@ import test from 'node:test';
 import type { ExperimentStatusResponse } from '../src/contracts/runner-rpc.js';
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
 import { SqliteTaskStore } from '../src/storage/sqlite-task-store.js';
+import { ExperimentExecutor } from '../src/runner/experiment-executor.js';
+import { SqliteRunnerStore } from '../src/runner/sqlite-runner-store.js';
 import { proposeFixtureHypothesis } from './hypothesis-fixture.js';
 import type { CommandRunResult, PerformanceGateResult, ValidationCycleResult } from '../src/workspace/validation-runner.js';
 
@@ -100,4 +102,59 @@ test('historical terminal records retain derived fields without inventing a Runn
     assert.throws(() => f.runtime.synchronizeRemoteExperiment({ ...f.remote, ended_at: '2026-02-01T00:00:00.000Z' }), /conflicting historical Runner ended_at/);
     assert.deepEqual(f.store.getExperiment(historical.experiment_id), historical);
   } finally { f.close(); }
+});
+
+test('terminal queue release advances monotonically without changing evaluation or resource facts', () => {
+  const f = fixture();
+  try {
+    const queue = { policy: 'runner-exclusive-fifo-v1', sequence: 1, enqueued_at: f.remote.started_at,
+      acquired_at: f.remote.started_at, released_at: null, wait_ms: 0 };
+    const beforeRelease = { ...f.remote, observed_context: { ...f.remote.observed_context, runner_queue: queue } };
+    const original = f.runtime.synchronizeRemoteExperiment(beforeRelease);
+    const evaluated = { ...original, validity: 'VALID' as const, failure_category: 'PERFORMANCE_REGRESSION' as const,
+      evaluation: { build: 'PASSED' as const, correctness: 'PASSED' as const, performance: 'FAILED' as const } };
+    f.store.saveExperiment(evaluated);
+    const afterRelease = { ...beforeRelease, observed_context: { ...beforeRelease.observed_context,
+      runner_queue: { ...queue, released_at: '2026-01-01T00:00:03.000Z' } } };
+    const advanced = f.runtime.synchronizeRemoteExperiment(afterRelease);
+    assert.equal((advanced.observed_context?.runner_queue as { released_at: string }).released_at, '2026-01-01T00:00:03.000Z');
+    assert.deepEqual(advanced.evaluation, evaluated.evaluation);
+    assert.equal(advanced.failure_category, evaluated.failure_category);
+    assert.equal(advanced.validity, evaluated.validity);
+    assert.deepEqual(f.runtime.synchronizeRemoteExperiment(beforeRelease), advanced, 'an older poll cannot erase the release');
+    for (const conflict of [
+      { ...afterRelease, observed_context: { ...afterRelease.observed_context, runner_queue: { ...queue, released_at: '2026-01-01T00:00:04.000Z' } } },
+      { ...afterRelease, observed_context: { ...afterRelease.observed_context, runner_queue: { ...queue, acquired_at: '2026-01-01T00:00:04.000Z', released_at: null } } },
+      { ...afterRelease, observed_context: { ...afterRelease.observed_context, resource_policy: { validity: 'VALID', cpu_set: '1' } } },
+    ]) {
+      assert.throws(() => f.runtime.synchronizeRemoteExperiment(conflict), /conflicting Runner terminal facts/);
+      assert.deepEqual(f.store.getExperiment(advanced.experiment_id), advanced);
+    }
+  } finally { f.close(); }
+});
+
+test('the real Runner may confirm queued cancellation before releasing its lane', async () => {
+  const f = fixture();
+  const runnerStore = new SqliteRunnerStore(path.join(f.root, 'runner.sqlite'));
+  const runner = new ExperimentExecutor(runnerStore, { workspaceRoot: f.root });
+  runner.initialize();
+  try {
+    const experiment = f.runtime.startExperiment({ taskId: f.task.task_id, candidateId: f.experiment.candidate_id,
+      type: 'DEVELOPMENT_FEEDBACK', initialStatus: 'PENDING' });
+    runner.submit({ experiment, steps: [{ step: 'BUILD', command: { executable: process.execPath,
+      args: ['-e', 'process.exit(0)'], cwd: f.root, environment: {}, timeout_ms: 1000 } }] });
+    assert.equal(runner.cancel(experiment.experiment_id)?.status, 'CANCELLED');
+    const before = runner.getExperiment(experiment.experiment_id)!;
+    assert.equal(before.queue?.released_at, null);
+    f.runtime.synchronizeRemoteExperiment(before);
+    let after = runner.getExperiment(experiment.experiment_id)!;
+    for (let i = 0; i < 100 && !after.queue?.released_at; i++) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      after = runner.getExperiment(experiment.experiment_id)!;
+    }
+    assert.ok(after.queue?.released_at, 'the cancelled execution releases its real Runner queue');
+    const reconciled = f.runtime.synchronizeRemoteExperiment(after);
+    assert.equal((reconciled.observed_context?.runner_queue as { released_at: string }).released_at, after.queue.released_at);
+    assert.equal(reconciled.status, 'CANCELLED');
+  } finally { await runner.shutdown(); runner.closeStore(); f.close(); }
 });
