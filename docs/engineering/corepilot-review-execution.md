@@ -11,10 +11,10 @@
 | 优先级 | 事项及当前核实 | 状态与完成条件 |
 | --- | --- | --- |
 | P0 | `testing-service.js` 导入：源码 `src/application/testing-service.ts` 已跟踪，`tsconfig.json` 使用 NodeNext；需用干净安装和构建核对编译产物与入口。 | DONE：干净工作区安装、构建、类型检查及服务启动通过，编译产物存在；报告中的源码缺失在当前提交不成立。 |
-| P0 | 新开发者安装、类型检查、构建、仓库检查、Node 和浏览器测试；以锁文件为准，提供 CI。 | IMPLEMENTED：Windows 隔离工作区的 Node 22.22.2 与 Node 24 已完成安装及回归，已增加 Linux/Windows CI；GitHub Actions 和最低 Node 22.19.0 尚未实际验证。 |
+| P0 | 新开发者安装、类型检查、构建、仓库检查、Node 和浏览器测试；以锁文件为准，提供 CI。 | IMPLEMENTED：Windows 隔离工作区已使用 Node 22.19.0 干净安装、构建和运行 Node 全量测试，另对较早版本运行网页全量测试；已增加 Linux/Windows CI，GitHub Actions 与 Linux 实机仍未验证。 |
 | P0 | 公开仓库不应跟踪本机配置和运行数据；忽略规则不能自动移除已跟踪文件。 | DONE：从 Git 索引移除根配置和本地临时模型配置，保留本机文件；加入忽略规则和检查并验证干净工作区。Git 历史中的旧版本不会因此消失。 |
-| P0 | README、贡献指南、CI、环境要求与干净克隆一致。 | IMPLEMENTED：已更新依赖及运行说明，Windows 隔离工作区的 Node 22.22.2、24 验证通过；最低 Node 22.19.0、Linux 和 GitHub Actions 尚需实际执行。 |
-| P0 | VS Code 扩展的构建和公开交付。 | NOT STARTED：现存扩展仍引用 9 个已不存在的旧模块，原版本和本轮均无法构建；根构建与 CI 不覆盖该扩展。不能将主程序构建通过等同于扩展可用，需先确定并迁移到当前公开 API。 |
+| P0 | README、贡献指南、CI、环境要求与干净克隆一致。 | IMPLEMENTED：已更新依赖及运行说明，Windows 隔离工作区 Node 22.19.0、22.22.2、24 的相应安装与检查已有记录；Linux 和 GitHub Actions 尚需实际执行。 |
+| P0 | VS Code 扩展的构建和公开交付。 | IMPLEMENTED：扩展已接回公开项目和工作流 API，打包及客户端测试纳入 CI；Windows 隔离扩展宿主加载及命令注册已验证，其他平台扩展宿主与 GitHub Actions 尚未验证。 |
 | P0 | 开源许可与发布机制。 | BLOCKED：仓库根目录没有项目许可证（VS Code 扩展有单独许可）；选择和修改项目许可证须由项目所有者授权。本次不发布 Release。 |
 | P1 | Application/Core/Runner/Evaluator/Storage/Agent 边界和实际状态所有权。 | IMPLEMENTED：现有架构图见 [系统架构](../architecture/corepilot-system.md)；部分 `core/` 仍依赖具体适配器，工作流、领域记录和 Runner 并非原子状态机，不能声明全仓治理完成。 |
 | P1 | 进程中断、重启、重复请求、远端未知、资源释放和状态一致性。 | IMPLEMENTED：启动恢复按状态查全量待处理记录；创建任务、执行终态、创建复现和恢复时的关联状态使用 SQLite 事务。Runner、Git、数据库跨资源一致性仍按原操作 ID 对账，其他状态转换尚未全面原子化。 |
@@ -26,7 +26,7 @@
 | P2 | Candidate、Baseline、Evaluator、机器、原始测量、Evidence、Approval、Delivery 的绑定和完整性。 | IMPLEMENTED：冻结包保存摘要和原始记录，新批准会重算统计并核对 RPC 计划、样本、命令与基线身份。未保存的候选二进制及自报评价程序摘要无法由控制端事后独立核验。 |
 | P2 | 不依赖原服务端目录的归档完整性核验。 | IMPLEMENTED：`corepilot evidence verify <归档> --sha256 <可信摘要> --json` 校验 V1 归档、文件清单和部分身份关联；不能证明来源、统计、审批、交付或公开安全。 |
 | P2 | 按原始样本离线重算性能数据。 | IMPLEMENTED：V1 归档在可信摘要与身份核验后，可分别重算正式实验与复验的 v3 统计；旧方案、缺失或超限明确报告。数值一致不证明来源、正确性、统计假设或审批。 |
-| P2 | 可公开归档的脱敏导出。 | NOT STARTED：当前冻结包包含私有路径和源码等信息，不能直接视为公开数据；需要独立的脱敏导出和人工检查机制。 |
+| P2 | 可公开归档的脱敏导出。 | IMPLEMENTED：两轮均通过的批准准备冻结包可投影为待人工审阅数值包，使用独立摘要核验并重算；数值仍可能敏感，失败或无结论实验及完整来源链的通用公开归档尚未实现。 |
 | P2 | 公开历史实验的完整原始证据。 | BLOCKED：现有 [Dilate3x3 证据索引](../../examples/ippi-dilate3x3-success-case/evidence-index.md) 对应的部分原件和公开授权不在仓库；不得伪造原始记录或覆盖冻结证据。 |
 | P3 | A/A、A/B 对称、独立复验、多负载评价、置信区间、退化和不足证据。 | IMPLEMENTED：已有流程与口径见 [性能可信度与复现](../guides/performance-assurance.md)；新批准要求 v3 区间并核对 evaluator 冻结统计政策，历史 v2 实验与已有批准保持原语义。离线测试不证明目标机噪声及误报率。 |
 | P3 | 异常样本处理与多轮统计方案。 | NOT STARTED：当前保留无效样本并判无效，没有经验证的异常值剔除方案；不能事后挑选样本或更改口径制造通过。 |
@@ -75,7 +75,19 @@
 - 隔离 Windows 工作区的 Node 22.22.2 对 `633c27b` 运行 `npm run build` 和 `npm run test:web`，浏览器测试 60/60 通过；测试使用本地 HTTP、Git、模型和 Runner 夹具。此后又合入终态事实与依赖修复，最终版本须另行验证。
 - 对 `16a0045` 在 Node 22.22.2 干净工作区运行构建、类型检查、仓库检查和 Node 测试，385/385 通过。浏览器 59/60：跨分支交付测试在公开记录的 `cleanup=PENDING` 时立即断言工作树已删除；断线截图产生于失败后的夹具清理。测试现等待 `cleanup=DONE` 后继续检查，遇清理失败、断连或超时仍失败；集成后 Node 22 下该测试及另外两项相关网页测试 3/3 通过。后续还有新的恢复修复，最终版本须另行验证。
 - 对 `200bc57` 在 Node 22.22.2 的两个隔离 Windows 工作区以同一锁文件执行 `npm ci`，重新运行 `npm run build`、`npm run typecheck`、`npm run check:repo`、`npm test` 和 `npm run test:web`：Node 410/410、网页 60/60 通过；编译后 CLI `--help` 也可运行。网页覆盖上述清理状态及新增原作业核对入口；模拟数据、本机 Runner 和临时 Git 夹具不代表真实目标机实验。
-- 限制：GitHub Actions 尚未实际运行。最低 Node 22.19.0 的本机下载因网络超时未能验证，也未在 Linux 验证，不宣称最低版本或跨平台通过。
+- 当时的限制：GitHub Actions 尚未实际运行，最低 Node 22.19.0 的本机下载因网络超时未能验证，也未在 Linux 验证。后续 Node 22.19.0 的验证见下方记录；Linux 和 GitHub Actions 仍未验证。
+
+### 后续干净安装与 VS Code 扩展
+
+- **干净安装**：Windows 隔离工作区对 `686cdec` 使用 Node 22.19.0 执行 `npm ci`、`npm run build` 和 `npm test`，487 项中 486 通过，1 项因本机不具备文件符号链接权限跳过。另一隔离工作区对 `7ca2245` 使用 Node 22.19.0 运行完整 Playwright 浏览器测试，81/81 通过。这些是不同提交的结果，不能视为后续集成提交的全量通过。
+- **VS Code**：原扩展引用了已删除的内部模块。扩展现使用公开项目和工作流 API，支持查看进度、报告和补丁及请求取消，创建任务转到网页；直接声明构建依赖，并将类型检查、VSIX 打包和客户端测试加入 CI。本机扩展构建及包内客户端测试 4/4 通过；Windows 独立隐藏桌面和临时用户数据目录实际加载 VSIX，14 个命令注册通过。Linux/macOS 实际扩展宿主及 GitHub Actions 未验证。
+- **依赖审计**：`npm audit --omit=dev` 为 0；完整审计仍有 3 项中危开发依赖告警，来自 VSIX 打包工具链的 `glob` / `minimatch`。尝试更高的 `vsce` 主版本后告警仍存在，未通过强制覆盖掩盖兼容性风险。
+
+### 待人工审阅的性能数值包
+
+- **问题和范围**：完整冻结证据可能含源码、路径和机器信息；原始归档完整性通过不表示可以公开。新增 `corepilot evidence export-review`，先核验可信原档摘要并分别重算正式实验与复验，再生成独立的白名单数值投影；`corepilot evidence verify-review` 使用新包摘要重算，输出不得覆盖已有文件。使用方法和限制见[离线核验证据归档](../guides/evidence-verification.md)。
+- **隐私与信任边界**：输出保留匿名负载序号、线程、权重、规则和两轮原始配对时间，不复制源码、原始标识、路径、日志或原档摘要。数值、种子和阈值仍可能敏感，标记为 `REVIEW_REQUIRED`，分享前须人工审阅。新包和摘要不证明来源、真机、正确性、批准或交付。当前仅支持两轮性能均通过的批准准备冻结包；失败或无结论实验的公开归档仍未实现。
+- **验证**：对集成提交 `cd99fa9`，使用 Node 22.19.0 运行 `node --import tsx --test --test-concurrency=1 tests/evidence-review-samples.test.ts tests/evidence-statistics-recalculation.test.ts`，7/7 通过；覆盖公开 CLI、两轮分别重算、敏感内容白名单、篡改和重签、资源上限以及不覆盖原档。均使用本机隔离夹具，不是本轮目标机性能证据。
 
 ### 测试方案试跑的测量清单
 
