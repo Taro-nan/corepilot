@@ -454,6 +454,8 @@ test('legacy point estimates remain visible without offering a new approval', as
   await expect(report).toContainText('原实验通过旧版评价口径');
   await expect(report).toContainText('确认新版测试方案');
   await expect(page.getByRole('button', { name: '审阅与批准', exact: true })).toHaveCount(0);
+  await expect(page.getByText('尚不满足当前批准条件', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('验证与交付状态')).toContainText('待补充批准依据');
   fs.mkdirSync(screenshots, { recursive: true });
   await page.screenshot({ path: path.join(screenshots, 'fixture-legacy-statistics.png'), fullPage: true });
   expect(f.store.getCandidateApproval(seeded.candidate.candidate_id)).toBeNull();
