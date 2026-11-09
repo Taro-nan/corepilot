@@ -462,6 +462,20 @@ test('legacy point estimates remain visible without offering a new approval', as
   expect(f.modelRequests.inference).toBe(0);
 });
 
+test('a missing Runner plan explains why new approval is unavailable', async ({ page }) => {
+  const f = fixture;
+  const seeded = await seedBlockedValidation(f, true);
+  const facts = seedApprovalFacts(f, seeded.workflowId);
+  const experiment = f.store.getExperiment(facts.repeated.experiment_id)!;
+  delete experiment.declared_context.runner_execution_plan;
+  f.store.saveExperiment(experiment);
+  await login(page);
+  await page.goto(f.url + '/#/tasks/' + encodeURIComponent(seeded.workflowId));
+  await expect(page.locator('.customer-report-summary')).toContainText('缺少原始 Runner 执行计划');
+  await expect(page.getByRole('button', { name: '审阅与批准', exact: true })).toHaveCount(0);
+  expect(f.store.getCandidateApproval(seeded.candidate.candidate_id)).toBeNull();
+});
+
 test('task filters survive refresh and detail navigation without surfacing raw identifiers by default', async ({ page }) => {
   const f = fixture;
   f.projects.add({ name: 'Filter fixture', repository_root: f.repo, config_path: f.configPath });

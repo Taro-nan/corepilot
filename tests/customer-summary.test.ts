@@ -10,7 +10,7 @@ function report(): OptimizationReport {
   workflow.candidate_commit = 'frozen'; workflow.candidate_tree = 'tree'; workflow.baseline_commit = 'base-source';
   const fact = (id: string, type: string, ratio: number) => ({ experiment: {
     experiment_id: id, type, task_id: workflow.optimization_task_id, candidate_id: workflow.candidate_id, status: 'SUCCEEDED', validity: 'VALID', evaluator: { id: 'e', version: '1', digest: 'e'.repeat(64) },
-    failure_category: null, baseline: { id: 'baseline', digest: 'b'.repeat(64) }, observed_context: { machine: { machine_identity_sha256: 'a'.repeat(64) }, runner_queue: { wait_ms: 100 }, resource_policy: { validity: 'VALID' } },
+    failure_category: null, baseline: { id: 'baseline', digest: 'b'.repeat(64) }, declared_context: { runner_execution_plan: { fixture: true } }, observed_context: { machine: { machine_identity_sha256: 'a'.repeat(64) }, runner_queue: { wait_ms: 100 }, resource_policy: { validity: 'VALID' } },
     evaluation: { build: 'PASSED', correctness: 'PASSED', performance: 'PASSED', correctness_coverage: { planned: 4, executed: 4, passed: 4, failed: 0, complete: true },
       details: { performance_gate: { gate_version: 3, weighted_geomean: ratio,
         statistics: { policy: { method: 'paired-block-bootstrap-v1', confidence_level: 0.95 }, verdict: 'PASSED', overall_interval: null } } },
@@ -58,6 +58,15 @@ test('correctness-only verification does not imply performance approval', () => 
   assert.equal(summary.state, 'BLOCKED');
   assert.match(summary.conclusion, /未测量性能/);
   assert.match(summary.next_step.message, /只验证了正确性/);
+});
+
+test('missing Runner plan is surfaced before starting a new approval', () => {
+  const r = report();
+  delete r.experiments[1].experiment.declared_context.runner_execution_plan;
+  const summary = customerSummary(r);
+  assert.equal(summary.verification.ready, true);
+  assert.equal(summary.state, 'BLOCKED');
+  assert.match(summary.next_step.message, /缺少原始 Runner 执行计划/);
 });
 
 test('missing, invalid, incomplete or mismatched independent evidence cannot recommend delivery', () => {
