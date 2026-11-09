@@ -32,6 +32,9 @@ export function configuredOptimizationFunction(configPath: string, packageLoader
 
 /** Validate the same inputs as submission without creating a task or calling a model. */
 export async function checkOptimization(configPath: string, functionName?: string, options: CheckOptimizationOptions = {}): Promise<{ message: string; function_name: string }> {
+  if (options.verificationMode !== 'source_only' && options.candidateScope !== undefined) {
+    throw new Error('源码修改范围仅适用于仅源码优化；正式验证使用已确认测试方案的范围。');
+  }
   if (options.verificationMode === 'source_only') {
     if (!functionName?.trim()) throw new Error('请选择要优化的函数；源码优化无需测试方案。');
     const preflight = loadSourceOptimizationPreflight({ verification_mode: 'source_only', config_path: configPath,

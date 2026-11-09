@@ -6,6 +6,8 @@ import { ApiClient } from '../src/client/api-client.js';
 import { parseOptimizeCliInput } from '../src/config/optimize-cli-input.js';
 import { startWebFixture, runFixtureCli } from './web-fixture.js';
 import { createTestingFixture, testingPlanRef, waitTestingPreparation } from './testing-fixture.js';
+import { runCommandArgs } from '../src/cli-interactive/commands.js';
+import type { WorkbenchContext } from '../src/cli-interactive/context.js';
 
 test('independent testing assets are available without a source project through HTTP and CLI', async () => {
   const fixture = await startWebFixture();
@@ -79,6 +81,56 @@ test('CLI source-only is explicit and does not silently change old optimization 
     { include: ['kernel.c', 'src/'], exclude: ['src/tests/'] });
   assert.equal(parseOptimizeCliInput(['--project', 'project-1']).verificationMode, undefined);
   assert.throws(() => parseOptimizeCliInput(['--project', 'project-1', '--source-only', '--performance']), /不能/);
+});
+
+test('CLI and HTTP preflight reject source scopes outside source-only mode', async () => {
+  const fixture = await startWebFixture();
+  try {
+    const project = fixture.projects.add({ name: 'Scope preflight', repository_root: fixture.repo, config_path: fixture.configPath, source_branch: 'main' });
+    const url = `${fixture.url}/v1/projects/${encodeURIComponent(project.project_id)}/check`;
+    const headers = { authorization: `Bearer ${fixture.token}`, 'content-type': 'application/json' };
+    for (const body of [
+      { function_name: 'kernel', candidate_scope: { include: ['kernel.c'], exclude: [] } },
+      { function_name: 'kernel', verification_mode: 'verified', candidate_scope: { include: ['kernel.c'], exclude: [] } },
+      { function_name: 'kernel', verification_mode: 'verified', candidate_scope: null },
+    ]) {
+      const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      assert.equal(response.status, 400);
+      const error = await response.json() as { error: { code: string; message: string } };
+      assert.equal(error.error.code, 'PROJECT_OPERATION_FAILED');
+      assert.match(error.error.message, /仅适用于仅源码优化/);
+    }
+    const source = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ function_name: 'kernel', verification_mode: 'source_only',
+      candidate_scope: { include: ['kernel.c'], exclude: ['tests/'] } }) });
+    assert.equal(source.status, 200);
+    assert.match((await source.json() as { message: string }).message, /允许修改：kernel\.c/);
+    const verified = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ function_name: 'kernel', verification_mode: 'verified' }) });
+    assert.equal(verified.status, 200, JSON.stringify(await verified.json()));
+
+    for (const flag of ['--allow', '--exclude']) {
+      const cli = await runFixtureCli(fixture.url, fixture.token, ['check', '--config', fixture.configPath, '--function', 'kernel', flag, 'kernel.c']);
+      assert.equal(cli.code, 1);
+      assert.match(cli.stderr, /仅适用于仅源码优化/);
+      assert.doesNotMatch(cli.stdout, /检查通过/);
+    }
+    const cliSource = await runFixtureCli(fixture.url, fixture.token, ['check', '--config', fixture.configPath, '--function', 'kernel',
+      '--source-only', '--allow', 'kernel.c', '--exclude', 'tests/']);
+    assert.equal(cliSource.code, 0, cliSource.stderr);
+    assert.match(cliSource.stdout, /允许修改：kernel\.c/);
+    assert.match(cliSource.stdout, /排除：tests\//);
+    const help = await runFixtureCli(fixture.url, fixture.token, ['check', '--help']);
+    assert.equal(help.code, 0, help.stderr);
+    assert.match(help.stdout, /--allow \/ --exclude 仅用于 --source-only/);
+    const projectCli = await runFixtureCli(fixture.url, fixture.token, ['project', 'check', project.project_id, '--allow', 'kernel.c']);
+    assert.equal(projectCli.code, 1);
+    assert.match(projectCli.stderr, /Unknown option|未知选项/i);
+    const noIo = { print: () => {}, error: () => {}, prompt: async () => null, select: async <T>() => null as T | null, confirm: async () => false };
+    const interactive = await runCommandArgs({} as WorkbenchContext, '/check', ['--allow', 'kernel.c'], noIo);
+    assert.equal(interactive.ok, false);
+    assert.match(interactive.message, /不接受参数/);
+    assert.equal(fixture.modelRequests.inference, 0);
+    assert.equal(fixture.service.list().length, 0);
+  } finally { await fixture.close(); }
 });
 
 test('HTTP and CLI share an independent file comparison, its persisted identity, results and cancellation', async () => {

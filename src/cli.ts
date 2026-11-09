@@ -219,7 +219,10 @@ async function check(args: string[]): Promise<number> {
   try {
     const parsed = parseArgs({ args, strict: true, options: { config: { type: 'string' }, function: { type: 'string' }, 'source-only': { type: 'boolean' }, branch: { type: 'string' }, allow: { type: 'string', multiple: true }, exclude: { type: 'string', multiple: true } } });
     const result = await checkOptimization(path.resolve(parsed.values.config ?? 'corepilot.yaml'), parsed.values.function,
-      { ...(parsed.values['source-only'] ? { verificationMode: 'source_only' as const, candidateScope: { include: parsed.values.allow ?? [], exclude: parsed.values.exclude ?? [] } } : {}), repositoryRoot: process.cwd(), sourceBranch: parsed.values.branch });
+      { ...(parsed.values['source-only'] ? { verificationMode: 'source_only' as const } : {}),
+        ...(parsed.values['source-only'] || parsed.values.allow !== undefined || parsed.values.exclude !== undefined
+          ? { candidateScope: { include: parsed.values.allow ?? [], exclude: parsed.values.exclude ?? [] } } : {}),
+        repositoryRoot: process.cwd(), sourceBranch: parsed.values.branch });
     console.log(result.message);
     return 0;
   } catch (error) { return fail(`运行条件检查失败：${(error as Error).message}`); }
@@ -455,6 +458,7 @@ async function libraryPackageCommand(args: string[]): Promise<number> {
 export async function runCli(argv: string[]): Promise<number> {
   const [command, ...args] = argv;
   if (command === 'optimize' && (args.includes('--help') || args.includes('-h'))) { console.log(renderOptimizeCliHelp()); return 0; }
+  if (command === 'check' && (args.includes('--help') || args.includes('-h'))) { console.log(renderCliHelp()); return 0; }
   if (command === 'workflow' && (args.includes('--help') || args.includes('-h'))) { console.log(renderCliHelp()); return 0; }
   if (!command) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) return fail('交互式工作台需要终端；使用 corepilot --help 查看命令');

@@ -621,6 +621,7 @@ export async function runCommandArgs(ctx: WorkbenchContext, name: string, args: 
     if (name === '/workflow') return await workflow(ctx, args, io);
     if (name === '/validation') return await configureValidation(ctx, io);
     if (name === '/check') {
+      if (args.length) return { ok: false, message: '/check 不接受参数。源码范围预检请使用 corepilot check --source-only --allow <文件或目录/>。' };
       const loaded = loadOptimizationConfig(ctx.configPath);
       if (isRegisteredRunner(loaded.config.runner)) {
         const api = await ctx.getApi();

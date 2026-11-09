@@ -28,7 +28,8 @@ export function renderCliHelp(): string {
     '    探索预算：[--budget-minutes <分钟>] [--max-candidates <候选数>]；默认 60 分钟 / 8 个候选。',
     '    --source-only --allow <文件或目录/> [--exclude <文件或目录/>]：仅生成优化代码；选项可重复。',
     '    修改范围需明确授权；正确性未验证、性能未测量，不能直接批准或交付。',
-    '  corepilot check [--config <path>] [--function <name>] [--source-only --allow <文件或目录/>]',
+    '  corepilot check [--config <path>] [--function <name>] [--source-only --allow <文件或目录/> [--exclude <路径>]]',
+    '    --allow / --exclude 仅用于 --source-only；正式验证使用已确认的测试方案范围。',
     '  corepilot serve --db <path> [--host <host>] [--port <port>] [--ssh-alias <alias> | --ssh-host <host> --ssh-username <user> [--ssh-port <port>] [--ssh-identity-file <path>]]',
     '  corepilot backend start|status|stop --config <path>',
     '  corepilot workflow list [--limit <1..200>] [--json] [--config <path>]',
@@ -67,7 +68,7 @@ export const WORKBENCH_COMMANDS: readonly WorkbenchCommandSpec[] = [
   { name: '/build', description: '配置构建命令', usage: '/build' },
   { name: '/target', description: '配置或切换目标机器', usage: '/target' },
   { name: '/validation', description: '选择 Library Package 或 testpack，配置 Runner', usage: '/validation' },
-  { name: '/check', description: '检查配置、验证资产与 Runner 连接', usage: '/check' },
+  { name: '/check', description: '检查配置、验证资产与 Runner 连接；源码范围请使用 corepilot check --source-only --allow', usage: '/check' },
   { name: '/config', description: '显示当前 YAML 配置内容', usage: '/config' },
   { name: '/exit', description: '退出工作台', usage: '/exit' },
 ];
