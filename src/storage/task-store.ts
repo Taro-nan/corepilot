@@ -3,7 +3,7 @@ import type { Event, RunnerJob, Task, TaskStatus } from '../contracts/index.js';
 import type { OptimizationStore } from './optimization-store.js';
 import type { ProjectRecord } from '../contracts/project.js';
 import type { ExecutionMachineRecord } from '../contracts/execution-machine.js';
-import type { Experiment, OptimizationTask } from '../contracts/optimization-domain.js';
+import type { Candidate, Experiment, OptimizationTask } from '../contracts/optimization-domain.js';
 import type { OptimizationWorkflowRecord, WorkflowExecutionOutcomePatch } from '../contracts/workflow.js';
 
 export interface LeaseRecord {
@@ -40,6 +40,8 @@ export interface TaskStore extends OptimizationStore {
   saveOptimizationWorkflowJson(workflowId: string, workflowJson: string): void;
   /** Atomically create the task and workflow, or return the existing matching request. */
   createOptimizationIntake(task: OptimizationTask, workflow: OptimizationWorkflowRecord): { workflowId: string; created: boolean };
+  /** Atomically attach a verified workflow checkpoint, reconciling a recovered candidate identity. */
+  attachOptimizationCandidate(workflowId: string, candidate: Candidate): Candidate;
   /** Append a non-retroactive scope authorization when resuming an older source-only task. */
   authorizeLegacySourceContinuation(expectedWorkflowJson: string, workflow: OptimizationWorkflowRecord): void;
   /** Commit the worker outcome and its Task status together without changing experiments or approval. */

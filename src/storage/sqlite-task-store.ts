@@ -37,6 +37,18 @@ interface JsonRecordRow {
   record_json: string;
 }
 
+function sameCandidateSource(left: Candidate['source'], right: Candidate['source']): boolean {
+  if (!left || !right || left.repository !== right.repository || left.commit !== right.commit || left.tree !== right.tree ||
+      left.archive_sha256 !== right.archive_sha256 || !Array.isArray(left.changed_files) || !Array.isArray(right.changed_files) ||
+      left.changed_files.length !== right.changed_files.length) return false;
+  const byPath = new Map(left.changed_files.map(file => [file.path, file]));
+  if (byPath.size !== left.changed_files.length || new Set(right.changed_files.map(file => file.path)).size !== right.changed_files.length) return false;
+  return right.changed_files.every(file => {
+    const old = byPath.get(file.path);
+    return !!old && old.before_sha256 === file.before_sha256 && old.after_sha256 === file.after_sha256;
+  });
+}
+
 /** SQLite 只保存通用任务、服务租约和 public workflow。 */
 export class SqliteTaskStore implements TaskStore {
   private readonly db: DatabaseSync;
@@ -299,6 +311,45 @@ export class SqliteTaskStore implements TaskStore {
       this.saveOptimizationTask(task);
       this.saveOptimizationWorkflowJson(workflow.workflow_id, JSON.stringify(workflow));
       return { workflowId: workflow.workflow_id, created: true };
+    });
+  }
+
+  attachOptimizationCandidate(workflowId: string, candidate: Candidate): Candidate {
+    return this.transaction(() => {
+      const json = this.getOptimizationWorkflowJson(workflowId);
+      const workflow = json ? JSON.parse(json) as OptimizationWorkflowRecord : null;
+      const task = this.getOptimizationTask(candidate.task_id);
+      if (!workflow || workflow.optimization_task_id !== candidate.task_id || workflow.status !== 'GENERATING' ||
+          !task || task.workflow_id !== workflowId || task.status !== 'RUNNING' || candidate.status !== 'FROZEN') {
+        throw new Error('候选与当前活动工作流或任务不匹配，请保留现场并核对。');
+      }
+      const candidates = this.listCandidates(candidate.task_id);
+      const sameCommit = candidates.filter(item => item.source.commit === candidate.source.commit);
+      if (sameCommit.length > 1) throw new Error('同一源码提交存在多个历史候选，无法自动确定恢复身份，请保留现场并核对。');
+      const previous = sameCommit[0];
+      let resolved = candidate;
+      if (previous) {
+        if (candidates.at(-1)?.candidate_id !== previous.candidate_id || previous.hypothesis_id !== candidate.hypothesis_id ||
+            previous.status !== 'FROZEN' || !sameCandidateSource(previous.source, candidate.source) ||
+            this.listExperiments(candidate.task_id).some(item => item.candidate_id === previous.candidate_id)) {
+          throw new Error('已保存候选与恢复检查点不一致或已有实验，请保留现场并核对原候选与实验。');
+        }
+        resolved = previous;
+      } else {
+        const parent = candidates.at(-1) ?? null;
+        if (candidate.parent_candidate_id !== (parent?.candidate_id ?? null) || candidate.sequence !== (parent?.sequence ?? 0) + 1) {
+          throw new Error('候选谱系在保存前已变化，请保留现场并重新核对。');
+        }
+      }
+      const currentId = workflow.candidate_id ?? null;
+      if (currentId !== resolved.candidate_id && currentId !== resolved.parent_candidate_id) {
+        throw new Error('工作流候选引用与检查点不一致，请保留现场并核对。');
+      }
+      if (!previous) this.createCandidate(candidate);
+      if (currentId !== resolved.candidate_id) {
+        this.saveOptimizationWorkflowJson(workflowId, JSON.stringify({ ...workflow, candidate_id: resolved.candidate_id, updated_at: new Date().toISOString() }));
+      }
+      return resolved;
     });
   }
 

@@ -148,6 +148,76 @@ test('candidate-budget exhaustion resumes the same workflow after service restar
   } finally { await f.close(); }
 });
 
+test('verified checkpoint recovery reuses the persisted Candidate after the session write is interrupted', async () => {
+  const f = await fixture(0);
+  const attach = f.store.attachOptimizationCandidate.bind(f.store);
+  let interrupted = false;
+  try {
+    f.store.attachOptimizationCandidate = (_workflowId, candidate) => {
+      // Reproduce the pre-transaction crash window left by older versions.
+      f.store.createCandidate(candidate);
+      interrupted = true;
+      throw new Error('injected interruption after Candidate insert');
+    };
+    const id = await f.start();
+    let interruptedRecord = f.service.get(id)!;
+    for (let i = 0; i < 800; i++) {
+      interruptedRecord = f.service.get(id)!;
+      if (interruptedRecord.status === 'FAILED' && !f.service.activeWorkflowIds().length) break;
+      await delay(25);
+    }
+    assert.equal(interrupted, true);
+    assert.equal(interruptedRecord.status, 'FAILED');
+    const before = f.store.listCandidates(interruptedRecord.optimization_task_id!);
+    assert.equal(before.length, 1);
+    assert.equal(f.store.listExperiments(interruptedRecord.optimization_task_id!).length, 0);
+    f.store.attachOptimizationCandidate = attach;
+    await f.restart();
+    await f.api.resumeOptimizationWorkflow(id);
+    const finished = await f.wait('WAITING_APPROVAL');
+    const after = f.store.listCandidates(finished.optimization_task_id!);
+    assert.equal(after.length, 2, 'the interrupted first checkpoint must not create a duplicate Candidate');
+    assert.deepEqual(after[0], before[0]);
+    assert.equal(after[1].parent_candidate_id, before[0].candidate_id);
+    assert.equal(f.store.listExperiments(finished.optimization_task_id!).length, 3);
+  } finally { f.store.attachOptimizationCandidate = attach; await f.close(); }
+});
+
+test('a lost acknowledgement after Candidate and Workflow commit resumes the same identity', async () => {
+  const f = await fixture(0);
+  const attach = f.store.attachOptimizationCandidate.bind(f.store);
+  let interrupted = false;
+  try {
+    f.store.attachOptimizationCandidate = (workflowId, candidate) => {
+      const saved = attach(workflowId, candidate);
+      if (!interrupted) { interrupted = true; throw new Error('injected lost checkpoint acknowledgement'); }
+      return saved;
+    };
+    const id = await f.start();
+    let before = f.service.get(id)!;
+    for (let i = 0; i < 800; i++) {
+      before = f.service.get(id)!;
+      if (before.status === 'FAILED' && !f.service.activeWorkflowIds().length) break;
+      await delay(25);
+    }
+    assert.equal(interrupted, true);
+    assert.equal(before.status, 'FAILED');
+    const candidates = f.store.listCandidates(before.optimization_task_id!);
+    assert.equal(candidates.length, 1);
+    assert.equal(before.candidate_id, candidates[0].candidate_id);
+    assert.equal(f.store.listExperiments(before.optimization_task_id!).length, 0);
+    f.store.attachOptimizationCandidate = attach;
+    await f.restart();
+    await f.api.resumeOptimizationWorkflow(id);
+    const finished = await f.wait('WAITING_APPROVAL');
+    const after = f.store.listCandidates(finished.optimization_task_id!);
+    assert.equal(after.length, 2);
+    assert.deepEqual(after[0], candidates[0]);
+    assert.equal(after[1].parent_candidate_id, candidates[0].candidate_id);
+    assert.equal(f.store.listExperiments(finished.optimization_task_id!).length, 3);
+  } finally { f.store.attachOptimizationCandidate = attach; await f.close(); }
+});
+
 test('stopping Control preserves an in-progress Agent session and allows continuation after restart', async () => {
   const f = await fixture(0, undefined, true);
   try {

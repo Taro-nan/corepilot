@@ -323,6 +323,13 @@ export class OptimizationRuntime {
   }
 
   recordCandidate(input: RecordCandidateInput): Candidate {
+    const candidate = this.prepareCandidate(input);
+    this.store.createCandidate(candidate);
+    return candidate;
+  }
+
+  /** Build a validated Candidate fact for a caller that must atomically link it to a workflow. */
+  prepareCandidate(input: RecordCandidateInput): Candidate {
     const task = this.getTask(input.taskId);
     const hypothesis = this.getHypothesis(input.hypothesisId);
     if (hypothesis.task_id !== input.taskId || hypothesis.status === 'ABANDONED') throw new Error('Candidate requires an active Hypothesis from the same task');
@@ -352,7 +359,6 @@ export class OptimizationRuntime {
       agent_identity: { ...input.agentIdentity },
       created_at: this.timestamp(),
     };
-    this.store.createCandidate(candidate);
     return candidate;
   }
 

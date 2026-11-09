@@ -664,7 +664,7 @@ export class OptimizationWorkflowService {
         signal,
         lifecycle: {
           candidateCheckpointed: ({ workspace, checkpoint, agent }) => {
-            const candidate = this.runtime.recordCandidate({
+            const candidate = this.runtime.prepareCandidate({
               taskId,
               hypothesisId: agent.hypothesis_id!,
               workspace,
@@ -679,8 +679,7 @@ export class OptimizationWorkflowService {
                 tool_calls: agent.tool_calls,
               },
             });
-            update({ candidate_id: candidate.candidate_id });
-            return candidate.candidate_id;
+            return this.options.store.attachOptimizationCandidate(workflowId, candidate).candidate_id;
           },
           experimentStarted: ({ candidateId }) => {
             const experiment = this.runtime.startExperiment({
