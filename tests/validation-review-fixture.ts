@@ -24,7 +24,7 @@ export async function prepareReviewFixture(f: Awaited<ReturnType<typeof startWeb
   const payload = (role: string) => {
     const input = `/fixture/${role}.so`, fileId = { device: '1', inode: '42' };
     return { artifact_identity: { input_path: input, resolved_symbol_path: input, sha256: 'a'.repeat(64) },
-      runner_artifact_path_check: { input_realpath: input, input_file_id: fileId,
+      runner_artifact_path_check: { planned_path: input, input_realpath: input, input_file_id: fileId,
         reported_paths: [{ field: 'input_path', path: input, realpath: input, file_id: fileId },
           { field: 'resolved_symbol_path', path: input, realpath: input, file_id: fileId }] } };
   };

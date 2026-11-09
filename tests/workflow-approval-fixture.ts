@@ -132,7 +132,7 @@ export function seedApprovalFacts(f: Awaited<ReturnType<typeof startWebFixture>>
         f.store.appendMeasurement({ ...output, schema_version: 1, measurement_id: `measurement:${randomUUID()}`, experiment_id: experiment.experiment_id,
           evaluator: { id: manifest.evaluator_id, version: manifest.version, digest }, recorded_at: now,
           domain_payload: { ...output.domain_payload, evaluator_identity: { id: manifest.evaluator_id, version: manifest.version, digest }, resource_policy: { validity: 'VALID' },
-            runner_artifact_path_check: { input_realpath: context!.artifact.path, input_file_id: fileId,
+            runner_artifact_path_check: { planned_path: context!.artifact.path, input_realpath: context!.artifact.path, input_file_id: fileId,
               reported_paths: [{ field: 'input_path', path: context!.artifact.path, realpath: context!.artifact.path, file_id: fileId },
                 { field: 'resolved_symbol_path', path: context!.artifact.path, realpath: context!.artifact.path, file_id: fileId }] } } });
       }

@@ -15,7 +15,8 @@ export function summarizeTestingTask(task: TestingTaskRecord, measurements: Meas
     if (!identity || typeof identity !== 'object' || Array.isArray(identity) ||
         typeof (identity as Record<string, unknown>).sha256 !== 'string' ||
         !/^[a-f0-9]{64}$/i.test((identity as Record<string, string>).sha256)) return false;
-    return runnerArtifactPathCheckMatches(identity, payload.runner_artifact_path_check, task.plan.function_name);
+    const subject = row.role === 'BASELINE' ? task.subjects?.baseline : task.subjects?.candidate;
+    return !!subject && runnerArtifactPathCheckMatches(identity, payload.runner_artifact_path_check, task.plan.function_name, subject.artifact_path);
   };
   const caseIds = task.input.mode === 'performance' ? [] : task.plan.cases.map(row => row.case_id);
   const failed: string[] = [], missing: string[] = [], invalid: string[] = []; let passed = 0;

@@ -10,8 +10,9 @@ const samePath = (left: string, right: string): boolean => {
 };
 
 /** Validate a Runner's retained file-identity check, not the evaluator's claim that it called a symbol. */
-export function runnerArtifactPathCheckMatches(identity: unknown, check: unknown, api: string): boolean {
-  if (!object(identity) || !object(check) || !absolute(check.input_realpath) || !fileId(check.input_file_id)) return false;
+export function runnerArtifactPathCheckMatches(identity: unknown, check: unknown, api: string, expectedPath?: string): boolean {
+  if (!object(identity) || !object(check) || !absolute(check.planned_path) || !absolute(check.input_realpath) || !fileId(check.input_file_id) ||
+      expectedPath !== undefined && (!absolute(expectedPath) || !samePath(check.planned_path, expectedPath))) return false;
   const inputId = check.input_file_id, inputRealpath = check.input_realpath;
   const apiKey = `resolved_${api.replace(/[^A-Za-z0-9_]/g, '_')}_path`;
   const resolvedFields = ['resolved_symbol_path', apiKey].filter((key, index, fields) => fields.indexOf(key) === index && Object.hasOwn(identity, key));

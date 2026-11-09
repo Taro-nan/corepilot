@@ -45,6 +45,7 @@ test('new evidence rejects wrong units, parameters, binary identities, missing p
       { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { delete row.domain_payload.artifact_identity; } },
       { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { (row.domain_payload.artifact_identity as Record<string, unknown>).resolved_symbol_path = '/another/library.so'; } },
       { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { (row.domain_payload.artifact_identity as Record<string, unknown>)[`resolved_${facts.workflow.function_name}_path`] = '/another/library.so'; } },
+      { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { (row.domain_payload.runner_artifact_path_check as Record<string, unknown>).planned_path = '/another/library.so'; } },
       { experiment: facts.first.experiment_id, kind: 'CORRECTNESS_CASE', role: 'EVALUATOR', change: row => { delete row.domain_payload.evaluator_binary_identity; } },
       { experiment: facts.first.experiment_id, kind: 'PERFORMANCE_SAMPLE', role: 'CANDIDATE', change: row => { delete row.domain_payload.benchmark_identity; } },
       { experiment: facts.repeated.experiment_id, kind: 'PERFORMANCE_SAMPLE', role: 'CANDIDATE', change: row => { (row.domain_payload.artifact_identity as Record<string, unknown>).sha256 = '2'.repeat(64); } },
@@ -109,7 +110,7 @@ test('new evidence permits a remote alias only with a consistent Runner file ide
     await assert.rejects(api.prepareWorkflowEvidence(seeded.workflowId), /缺少 Runner 库路径核对记录/);
     const fileId = { device: '1', inode: '42' };
     const inputPath = (altered.domain_payload.artifact_identity as { input_path: string }).input_path;
-    altered.domain_payload.runner_artifact_path_check = { input_realpath: '/runner/real/library.so', input_file_id: fileId,
+    altered.domain_payload.runner_artifact_path_check = { planned_path: inputPath, input_realpath: '/runner/real/library.so', input_file_id: fileId,
       reported_paths: [{ field: 'input_path', path: inputPath, realpath: '/runner/real/library.so', file_id: fileId },
         { field: 'resolved_symbol_path', path: '/runner/alias/library.so', realpath: '/runner/other.so', file_id: { ...fileId, inode: '99' } }] };
     writeRow.run(JSON.stringify(altered), altered.measurement_id);

@@ -1444,7 +1444,7 @@ function validateMeasurementArtifactIdentity(
   context: FormalExecutionContext,
   artifactDigest: string,
   bundle: LoadedFormalEvaluatorBundle | null,
-): { input_realpath: string; input_file_id: { device: string; inode: string }; reported_paths: Array<{
+): { planned_path: string; input_realpath: string; input_file_id: { device: string; inode: string }; reported_paths: Array<{
   field: string; path: string; realpath: string; file_id: { device: string; inode: string };
 }> } {
   if (Object.hasOwn(observation.domain_payload, 'runner_artifact_path_check')) {
@@ -1498,7 +1498,8 @@ function validateMeasurementArtifactIdentity(
       !/^[0-9a-f]{64}$/i.test((binary as Record<string, unknown>).sha256 as string)) {
     throw new Error(`formal measurement '${context.subject_id}' has invalid ${binaryField}`);
   }
-  return { input_realpath: inputRealpath, input_file_id: { device: String(inputStat.dev), inode: String(inputStat.ino) }, reported_paths: reportedPaths };
+  return { planned_path: context.artifact.path, input_realpath: inputRealpath,
+    input_file_id: { device: String(inputStat.dev), inode: String(inputStat.ino) }, reported_paths: reportedPaths };
 }
 
 function evaluatorIdentity(evaluator: StagedEvaluatorIdentity): Record<string, string> {

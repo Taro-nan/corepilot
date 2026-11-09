@@ -115,7 +115,7 @@ export function assertMeasurementTrace(input: { candidate: Candidate; experiment
     const pathCheck = row.domain_payload.runner_artifact_path_check;
     if (pathCheck === undefined) {
       return fail(`用例 ${context.subject_id} 缺少 Runner 库路径核对记录；请升级 Runner 并重新执行正式实验和独立复验`);
-    } else if (!runnerArtifactPathCheckMatches(identity, pathCheck, bundle.manifest.domain.api)) {
+    } else if (!runnerArtifactPathCheckMatches(identity, pathCheck, bundle.manifest.domain.api, context.artifact.path)) {
       return fail(`用例 ${context.subject_id} 的 Runner 库路径核对记录无效`);
     }
     const digest = identity.sha256.toLowerCase();
