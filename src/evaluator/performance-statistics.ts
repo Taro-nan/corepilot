@@ -39,7 +39,7 @@ export function evaluateStatisticalPerformance(testpack: StatisticalInput, input
     if (baseline.length < policy.min_samples) { issues.push(`${spec.case_id}: ${baseline.length} samples; frozen plan requires at least ${policy.min_samples}`); insufficient = true; }
     const bm = median(baseline), cm = median(candidate), speedup = bm / cm;
     if (!Number.isFinite(bm) || !Number.isFinite(cm) || !Number.isFinite(speedup) || speedup <= 0) {
-      issues.push(`non-representable median or ratio: ${spec.case_id}`); invalid = true; continue;
+      issues.push(`负载 ${spec.case_id} 的中位数或比值超出可计算范围。`); invalid = true; continue;
     }
     workloads.push({ case_id: spec.case_id, baseline_samples: [...baseline], candidate_samples: [...candidate], baseline_median: bm, candidate_median: cm,
       speedup, critical: spec.critical || testpack.performance.key_cases.includes(spec.case_id), regression: false });
@@ -49,7 +49,7 @@ export function evaluateStatisticalPerformance(testpack: StatisticalInput, input
   const geomean = (values: number[]) => Math.exp(values.reduce((sum, value, i) => sum + Math.log(value) * declared[i].weight, 0) / weightTotal);
   let weighted = workloads.length === declared.length && weightTotal > 0 && Number.isFinite(weightTotal) ? geomean(workloads.map(row => row.speedup)) : 0;
   if (workloads.length === declared.length && weightTotal > 0 && (!Number.isFinite(weighted) || weighted <= 0)) {
-    issues.push('non-representable weighted geometric mean'); invalid = true; weighted = 0;
+    issues.push('综合性能几何平均值超出可计算范围。'); invalid = true; weighted = 0;
   }
   const sampleDigest = createHash('sha256').update(JSON.stringify({ policy, declared, samples: workloads.map(row => ({ id: row.case_id, baseline: row.baseline_samples, candidate: row.candidate_samples,
     ...(input.find(item => item.case_id === row.case_id)?.sample_indices ? { indices: input.find(item => item.case_id === row.case_id)!.sample_indices } : {}) })) })).digest('hex');
@@ -72,7 +72,7 @@ export function evaluateStatisticalPerformance(testpack: StatisticalInput, input
       totals.push(total);
     }
     if (calculationInvalid) {
-      issues.push('non-representable bootstrap ratio or weighted geometric mean');
+      issues.push('重采样比值或综合性能计算超出可计算范围。');
       statistics.verdict = 'INVALID';
     } else {
       const alpha = 1 - policy.confidence_level;
