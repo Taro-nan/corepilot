@@ -31,6 +31,7 @@ import { TestingService } from './application/testing-service.js';
 import { executeTestingCommand } from './client/testing-commands.js';
 import { verifyFrozenEvidenceArchive } from './workspace/frozen-evidence.js';
 import { recalculateFrozenEvidenceArchive } from './application/evidence-statistics-recalculation.js';
+import { exportReviewSamples, verifyReviewSamples } from './application/evidence-review-samples.js';
 
 function fail(message: string): number { console.error(`corepilot: ${message}`); return 1; }
 function serverUrl(): string { return process.env.COREPILOT_SERVER_URL ?? 'http://127.0.0.1:4317'; }
@@ -38,9 +39,19 @@ function serverUrl(): string { return process.env.COREPILOT_SERVER_URL ?? 'http:
 function evidenceCommand(args: string[]): number {
   try {
     const parsed = parseArgs({ args, allowPositionals: true, strict: true,
-      options: { sha256: { type: 'string' }, json: { type: 'boolean' }, 'recalculate-performance': { type: 'boolean' } } });
-    if (parsed.positionals.length !== 2 || parsed.positionals[0] !== 'verify' || !parsed.values.sha256) {
-      throw new Error('用法：corepilot evidence verify <归档文件> --sha256 <可信渠道提供的 SHA-256> [--recalculate-performance] [--json]');
+      options: { sha256: { type: 'string' }, output: { type: 'string' }, json: { type: 'boolean' }, 'recalculate-performance': { type: 'boolean' } } });
+    const [action, filename] = parsed.positionals;
+    if (parsed.positionals.length !== 2 || !filename || !parsed.values.sha256 ||
+        (action !== 'verify' && action !== 'export-review' && action !== 'verify-review') ||
+        (action === 'export-review' ? !parsed.values.output : !!parsed.values.output) ||
+        (action !== 'verify' && parsed.values['recalculate-performance'])) {
+      throw new Error('用法：corepilot evidence verify|export-review|verify-review <文件> --sha256 <可信 SHA-256>；export-review 还需 --output <新文件>');
+    }
+    if (action === 'export-review' || action === 'verify-review') {
+      const result = action === 'export-review'
+        ? exportReviewSamples(filename, parsed.values.sha256, parsed.values.output!) : verifyReviewSamples(filename, parsed.values.sha256);
+      console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      return 0;
     }
     const recalculation = parsed.values['recalculate-performance'] ? recalculateFrozenEvidenceArchive(parsed.positionals[1], parsed.values.sha256) : null;
     const result = recalculation ?? verifyFrozenEvidenceArchive(parsed.positionals[1], parsed.values.sha256);
@@ -50,7 +61,9 @@ function evidenceCommand(args: string[]): number {
   } catch (error) {
     const message = (error as Error).message;
     if (!args.includes('--json')) return fail(message);
-    console.error(JSON.stringify({ ok: false, code: 'EVIDENCE_VERIFICATION_FAILED', message }));
+    const code = args[0] === 'export-review' ? 'EVIDENCE_REVIEW_EXPORT_FAILED'
+      : args[0] === 'verify-review' ? 'EVIDENCE_REVIEW_VERIFICATION_FAILED' : 'EVIDENCE_VERIFICATION_FAILED';
+    console.error(JSON.stringify({ ok: false, code, message }));
     return 1;
   }
 }
