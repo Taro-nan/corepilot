@@ -13,6 +13,7 @@ import { seedApprovalFacts } from '../../tests/workflow-approval-fixture.js';
 import { initialOptimizationWorkflowRecord } from '../../src/workflow/optimization-workflow.js';
 import { prepareReproductionFixture } from '../../tests/reproduction-fixture.js';
 import { DEFAULT_STATISTICS } from '../../src/contracts/performance-statistics.js';
+import type { OptimizationWorkflowRecord } from '../../src/contracts/workflow.js';
 
 let fixture: Awaited<ReturnType<typeof startWebFixture>>;
 test.beforeEach(async () => { fixture = await startWebFixture({ execute: true }); });
@@ -1414,6 +1415,18 @@ test('a task optimizes another branch and delivers there while preserving the or
   await approval.getByLabel('合并提交说明').fill('Optimize feature/vector');
   await approval.getByRole('button', { name: '确认交付并合并', exact: true }).click();
   await expect(page.locator('.title-row .badge')).toContainText('已交付');
+  const api = new ApiClient(f.url, { token: f.token });
+  await expect.poll(async () => {
+    const { workflow: current } = await api.getOptimizationWorkflow(workflow.workflow_id) as { workflow: OptimizationWorkflowRecord };
+    const operation = current.delivery_operation;
+    if (!operation || current.status !== 'DELIVERABLE' || operation.status !== 'COMPLETED') {
+      throw new Error('交付记录尚未确认，请核对任务状态。');
+    }
+    if (operation.cleanup === 'NEEDS_ATTENTION') {
+      throw new Error(operation.cleanup_message ?? '候选工作区清理失败。');
+    }
+    return operation.cleanup;
+  }, { timeout: 15_000, message: '等待已确认交付的候选工作区完成清理' }).toBe('DONE');
   expect(f.git('branch', '--show-current')).toBe('main');
   expect(f.git('rev-parse', 'main')).toBe(originalHead);
   expect(f.git('show', 'main:kernel.c')).toContain('return 1 + 1');
