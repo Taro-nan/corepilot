@@ -3,12 +3,14 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { TaskStore } from '../storage/task-store.js';
 import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import type { SqliteOptimizationWorkflowStore } from '../workflow/optimization-workflow.js';
 import type { ExperimentExecutionPlan, ExperimentStatusResponse } from '../contracts/runner-rpc.js';
 import { OptimizationRuntime } from '../core/optimization-runtime.js';
+import { isRunnerSubmissionRejected } from '../core/experiment-execution-backend.js';
 import { RunnerClient, RunnerClientError } from '../client/runner-client.js';
 import { loadOptimizationConfig, resolveRunnerConfig } from '../config/optimization-config.js';
 import { isRegisteredRunner } from '../config/runner-config.js';
@@ -78,8 +80,12 @@ export class ReproductionService {
       record.updated_at = now;
       this.store.createReproductionExperiment(experiment, expectedWorkflowJson, JSON.stringify(record));
     }
+    const experimentId = this.required(workflowId).reproduction!.experiment_id;
     const controller = new AbortController();
-    const promise = this.run(workflowId, controller.signal).catch(error => this.update(workflowId, { status: 'UNKNOWN', error: (error as Error).message })).finally(() => this.active.delete(workflowId));
+    const promise = this.run(workflowId, controller.signal).catch(() => {
+      try { this.update(workflowId, experimentId, { status: 'UNKNOWN', error: '复现状态无法保存，请核对原实验和 Runner。' }); }
+      catch { console.error(`无法保存复现状态；请核对工作流 ${workflowId.replace(/[^A-Za-z0-9:_-]/g, '_').slice(0, 160)} 的原实验。`); }
+    }).finally(() => this.active.delete(workflowId));
     this.active.set(workflowId, { controller, promise });
     return this.required(workflowId).reproduction!;
   }
@@ -87,17 +93,41 @@ export class ReproductionService {
   async cancel(workflowId: string) {
     const record = this.required(workflowId);
     if (!record.reproduction || !unfinished(record.reproduction)) return;
+    const experimentId = record.reproduction.experiment_id;
+    if (!this.update(workflowId, experimentId, { cancel_requested: true })) return;
+    let experiment = this.runtime.getExperiment(experimentId);
+    if (this.canPrepare(experiment)) {
+      const active = this.active.get(workflowId);
+      if (active) { active.controller.abort('cancelled by user'); return; }
+      try {
+        this.runtime.failExperiment({ experimentId, error: 'cancelled before submission', cancelled: true, expectedExperiment: experiment });
+        this.update(workflowId, experimentId, { status: 'CANCELLED', phase: '提交前已取消', error: null });
+        return;
+      } catch (error) {
+        const current = this.runtime.getExperiment(experimentId);
+        if (this.canPrepare(current)) throw error;
+        if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(current.status)) return;
+        experiment = current;
+      }
+    }
     const { client } = this.connection(record);
-    const experiment = this.runtime.getExperiment(record.reproduction.experiment_id);
-    if (experiment.declared_context.runner_execution_plan) await client.cancelExperiment(experiment.experiment_id);
-    else this.active.get(workflowId)?.controller.abort('cancelled by user');
+    try { await client.cancelExperiment(experiment.experiment_id); }
+    catch {
+      this.update(workflowId, experimentId, { status: 'UNKNOWN', error: `复现实验 ${experiment.experiment_id} 的取消尚未确认，请核对原 Runner。` });
+      throw new Error('取消请求尚未确认；请核对原实验状态后继续。');
+    }
   }
 
   async stop() { for (const active of this.active.values()) active.controller.abort('backend shutting down'); await Promise.allSettled([...this.active.values()].map(row => row.promise)); }
   private required(id: string) { const record = this.records.get(id); if (!record) throw new Error('workflow not found'); return record; }
-  private update(id: string, patch: Partial<Job>) {
-    const record = this.required(id); record.reproduction = { ...record.reproduction!, ...patch, updated_at: new Date().toISOString() };
-    record.updated_at = record.reproduction.updated_at; this.records.save(record);
+  private update(id: string, experimentId: string, patch: Partial<Omit<Job, 'experiment_id'>>) {
+    return this.store.updateReproduction(id, experimentId, patch);
+  }
+  private canPrepare(experiment: import('../contracts/optimization-domain.js').Experiment): boolean {
+    return experiment.status === 'PENDING' && experiment.started_at === null && experiment.ended_at === null &&
+      !experiment.declared_context.runner_execution_plan && !experiment.declared_context.reproduction_submission_intent &&
+      !experiment.runner_terminal_facts && !this.store.listCommandExecutions(experiment.experiment_id).length &&
+      !this.store.listMeasurements(experiment.experiment_id).length;
   }
   private connection(record: OptimizationWorkflowRecord) {
     const config = loadOptimizationConfig(record.config_path).config;
@@ -106,17 +136,28 @@ export class ReproductionService {
     const effective = machine ? { ...config, runner: machine.runner, target: machine.target } : config;
     const runner = resolveRunnerConfig(effective);
     if (runner.mode !== 'rpc') throw new Error('复现需要原机器的 RPC 连接');
-    return { client: new RunnerClient({ baseUrl: runner.endpoint, token: runner.token, requestTimeoutMs: runner.requestTimeoutMs }), target: effective.target };
+    return { client: new RunnerClient({ baseUrl: runner.endpoint, token: runner.token, requestTimeoutMs: runner.requestTimeoutMs }),
+      target: effective.target, secrets: [runner.token, config.model.api_key].filter((value): value is string => typeof value === 'string' && !!value) };
   }
   private async run(id: string, signal: AbortSignal) {
     const record = this.required(id), job = record.reproduction!;
-    const { client, target } = this.connection(record);
+    const { client, target, secrets } = this.connection(record);
     const original = this.runtime.getExperiment(job.original_experiment_id);
     const experiment = this.runtime.getExperiment(job.experiment_id);
     const frozen = readFrozenValidationTestpack(record.testpack_snapshot_path!).testpack;
     let plan = experiment.declared_context.runner_execution_plan as Omit<ExperimentExecutionPlan, 'experiment'> | undefined;
-    let submitted = false;
+    // Any pre-existing plan may already have reached a Runner, including plans
+    // written by older versions without a submission marker.
+    let mayHaveSubmitted = !!plan || !!experiment.declared_context.reproduction_submission_intent || !this.canPrepare(experiment);
+    let rejectedBeforeExecution = false;
+    let acknowledged = false;
     try {
+      if (!plan && !this.canPrepare(experiment)) throw new Error('无法证明原复现实验尚未提交，请核对原 Runner。');
+      if (!plan && job.cancel_requested) {
+        this.runtime.failExperiment({ experimentId: job.experiment_id, error: 'cancelled before submission', cancelled: true, expectedExperiment: experiment });
+        this.update(id, job.experiment_id, { status: 'CANCELLED', phase: '提交前已取消', error: null });
+        return;
+      }
       const facts = await client.probe(signal);
       if (facts.machine.machine_identity_sha256 !== job.machine_identity) throw new Error('执行机器身份与原实验不一致；请恢复原机器连接');
       if (facts.health.capabilities?.exclusive_queue !== 1) throw new Error('请更新 Runner：复现要求统一排队，避免构建和采样相互干扰');
@@ -124,8 +165,9 @@ export class ReproductionService {
       if (!plan) {
         const previous = original.declared_context.runner_execution_plan as Omit<ExperimentExecutionPlan, 'experiment'>;
         if (!previous.candidate || !previous.evaluator) throw new Error('原计划缺少源码或测试资产身份');
-        const root = path.posix.join(target.workspace_root.replaceAll('\\', '/'), 'reproductions', id.replace(/[^A-Za-z0-9_-]/g, '_'), job.experiment_id.replace(/[^A-Za-z0-9_-]/g, '_'));
-        this.update(id, { status: 'PREPARING', remote_root: root, phase: '导出冻结源码，准备全新构建目录', error: null });
+        const root = path.posix.join(target.workspace_root.replaceAll('\\', '/'), 'reproductions', id.replace(/[^A-Za-z0-9_-]/g, '_'),
+          job.experiment_id.replace(/[^A-Za-z0-9_-]/g, '_'), randomUUID().replaceAll('-', ''));
+        this.update(id, job.experiment_id, { status: 'PREPARING', phase: '导出冻结源码，准备全新构建目录', error: null });
         const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-reproduce-'));
         try {
           const archive = await exportGitSourceArchive(record.repository_root!, job.source_commit, path.join(temporary, 'source.tar.gz'));
@@ -146,31 +188,38 @@ export class ReproductionService {
             : Array.isArray(value) ? value.map(replace) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, val]) => [key, replace(val)])) : value;
           plan = replace(previous) as Omit<ExperimentExecutionPlan, 'experiment'>;
           plan.build_directory = path.posix.join(root, 'build'); plan.output_directory = path.posix.join(root, 'logs');
-          this.store.saveExperiment({ ...experiment, declared_context: { ...experiment.declared_context, runner_execution_plan: plan } });
+          signal.throwIfAborted();
+          if (this.required(id).reproduction?.cancel_requested) throw new Error('提交前已请求取消');
+          this.store.claimReproductionSubmission(id, experiment, plan as unknown as Record<string, unknown>, root, new Date().toISOString());
+          mayHaveSubmitted = true;
+          try {
+            const receipt = await client.submitExperiment({ ...plan, experiment }, signal);
+            if (receipt.experiment_id !== job.experiment_id) throw new Error('Runner 回执中的实验身份不一致');
+            acknowledged = true;
+          } catch (error) {
+            if (!signal.aborted && isRunnerSubmissionRejected(error)) rejectedBeforeExecution = true;
+            else if (error instanceof RunnerClientError && error.status === 409) { /* Reconcile the existing id below. */ }
+            else throw error;
+            if (rejectedBeforeExecution) throw error;
+          }
         } finally {
           if (path.dirname(path.resolve(temporary)) !== path.resolve(os.tmpdir()) || !path.basename(temporary).startsWith('corepilot-reproduce-')) throw new Error('Unexpected reproduction temporary path');
           fs.rmSync(temporary, { recursive: true, force: true });
         }
       }
-      try { await client.getExperiment(job.experiment_id, signal); submitted = true; }
-      catch (error) {
-        if (!(error instanceof RunnerClientError) || error.status !== 404) throw error;
-        submitted = true;
-        try { await client.submitExperiment({ ...plan, experiment }, signal); }
-        catch (submitError) {
-          if (!(submitError instanceof RunnerClientError && submitError.status === 409)) {
-            if (submitError instanceof RunnerClientError && submitError.status !== null) submitted = false;
-            throw submitError;
-          }
-        }
-      }
-      this.update(id, { status: 'RUNNING', phase: 'Runner 排队、构建和复验', error: null });
+      this.update(id, job.experiment_id, { status: acknowledged ? 'RUNNING' : 'UNKNOWN',
+        phase: acknowledged ? 'Runner 排队、构建和复验' : '正在核对原复现实验', error: null });
       let status: ExperimentStatusResponse;
+      let cancelSent = false;
       while (true) {
         signal.throwIfAborted();
+        if (!cancelSent && this.required(id).reproduction?.cancel_requested) {
+          await client.cancelExperiment(job.experiment_id);
+          cancelSent = true;
+        }
         status = await client.getExperiment(job.experiment_id, signal);
         this.runtime.synchronizeRemoteExperiment(status);
-        this.update(id, { phase: status.queue?.reason ?? status.current_step ?? status.status });
+        this.update(id, job.experiment_id, { status: status.status === 'UNKNOWN' ? 'UNKNOWN' : 'RUNNING', phase: status.queue?.reason ?? status.current_step ?? status.status });
         if (!['PENDING', 'RUNNING'].includes(status.status)) break;
         await delay(250, undefined, { signal });
       }
@@ -178,18 +227,33 @@ export class ReproductionService {
       const [commands, measurements] = await Promise.all([client.getCommandExecutions(job.experiment_id), client.getMeasurements(job.experiment_id)]);
       this.runtime.synchronizeRemoteFacts({ experimentId: job.experiment_id, commandExecutions: commands.command_executions, measurements: measurements.measurements });
       if (!commands.command_executions.length) {
-        this.update(id, { status: status.status === 'CANCELLED' ? 'CANCELLED' : 'FAILED', error: status.failure?.message ?? '复现未执行构建', passed: false }); return;
+        this.update(id, job.experiment_id, { status: status.status === 'CANCELLED' ? 'CANCELLED' : 'FAILED', error: status.failure?.message ?? '复现未执行构建', passed: false }); return;
       }
       const validation = withRunnerValidationStatus(validationCycleFromCommandExecutions({ testpack: frozen, commands: commands.command_executions, includePerformance: record.enable_performance, steps: plan.steps }), status);
       const gate = record.enable_performance && validation.performance?.ok ? evaluatePerformanceGate(frozen, parsePerformanceMeasurements(validation.performance.stdout)) : null;
       this.runtime.completeRevalidationExperiment({ experimentId: job.experiment_id, revalidation: { formal: validation, independent: null, performance_gate: gate, passed: validation.passed && (!record.enable_performance || gate?.passed === true) }, factsAlreadyPersisted: true });
       const passed = validation.passed && (!record.enable_performance || gate?.passed === true);
-      this.update(id, { status: passed ? 'SUCCEEDED' : gate?.statistics?.verdict === 'INCONCLUSIVE' ? 'INCONCLUSIVE' : status.status === 'CANCELLED' ? 'CANCELLED' : 'FAILED', passed,
+      this.update(id, job.experiment_id, { status: passed ? 'SUCCEEDED' : gate?.statistics?.verdict === 'INCONCLUSIVE' ? 'INCONCLUSIVE' : status.status === 'CANCELLED' ? 'CANCELLED' : 'FAILED', passed,
         error: passed ? null : gate?.reason ?? status.failure?.message ?? '复现未通过正确性或完整性检查', phase: passed ? '干净构建与冻结契约复现通过' : '复现已结束，查看新实验记录' });
     } catch (error) {
-      if (!submitted) this.runtime.failExperiment({ experimentId: job.experiment_id, error: (error as Error).message, cancelled: signal.aborted });
-      else this.runtime.markRemoteStateUnknown(job.experiment_id, (error as Error).message);
-      this.update(id, { status: submitted ? 'UNKNOWN' : signal.aborted ? 'CANCELLED' : 'FAILED', error: (error as Error).message });
+      // A concurrent claimant may have persisted the intent after our earlier
+      // snapshot. Never overwrite that work with a local failure or cancel.
+      const current = this.runtime.getExperiment(job.experiment_id);
+      if (!rejectedBeforeExecution && !this.canPrepare(current)) mayHaveSubmitted = true;
+      if (mayHaveSubmitted && !rejectedBeforeExecution || signal.reason === 'backend shutting down') {
+        let message = `复现实验 ${job.experiment_id} 的状态尚未确认，请核对原 Runner；系统不会重新提交。`;
+        try { if (mayHaveSubmitted) this.runtime.markRemoteStateUnknown(job.experiment_id, message); }
+        catch { message += ' 本地实验状态暂时无法保存。'; }
+        this.update(id, job.experiment_id, { status: 'UNKNOWN', error: message });
+      } else {
+        const cancelled = signal.aborted || this.required(id).reproduction?.cancel_requested === true;
+        const raw = cancelled ? '复现已在提交前取消。' : rejectedBeforeExecution && error instanceof RunnerClientError
+          ? `Runner 拒绝复现计划（${error.code}），请核对测试配置。`
+          : error instanceof Error ? error.message : typeof error === 'string' ? error : '复现准备失败，请核对任务与机器配置。';
+        const message = secrets.reduce((text, secret) => text.split(secret).join('[redacted]'), redactRecord(raw)).slice(0, 2048);
+        this.runtime.failExperiment({ experimentId: job.experiment_id, error: message, cancelled, expectedExperiment: current });
+        this.update(id, job.experiment_id, { status: cancelled ? 'CANCELLED' : 'FAILED', error: message });
+      }
     }
   }
 }

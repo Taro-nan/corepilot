@@ -53,6 +53,10 @@ export interface TaskStore extends OptimizationStore {
   saveRecoveredWorkflow(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   /** Create a reproduction and its workflow reference in one transaction, if the workflow has not changed. */
   createReproductionExperiment(experiment: Experiment, expectedWorkflowJson: string, workflowJson: string): void;
+  /** Claim one prepared reproduction submission before the first Runner POST. */
+  claimReproductionSubmission(workflowId: string, expected: Experiment, plan: Record<string, unknown>, remoteRoot: string, timestamp: string): void;
+  /** Patch the linked active reproduction without losing concurrent updates. */
+  updateReproduction(workflowId: string, experimentId: string, patch: Partial<Omit<NonNullable<OptimizationWorkflowRecord['reproduction']>, 'experiment_id'>>): boolean;
   saveCompletedDelivery(workflowId: string, workflowJson: string, task: OptimizationTask | null): void;
   getOptimizationWorkflowJson(workflowId: string): string | null;
   listOptimizationWorkflowJson(limit: number): string[];

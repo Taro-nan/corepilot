@@ -62,7 +62,7 @@ export interface OptimizationWorkflowRecord {
   delivery_history?: WorkflowDeliveryOperation[];
   reproduction?: { experiment_id: string; status: 'PREPARING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'INCONCLUSIVE' | 'UNKNOWN' | 'CANCELLED';
     phase: string; created_at: string; updated_at: string; error: string | null; source_commit: string; evaluator_digest: string;
-    original_experiment_id: string; remote_root: string; machine_identity: string; passed?: boolean };
+    original_experiment_id: string; remote_root: string; machine_identity: string; passed?: boolean; cancel_requested?: boolean };
   delivery?: { commit: string; tree: string; candidate_id: string | null; approved_at: string; commit_message: string; approval_id?: string; evidence_id?: string };
   agent_session?: OptimizationSessionSummary;
   session_budget?: OptimizationSessionBudget;

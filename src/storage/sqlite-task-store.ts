@@ -490,6 +490,45 @@ export class SqliteTaskStore implements TaskStore {
     });
   }
 
+  claimReproductionSubmission(workflowId: string, expected: Experiment, plan: Record<string, unknown>, remoteRoot: string, timestamp: string): void {
+    this.transaction(() => {
+      const workflowJson = this.getOptimizationWorkflowJson(workflowId);
+      const workflow = workflowJson ? JSON.parse(workflowJson) as OptimizationWorkflowRecord : null;
+      const current = this.getExperiment(expected.experiment_id);
+      if (!current || !isDeepStrictEqual(current, expected) || current.status !== 'PENDING' || current.started_at !== null ||
+          current.ended_at !== null || current.declared_context.purpose !== 'DELIVERY_REPRODUCTION' ||
+          current.declared_context.runner_execution_plan || current.declared_context.reproduction_submission_intent ||
+          workflow?.optimization_task_id !== current.task_id || workflow.candidate_id !== current.candidate_id ||
+          workflow.reproduction?.experiment_id !== current.experiment_id ||
+          workflow.reproduction.cancel_requested === true ||
+          !['PREPARING', 'RUNNING', 'UNKNOWN'].includes(workflow.reproduction.status) ||
+          this.listCommandExecutions(current.experiment_id).length || this.listMeasurements(current.experiment_id).length) {
+        throw new Error('复现实验状态已变化或无法证明尚未提交，请核对原实验。');
+      }
+      this.saveExperiment({ ...current, updated_at: timestamp, declared_context: { ...current.declared_context,
+        runner_execution_plan: structuredClone(plan), reproduction_submission_intent: { schema_version: 1, experiment_id: current.experiment_id, recorded_at: timestamp } } });
+      workflow.reproduction.remote_root = remoteRoot;
+      workflow.reproduction.updated_at = timestamp;
+      workflow.updated_at = timestamp;
+      this.saveOptimizationWorkflowJson(workflowId, JSON.stringify(workflow));
+    });
+  }
+
+  updateReproduction(workflowId: string, experimentId: string, patch: Partial<Omit<NonNullable<OptimizationWorkflowRecord['reproduction']>, 'experiment_id'>>): boolean {
+    return this.transaction(() => {
+      const json = this.getOptimizationWorkflowJson(workflowId);
+      const workflow = json ? JSON.parse(json) as OptimizationWorkflowRecord : null;
+      const reproduction = workflow?.reproduction;
+      if (!workflow || !reproduction || reproduction.experiment_id !== experimentId ||
+          !['PREPARING', 'RUNNING', 'UNKNOWN'].includes(reproduction.status)) return false;
+      const timestamp = new Date().toISOString();
+      workflow.reproduction = { ...reproduction, ...patch, updated_at: timestamp };
+      workflow.updated_at = timestamp;
+      this.saveOptimizationWorkflowJson(workflowId, JSON.stringify(workflow));
+      return true;
+    });
+  }
+
   saveCompletedDelivery(workflowId: string, workflowJson: string, task: OptimizationTask | null): void {
     this.transaction(() => {
       if (task) {

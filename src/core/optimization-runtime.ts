@@ -92,6 +92,8 @@ export interface FailExperimentInput {
   error: string;
   cancelled?: boolean;
   remoteStateUnknown?: boolean;
+  /** Fail only this previously checked snapshot; concurrent changes must win. */
+  expectedExperiment?: Experiment;
 }
 
 export interface ApproveOptimizationCandidateInput {
@@ -628,13 +630,13 @@ export class OptimizationRuntime {
       ended_at: null,
       updated_at: timestamp,
     };
-    this.store.saveExperiment(unknown);
-    return unknown;
+    return this.store.commitExperimentResult(experiment, unknown, null);
   }
 
   failExperiment(input: FailExperimentInput): Experiment {
     const status = input.remoteStateUnknown ? 'UNKNOWN' : input.cancelled ? 'CANCELLED' : 'FAILED';
-    const experiment = this.getExperiment(input.experimentId);
+    const experiment = input.expectedExperiment ?? this.getExperiment(input.experimentId);
+    if (experiment.experiment_id !== input.experimentId) throw new Error('experiment identity does not match expected snapshot');
     const diagnosticCode = status === 'UNKNOWN' ? 'REMOTE_STATE_UNKNOWN' : status === 'CANCELLED' ? 'CANCELLED' : 'EXECUTION_FAILED';
     if (experiment.status === status && experiment.last_control_diagnostic?.code === diagnosticCode &&
         experiment.validity === (status === 'UNKNOWN' ? 'UNKNOWN' : 'INVALID') &&
