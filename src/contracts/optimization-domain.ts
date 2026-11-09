@@ -1,5 +1,6 @@
 import type { DevelopmentFindings } from './development-investigation.js';
 import type { LibraryPackageTaskReference } from './library-package.js';
+import type { RunnerFailure } from './runner-rpc.js';
 
 /**
  * Core optimization facts shared by the existing public workflow and its
@@ -134,6 +135,17 @@ export interface ExperimentEvaluationSummary {
   details?: Record<string, unknown>;
 }
 
+/** Runner's terminal report before Control derives an evaluation from its facts. */
+export interface RunnerTerminalFacts {
+  status: Extract<ExperimentStatus, 'SUCCEEDED' | 'FAILED' | 'CANCELLED'>;
+  validity: ExperimentValidity;
+  failure_category: FailureCategory | null;
+  failure: RunnerFailure | null;
+  observed_context: Record<string, unknown> | null;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
 export interface Experiment {
   schema_version: typeof OPTIMIZATION_DOMAIN_SCHEMA_VERSION;
   experiment_id: string;
@@ -148,6 +160,8 @@ export interface Experiment {
   declared_context: Record<string, unknown>;
   observed_context: Record<string, unknown> | null;
   evaluation: ExperimentEvaluationSummary | null;
+  /** Absent in historical records that predate terminal fact preservation. */
+  runner_terminal_facts?: RunnerTerminalFacts;
   /** Control-plane diagnostic; not an observation that a test step ran or did not run. */
   last_control_diagnostic?: { code: 'REMOTE_STATE_UNKNOWN' | 'CANCELLED' | 'EXECUTION_FAILED'; message: string; resolved_at?: string };
   started_at: string | null;

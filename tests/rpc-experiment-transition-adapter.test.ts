@@ -284,6 +284,8 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
     assert.equal((runtime.getExperiment(experiment.experiment_id).observed_context as { evaluator: { digest: string } }).evaluator.digest, evaluatorDigest);
     assert.doesNotThrow(() => assertMeasurementTrace({ candidate, experiment: runtime.getExperiment(experiment.experiment_id),
       rows: measurements, commands, bundle: loadFormalEvaluatorBundle(evaluatorRoot) }));
+    const evaluated = runtime.completeValidationExperiment({ experimentId: experiment.experiment_id, validation: result,
+      performance: null, factsAlreadyPersisted: true });
     const resumed = new RpcExperimentTransitionAdapter({ backend: new RunnerClientExperimentExecutionBackend(runnerClient), runtime, pollIntervalMs: 10,
       stageCandidate: async () => { throw new Error('Recovery must not restage or delete live source directories'); },
       stageEvaluator: async () => { throw new Error('Recovery must use the persisted execution plan'); },
@@ -291,6 +293,7 @@ async function verifyRpcTransition(omitThreads?: 'CORRECTNESS', submissionFailur
     const recovered = await resumed.executeValidation({ experimentId: experiment.experiment_id, workspace, build, testpack,
       sourceRoot: localRepository, includePerformance: true, resume: true });
     assert.equal(recovered.passed, true);
+    assert.deepEqual(runtime.getExperiment(experiment.experiment_id), evaluated, 'reconciliation preserves the Control evaluation');
     assert.deepEqual(store.listCommandExecutions(experiment.experiment_id), commands);
     assert.deepEqual(store.listMeasurements(experiment.experiment_id), measurements);
     assert.equal(store.listExperiments(task.task_id).length, 1, 'reconnecting observes the original execution');

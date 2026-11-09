@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { HypothesisOutcome, HypothesisProposal, OptimizationHypothesis, OptimizationReasoningHistory } from '../contracts/optimization-hypothesis.js';
 import { candidateEvaluationFeedback } from '../workspace/candidate-evaluation-feedback.js';
 import { assessHypothesisOutcome } from './hypothesis-outcome.js';
@@ -15,6 +16,7 @@ import type {
   Measurement,
   OptimizationTask,
   OptimizationTaskStatus,
+  RunnerTerminalFacts,
 } from '../contracts/optimization-domain.js';
 import type { DevelopmentFindings } from '../contracts/development-investigation.js';
 import { OPTIMIZATION_DOMAIN_SCHEMA_VERSION } from '../contracts/optimization-domain.js';
@@ -525,6 +527,20 @@ export class OptimizationRuntime {
     if (isConfirmedTerminal(experiment.status)) {
       if (!isConfirmedTerminal(status.status)) return experiment;
       if (experiment.status !== status.status) throw new Error(`conflicting terminal state for experiment '${status.experiment_id}'`);
+      if (experiment.runner_terminal_facts) {
+        if (!isDeepStrictEqual(experiment.runner_terminal_facts, terminalRunnerFacts(status))) {
+          throw new Error(`conflicting Runner terminal facts for experiment '${status.experiment_id}'`);
+        }
+      } else {
+        // Old records mix Runner and Control validity/failure fields. Compare only
+        // known execution facts, preserving unknowns and all existing results.
+        for (const key of ['started_at', 'ended_at', 'observed_context'] as const) {
+          if (experiment[key] !== null && status[key] !== null && !isDeepStrictEqual(experiment[key], status[key])) {
+            throw new Error(`conflicting historical Runner ${key} for experiment '${status.experiment_id}'`);
+          }
+        }
+      }
+      return experiment;
     }
     const diagnostic = experiment.last_control_diagnostic;
     const synchronized: Experiment = {
@@ -536,6 +552,7 @@ export class OptimizationRuntime {
       started_at: status.started_at,
       ended_at: status.ended_at,
       updated_at: status.updated_at,
+      ...(isConfirmedTerminal(status.status) ? { runner_terminal_facts: terminalRunnerFacts(status) } : {}),
       ...(diagnostic?.code === 'REMOTE_STATE_UNKNOWN' && !diagnostic.resolved_at && isConfirmedTerminal(status.status)
         ? { last_control_diagnostic: { ...diagnostic, resolved_at: status.updated_at } } : {}),
     };
@@ -792,8 +809,15 @@ function prefixed(prefix: string, name: string): string {
   return prefix ? `${prefix}.${name}` : name;
 }
 
-function isConfirmedTerminal(status: Experiment['status']): boolean {
+function isConfirmedTerminal(status: Experiment['status']): status is RunnerTerminalFacts['status'] {
   return status === 'SUCCEEDED' || status === 'FAILED' || status === 'CANCELLED';
+}
+
+function terminalRunnerFacts(status: ExperimentStatusResponse): RunnerTerminalFacts {
+  if (!isConfirmedTerminal(status.status)) throw new Error('Runner terminal facts require a confirmed terminal status');
+  return { status: status.status, validity: status.validity, failure_category: status.failure_category,
+    failure: structuredClone(status.failure), observed_context: structuredClone(status.observed_context),
+    started_at: status.started_at, ended_at: status.ended_at };
 }
 
 function sameFact(left: CommandExecution | Measurement, right: CommandExecution | Measurement): boolean {
