@@ -32,9 +32,11 @@ test('shared review API blocks a self-passing evaluator and stores a version-bou
     record.correctness_inputs = [{ input_id: 'kernel-check' }]; fs.writeFileSync(filename, JSON.stringify(record));
     const review = () => f.projects.validationReview.preview(r.project, r.pkg, r.version, r.target);
     assert.equal((await review()).state, 'BLOCKED');
-    const observation = { kind: 'OBSERVATION', role: 'EVALUATOR', subject_id: 'sensitivity:zero-output:kernel-check', sample_index: null,
+    const observation = { experiment_id: 'validation:other', kind: 'OBSERVATION', role: 'EVALUATOR', subject_id: 'sensitivity:zero-output:kernel-check', sample_index: null,
       value: 'DETECTED', unit: null, validity: 'VALID', domain_payload: { classification: 'TEST_SENSITIVITY', probe_id: 'zero-output', input_id: 'kernel-check', original_verdict: 'FAIL' } };
     r.state.measurements.push(observation as typeof r.state.measurements[number]);
+    const foreign = await review(); assert.equal(foreign.state, 'BLOCKED'); assert.equal(foreign.quality?.status, 'PENDING');
+    observation.experiment_id = r.trialId;
     const ready = await review(); assert.equal(ready.state, 'READY_FOR_REVIEW'); assert.equal(ready.quality?.status, 'PASSED');
     const accepted = await f.projects.validationReview.approve(r.project, r.pkg, r.version, r.target, { expected_digest: ready.evaluator_digest,
       expected_package_digest: ready.package_digest, trial_id: r.trialId, reviewer: 'Fixture owner', confirm: true });
