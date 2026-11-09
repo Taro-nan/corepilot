@@ -673,23 +673,16 @@ export class SqliteTaskStore implements TaskStore {
       .run(JSON.stringify({ ...hypothesis, status: 'ABANDONED', abandonment: { reason, recorded_at: recordedAt }, updated_at: recordedAt }), recordedAt, hypothesisId);
   }
 
-  appendHypothesisOutcome(outcome: HypothesisOutcome): void {
-    this.transaction(() => {
-      const hypothesis = this.getHypothesis(outcome.hypothesis_id);
-      const candidate = this.getCandidate(outcome.candidate_id);
-      const experiment = this.getExperiment(outcome.experiment_id);
-      if (!hypothesis || hypothesis.task_id !== outcome.task_id || candidate?.task_id !== outcome.task_id || candidate.hypothesis_id !== hypothesis.hypothesis_id || experiment?.candidate_id !== candidate.candidate_id || experiment.task_id !== outcome.task_id) throw new Error('Hypothesis outcome identity mismatch');
-      if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(experiment.status)) throw new Error('Hypothesis outcome requires a completed Experiment');
-      const existing = this.readJsonRecord<HypothesisOutcome>('SELECT record_json FROM optimization_hypothesis_outcomes WHERE experiment_id = ?', outcome.experiment_id);
-      if (existing) {
-        if (JSON.stringify({ ...existing, recorded_at: outcome.recorded_at }) !== JSON.stringify(outcome)) throw new Error('Hypothesis outcome cannot change after recording');
-        return;
-      }
-      this.db.prepare('INSERT INTO optimization_hypothesis_outcomes (outcome_id, hypothesis_id, task_id, candidate_id, experiment_id, record_json, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(outcome.outcome_id, outcome.hypothesis_id, outcome.task_id, outcome.candidate_id, outcome.experiment_id, JSON.stringify(outcome), outcome.recorded_at);
-      this.db.prepare('UPDATE optimization_hypotheses SET record_json = ?, updated_at = ? WHERE hypothesis_id = ?')
-        .run(JSON.stringify({ ...hypothesis, status: hypothesis.status === 'ABANDONED' ? 'ABANDONED' : outcome.status, updated_at: outcome.recorded_at }), outcome.recorded_at, hypothesis.hypothesis_id);
-    });
+  private appendHypothesisOutcome(outcome: HypothesisOutcome): void {
+    const hypothesis = this.getHypothesis(outcome.hypothesis_id);
+    const candidate = this.getCandidate(outcome.candidate_id);
+    const experiment = this.getExperiment(outcome.experiment_id);
+    if (!hypothesis || hypothesis.task_id !== outcome.task_id || candidate?.task_id !== outcome.task_id || candidate.hypothesis_id !== hypothesis.hypothesis_id || experiment?.candidate_id !== candidate.candidate_id || experiment.task_id !== outcome.task_id) throw new Error('Hypothesis outcome identity mismatch');
+    if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(experiment.status)) throw new Error('Hypothesis outcome requires a completed Experiment');
+    this.db.prepare('INSERT INTO optimization_hypothesis_outcomes (outcome_id, hypothesis_id, task_id, candidate_id, experiment_id, record_json, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(outcome.outcome_id, outcome.hypothesis_id, outcome.task_id, outcome.candidate_id, outcome.experiment_id, JSON.stringify(outcome), outcome.recorded_at);
+    this.db.prepare('UPDATE optimization_hypotheses SET record_json = ?, updated_at = ? WHERE hypothesis_id = ?')
+      .run(JSON.stringify({ ...hypothesis, status: hypothesis.status === 'ABANDONED' ? 'ABANDONED' : outcome.status, updated_at: outcome.recorded_at }), outcome.recorded_at, hypothesis.hypothesis_id);
   }
 
   listHypothesisOutcomes(taskId: string): HypothesisOutcome[] {
@@ -711,6 +704,50 @@ export class SqliteTaskStore implements TaskStore {
       WHERE experiment_id = ?
     `).run(experiment.status, JSON.stringify(experiment), experiment.updated_at, experiment.experiment_id);
     if (Number(result.changes) !== 1) throw new Error(`optimization experiment '${experiment.experiment_id}' not found`);
+  }
+
+  commitExperimentResult(expected: Experiment, next: Experiment, outcome: HypothesisOutcome | null): Experiment {
+    return this.transaction(() => {
+      const current = this.getExperiment(expected.experiment_id);
+      if (!current || !isDeepStrictEqual(current, expected)) throw new Error('实验状态已改变，请重新核对原实验后恢复。');
+      if (next.experiment_id !== current.experiment_id || next.task_id !== current.task_id ||
+          next.candidate_id !== current.candidate_id || next.type !== current.type) {
+        throw new Error('实验评价与原实验身份不一致。');
+      }
+      if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(current.status) && next.status !== current.status) {
+        throw new Error('不能更改已确认的实验终态。');
+      }
+      if (!isDeepStrictEqual(next.runner_terminal_facts, current.runner_terminal_facts) ||
+          (current.observed_context && !isDeepStrictEqual(next.observed_context, current.observed_context))) {
+        throw new Error('实验评价不能覆盖 Runner 的原始终态事实。');
+      }
+      if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(current.status) && current.evaluation &&
+          (!isDeepStrictEqual(current.evaluation, next.evaluation) || current.validity !== next.validity || current.failure_category !== next.failure_category)) {
+        throw new Error('已记录的实验评价或假设结果不一致，请保留原记录并核对。');
+      }
+      const unchanged = isDeepStrictEqual({ ...current, updated_at: next.updated_at }, next);
+      if (outcome) {
+        if (outcome.experiment_id !== next.experiment_id || outcome.task_id !== next.task_id || outcome.candidate_id !== next.candidate_id) {
+          throw new Error('假设结果与原实验身份不一致。');
+        }
+        const existing = this.readJsonRecord<HypothesisOutcome>('SELECT record_json FROM optimization_hypothesis_outcomes WHERE experiment_id = ?', next.experiment_id);
+        if (existing) {
+          if (!isDeepStrictEqual({ ...existing, recorded_at: outcome.recorded_at }, outcome) || !unchanged) {
+            throw new Error('已记录的实验评价或假设结果不一致，请保留原记录并核对。');
+          }
+          return current;
+        }
+        if (unchanged) {
+          this.appendHypothesisOutcome(outcome);
+          return current;
+        }
+      } else if (unchanged) {
+        return current;
+      }
+      this.saveExperiment(next);
+      if (outcome) this.appendHypothesisOutcome(outcome);
+      return next;
+    });
   }
 
   getExperiment(experimentId: string): Experiment | null {

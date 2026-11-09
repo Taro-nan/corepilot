@@ -410,6 +410,7 @@ export class OptimizationRuntime {
     const experiment = input.factsAlreadyPersisted
       ? this.getExperiment(input.experimentId)
       : this.requireRunningExperiment(input.experimentId);
+    if (input.factsAlreadyPersisted && !isConfirmedTerminal(experiment.status)) throw new Error('原实验终态尚未确认，不能保存评价。');
     if (!input.factsAlreadyPersisted) this.appendValidationFacts(experiment.experiment_id, input.validation, input.performance, '');
     const commands = this.store.listCommandExecutions(experiment.experiment_id);
     const cancelled = commands.some((item) => item.cancelled);
@@ -434,12 +435,10 @@ export class OptimizationRuntime {
       failure_category: experiment.failure_category ?? failureCategory,
       observed_context: input.observedContext ?? experiment.observed_context,
       evaluation,
-      ended_at: experiment.ended_at ?? timestamp,
+      ended_at: input.factsAlreadyPersisted ? experiment.ended_at : experiment.ended_at ?? timestamp,
       updated_at: timestamp,
     };
-    this.store.saveExperiment(completed);
-    this.recordHypothesisOutcome(completed, input.validation, input.performance);
-    return completed;
+    return this.store.commitExperimentResult(experiment, completed, this.prepareHypothesisOutcome(completed, input.validation, input.performance));
   }
 
   completeRevalidationExperiment(input: {
@@ -451,6 +450,7 @@ export class OptimizationRuntime {
     const experiment = input.factsAlreadyPersisted
       ? this.getExperiment(input.experimentId)
       : this.requireRunningExperiment(input.experimentId);
+    if (input.factsAlreadyPersisted && !isConfirmedTerminal(experiment.status)) throw new Error('原实验终态尚未确认，不能保存评价。');
     if (!input.factsAlreadyPersisted && input.revalidation.formal) this.appendValidationFacts(experiment.experiment_id, input.revalidation.formal, null, 'formal');
     if (!input.factsAlreadyPersisted && input.revalidation.independent) this.appendValidationFacts(experiment.experiment_id, input.revalidation.independent, null, 'independent');
     const commands = this.store.listCommandExecutions(experiment.experiment_id);
@@ -509,13 +509,11 @@ export class OptimizationRuntime {
           performance_gate: input.revalidation.performance_gate ?? null,
         },
       },
-      ended_at: experiment.ended_at ?? timestamp,
+      ended_at: input.factsAlreadyPersisted ? experiment.ended_at : experiment.ended_at ?? timestamp,
       updated_at: timestamp,
     };
-    this.store.saveExperiment(completed);
     const validation = input.revalidation.formal?.passed === false ? input.revalidation.formal : input.revalidation.independent?.passed === false ? input.revalidation.independent : input.revalidation.formal;
-    this.recordHypothesisOutcome(completed, validation ?? undefined, input.revalidation.performance_gate ?? null);
-    return completed;
+    return this.store.commitExperimentResult(experiment, completed, this.prepareHypothesisOutcome(completed, validation ?? undefined, input.revalidation.performance_gate ?? null));
   }
 
   /** Mirror runner-owned lifecycle facts without inventing a Control result. */
@@ -635,9 +633,16 @@ export class OptimizationRuntime {
   }
 
   failExperiment(input: FailExperimentInput): Experiment {
-    const experiment = this.requireRunningExperiment(input.experimentId);
-    const timestamp = this.timestamp();
     const status = input.remoteStateUnknown ? 'UNKNOWN' : input.cancelled ? 'CANCELLED' : 'FAILED';
+    const experiment = this.getExperiment(input.experimentId);
+    const diagnosticCode = status === 'UNKNOWN' ? 'REMOTE_STATE_UNKNOWN' : status === 'CANCELLED' ? 'CANCELLED' : 'EXECUTION_FAILED';
+    if (experiment.status === status && experiment.last_control_diagnostic?.code === diagnosticCode &&
+        experiment.validity === (status === 'UNKNOWN' ? 'UNKNOWN' : 'INVALID') &&
+        experiment.failure_category === (status === 'UNKNOWN' ? 'UNKNOWN' : status === 'CANCELLED' ? 'CANCELLED' : 'INFRASTRUCTURE_FAILURE')) {
+      return experiment;
+    }
+    if (experiment.status !== 'RUNNING' && experiment.status !== 'PENDING') throw new Error(`experiment '${input.experimentId}' is already terminal (${experiment.status})`);
+    const timestamp = this.timestamp();
     const failed: Experiment = {
       ...experiment,
       status,
@@ -651,15 +656,13 @@ export class OptimizationRuntime {
       ended_at: input.remoteStateUnknown ? null : timestamp,
       updated_at: timestamp,
     };
-    this.store.saveExperiment(failed);
-    this.recordHypothesisOutcome(failed);
-    return failed;
+    return this.store.commitExperimentResult(experiment, failed, this.prepareHypothesisOutcome(failed));
   }
 
-  private recordHypothesisOutcome(experiment: Experiment, validation?: ValidationCycleResult, performance: PerformanceGateResult | null = null): void {
-    if (!isConfirmedTerminal(experiment.status) || experiment.type === 'DEVELOPMENT_FEEDBACK') return;
+  private prepareHypothesisOutcome(experiment: Experiment, validation?: ValidationCycleResult, performance: PerformanceGateResult | null = null): HypothesisOutcome | null {
+    if (!isConfirmedTerminal(experiment.status) || experiment.type === 'DEVELOPMENT_FEEDBACK') return null;
     const candidate = this.getCandidate(experiment.candidate_id);
-    if (!candidate.hypothesis_id) return;
+    if (!candidate.hypothesis_id) return null;
     const feedback = validation ? candidateEvaluationFeedback({
       validation: { ...validation, runner_status: {
         ...experiment,
@@ -672,8 +675,7 @@ export class OptimizationRuntime {
       performance,
     }) : null;
     const assessment = feedback ? assessHypothesisOutcome(feedback) : { status: 'INCONCLUSIVE' as const, reason: `no complete evaluation feedback: ${experiment.failure_category ?? experiment.status}` };
-    const outcome: HypothesisOutcome = { schema_version: 1, outcome_id: `hypothesis-outcome:${experiment.experiment_id}`, hypothesis_id: candidate.hypothesis_id, task_id: experiment.task_id, candidate_id: candidate.candidate_id, experiment_id: experiment.experiment_id, ...assessment, failure_category: experiment.failure_category, feedback, recorded_at: this.timestamp() };
-    this.store.appendHypothesisOutcome(outcome);
+    return { schema_version: 1, outcome_id: `hypothesis-outcome:${experiment.experiment_id}`, hypothesis_id: candidate.hypothesis_id, task_id: experiment.task_id, candidate_id: candidate.candidate_id, experiment_id: experiment.experiment_id, ...assessment, failure_category: experiment.failure_category, feedback, recorded_at: this.timestamp() };
   }
 
   private appendValidationFacts(

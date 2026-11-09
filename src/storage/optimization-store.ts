@@ -20,7 +20,6 @@ export interface OptimizationStore {
   getHypothesis(hypothesisId: string): OptimizationHypothesis | null;
   listHypotheses(taskId: string): OptimizationHypothesis[];
   abandonHypothesis(hypothesisId: string, reason: string, recordedAt: string): void;
-  appendHypothesisOutcome(outcome: HypothesisOutcome): void;
   listHypothesisOutcomes(taskId: string): HypothesisOutcome[];
 
   createCandidate(candidate: Candidate): void;
@@ -32,6 +31,8 @@ export interface OptimizationStore {
 
   createExperiment(experiment: Experiment): void;
   saveExperiment(experiment: Experiment): void;
+  /** Atomically persist Control's result and the associated hypothesis outcome. */
+  commitExperimentResult(expected: Experiment, next: Experiment, outcome: HypothesisOutcome | null): Experiment;
   getExperiment(experimentId: string): Experiment | null;
   /** Durable insertion order; wall-clock changes must not reorder experiments. */
   listExperiments(taskId: string): Experiment[];

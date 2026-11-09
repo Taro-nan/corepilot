@@ -333,6 +333,46 @@ test('a saved active local experiment is reported interrupted rather than execut
   } finally { f.store.saveOptimizationWorkflowJson = save; await f.close(); }
 });
 
+test('public recovery preserves a committed local result when its acknowledgement is lost', async () => {
+  const f = await fixture(0);
+  const commit = f.store.commitExperimentResult.bind(f.store);
+  let interrupted = false;
+  try {
+    f.store.commitExperimentResult = (expected, next, outcome) => {
+      const saved = commit(expected, next, outcome);
+      if (!interrupted && next.type === 'FORMAL_EVALUATION' && outcome) {
+        interrupted = true;
+        throw new Error('injected lost result acknowledgement');
+      }
+      return saved;
+    };
+    const id = await f.start();
+    let first = f.service.get(id)!;
+    for (let count = 0; count < 800; count++) {
+      first = f.service.get(id)!;
+      if (first.status === 'FAILED' && !f.service.activeWorkflowIds().length) break;
+      await delay(25);
+    }
+    assert.equal(first.status, 'FAILED');
+    assert.equal(interrupted, true);
+    const experiments = f.store.listExperiments(first.optimization_task_id!);
+    const outcomes = f.store.listHypothesisOutcomes(first.optimization_task_id!);
+    assert.equal(experiments.length, 1);
+    assert.equal(experiments[0].status, 'SUCCEEDED');
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0].experiment_id, experiments[0].experiment_id);
+    const commands = f.store.listCommandExecutions(experiments[0].experiment_id);
+    f.store.commitExperimentResult = commit;
+    await f.restart();
+    await f.api.resumeOptimizationWorkflow(id);
+    const recovered = await f.wait('INTERRUPTED');
+    assert.match(recovered.error ?? '', /本地进程状态未确认/);
+    assert.deepEqual(f.store.listExperiments(first.optimization_task_id!), experiments);
+    assert.deepEqual(f.store.listHypothesisOutcomes(first.optimization_task_id!), outcomes);
+    assert.deepEqual(f.store.listCommandExecutions(experiments[0].experiment_id), commands);
+  } finally { f.store.commitExperimentResult = commit; await f.close(); }
+});
+
 test('stopping Control preserves an in-progress Agent session and allows continuation after restart', async () => {
   const f = await fixture(0, undefined, true);
   try {
