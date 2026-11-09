@@ -11,6 +11,17 @@ import type { OptimizationSessionEvents, OptimizationSessionSummary } from '../c
 const metricsKey = value<{ turns: number; tool_calls: number; compactions: number }>('corepilot', 'metrics');
 const checkpointKey = value<unknown>('corepilot', 'workflow-checkpoint');
 const mutatingTools = new Set(['write_file', 'create_file', 'replace_text', 'delete_file', 'move_file', 'revert_file', 'record_hypothesis']);
+const continuationPrefix = '用户补充要求：';
+
+/** Keep the user's bounded request visible before longer generated context. */
+export function withContinuationInstruction(prompt: string, instruction?: string): string {
+  return instruction ? `${continuationPrefix}${instruction}\n\n${prompt}` : prompt;
+}
+
+function eventMessageText(text: string, role: string): string {
+  const limit = role === 'user' && text.startsWith(continuationPrefix) ? 16_384 + continuationPrefix.length : 8192;
+  return text.slice(0, limit);
+}
 
 export interface PiOptimizationSessionOptions {
   id: string;
@@ -234,9 +245,9 @@ function eventEntries(entry: Entry): OptimizationSessionEvents['events'] {
   if (message.role === 'toolResult') return [{ ...common, kind: 'tool_result', tool_name: message.toolName, is_error: message.isError,
     text: message.content.filter(item => item.type === 'text').map(item => item.text).join('\n').slice(0, 8192) }];
   if (message.role !== 'assistant' && message.role !== 'user') return [];
-  if (typeof message.content === 'string') return [{ ...common, kind: 'message', role: message.role, text: message.content.slice(0, 8192) }];
+  if (typeof message.content === 'string') return [{ ...common, kind: 'message', role: message.role, text: eventMessageText(message.content, message.role) }];
   return message.content.flatMap((item, index): OptimizationSessionEvents['events'] => {
-    if (item.type === 'text') return [{ ...common, id: `${entry.id}:${index}`, kind: 'message', role: message.role, text: item.text.slice(0, 8192) }];
+    if (item.type === 'text') return [{ ...common, id: `${entry.id}:${index}`, kind: 'message', role: message.role, text: eventMessageText(item.text, message.role) }];
     if (item.type === 'toolCall') return [{ ...common, id: `${entry.id}:${index}`, kind: 'tool_call', tool_name: item.name, text: JSON.stringify(item.arguments).slice(0, 2048) }];
     return [];
   });

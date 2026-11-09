@@ -287,12 +287,20 @@ test('Agent process records and continuation reuse the same workflow and evaluat
   await expect(page.getByRole('dialog')).toContainText('return 2');
   await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
   fs.writeFileSync(release, 'ready');
-  await panel.getByLabel('继续时的补充要求（可选）').fill('保留已完成的调查，继续验证。');
+  const instruction = '保留已完成的调查，继续验证。' + '补'.repeat(10_000) + '要求结束标记';
+  await panel.getByLabel('继续时的补充要求（可选）').fill(instruction);
   await panel.getByRole('button', { name: '继续优化', exact: true }).click();
   await expect.poll(() => f.service.get(submitted.workflow_id)?.status).toBe('WAITING_APPROVAL');
   expect(f.service.get(submitted.workflow_id)?.continuation_count).toBe(1);
   await expect(page.locator('.page-heading .badge')).toHaveText('待人工审阅');
-  expect((await api.getOptimizationSessionEvents(submitted.workflow_id, 0, 200)).events.some(event => event.text.includes('保留已完成的调查'))).toBe(true);
+  let cursor = 0, instructionRecorded = false;
+  for (let page = 0; page < 20; page++) {
+    const batch = await api.getOptimizationSessionEvents(submitted.workflow_id, cursor, 200);
+    instructionRecorded ||= batch.events.some(event => event.role === 'user' && event.text.includes('保留已完成的调查') && event.text.includes('要求结束标记'));
+    if (instructionRecorded || batch.next_cursor === cursor) break;
+    cursor = batch.next_cursor;
+  }
+  expect(instructionRecorded).toBe(true);
   await page.screenshot({ path: test.info().outputPath('agent-session.png'), fullPage: true });
 });
 

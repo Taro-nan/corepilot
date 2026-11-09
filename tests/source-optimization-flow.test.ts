@@ -102,7 +102,9 @@ test('continuing a ready source candidate records a child proposal and new froze
   const f = await sourceOptimizationFixture();
   try {
     const id = await f.start(); const first = await f.wait('CANDIDATE_READY');
-    await f.api.resumeOptimizationWorkflow(id, { message: 'Investigate the next source-only proposal.' });
+    const start = 'Investigate the next source-only proposal. ', end = 'instruction-end';
+    const instruction = start + 'x'.repeat(16_384 - start.length - end.length) + end;
+    await f.api.resumeOptimizationWorkflow(id, { message: instruction });
     const second = await f.wait('CANDIDATE_READY');
     const candidates = f.store.listCandidates(second.optimization_task_id!);
     assert.equal(candidates.length, 2); assert.equal(candidates[1].parent_candidate_id, first.candidate_id);
@@ -111,6 +113,14 @@ test('continuing a ready source candidate records a child proposal and new froze
     assert.match(f.git('show', `${first.candidate_commit}:kernel.c`), /return 2/);
     assert.equal(f.store.listExperiments(second.optimization_task_id!).length, 0);
     assert.equal(f.git('rev-parse', 'HEAD'), f.baseline);
+    let cursor = 0, found = false;
+    for (let page = 0; page < 20; page++) {
+      const batch = await f.api.getOptimizationSessionEvents(id, cursor, 200);
+      found ||= batch.events.some(event => event.role === 'user' && event.text.includes('Investigate the next source-only proposal.') && event.text.includes('instruction-end'));
+      if (found || batch.next_cursor === cursor) break;
+      cursor = batch.next_cursor;
+    }
+    assert.equal(found, true);
   } finally { await f.close(); }
 });
 

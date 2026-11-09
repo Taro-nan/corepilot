@@ -14,7 +14,7 @@ import { createPiModels, COREPILOT_PI_PROVIDER_ID, type PiRuntimeModelConfig } f
 import { verifyToolCalling } from '../model/tool-verification.js';
 import { createModelTransport, type ModelTransport } from '../model/model-transport.js';
 import type { AgentTool } from '../agent/pi-agent-runtime.js';
-import { PiOptimizationSession, readOptimizationSessionEvents } from '../agent/pi-optimization-session.js';
+import { PiOptimizationSession, readOptimizationSessionEvents, withContinuationInstruction } from '../agent/pi-optimization-session.js';
 import { resolveOptimizationBudget, type OptimizationSessionBudget, type OptimizationSessionEvents } from '../contracts/optimization-session.js';
 import { buildCandidateFeedbackPrompt, runPublicAgentWorkflow, type PublicDevelopmentInvestigation, type PublicAgentWorkflowCheckpoint } from './public-agent-workflow.js';
 import { candidateSourceChangesSinceBaseline, ensureCandidateRepository, type CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
@@ -810,7 +810,7 @@ export class OptimizationWorkflowService {
         }); await session!.progress({ phase: progress.phase, ...(progress.last_event ? { last_event: clean(progress.last_event) } : {}) }); },
         runAgent: async (tools: readonly AgentTool[], prompt: string, agentSignal: AbortSignal) => {
           try {
-            const result = await session!.run(continuationMessage ? `${prompt}\n用户补充要求：${continuationMessage}` : prompt,
+            const result = await session!.run(withContinuationInstruction(prompt, continuationMessage),
               tools, agentSignal, budget.time_limit_ms - (Date.now() - continuationStarted), afterSavedEvaluation);
             afterSavedEvaluation = false;
             continuationMessage = undefined;

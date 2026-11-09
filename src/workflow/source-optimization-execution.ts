@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { PiOptimizationSession } from '../agent/pi-optimization-session.js';
+import { PiOptimizationSession, withContinuationInstruction } from '../agent/pi-optimization-session.js';
 import { resolveOptimizationBudget } from '../contracts/optimization-session.js';
 import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import type { OptimizationRuntime } from '../core/optimization-runtime.js';
@@ -96,7 +96,7 @@ export async function executeSourceOptimization(input: {
         });
         await session!.progress({ phase, last_event: clean(message) });
       },
-      runAgent: (tools, prompt, agentSignal, afterSubmission) => session!.run(input.message ? `${prompt}\n用户补充要求：${input.message}` : prompt,
+      runAgent: (tools, prompt, agentSignal, afterSubmission) => session!.run(withContinuationInstruction(prompt, input.message),
         tools, agentSignal, budget.time_limit_ms - (Date.now() - started), afterSubmission),
     });
     const { state, status } = result;
