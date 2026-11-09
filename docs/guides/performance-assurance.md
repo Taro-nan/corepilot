@@ -89,8 +89,8 @@ corepilot project trial-status <项目 ID> <试跑 ID>
 | --- | --- |
 | 仍在运行 | 观察原作业；关闭页面不取消 Runner |
 | 会话中断或预算耗尽 | `corepilot workflow resume <ID>` 恢复原会话 |
-| evaluator、执行环境或统计证据受阻 | 修复原因后 `corepilot workflow retry-validation <ID>`，使用原冻结候选创建新实验 |
-| 远端状态未知 | 先核对原实验 ID，不能当作已失败重新启动 |
+| evaluator、执行环境或统计证据受阻，且原实验终态已确认 | 修复原因后 `corepilot workflow retry-validation <ID>`，使用原冻结候选创建新实验 |
+| 远端状态未知、提交响应丢失或 Runner 返回 404 | 先核对原 Runner 和实验 ID；查询不到不能证明未执行，不能当作已失败重新启动 |
 | 正式实验与复验完成 | 人工审阅源码、范围和证据，再决定交付 |
 
 测试方案资格审阅、领域 Approval 和 Git 源码交付分别展示。普通报告不会自动批准；公开审阅入口支持冻结证据并记录具名人工决定，之后才可单独交付。历史交付不补造批准。
