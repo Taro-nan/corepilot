@@ -65,6 +65,8 @@ Control SQLite 在 [SqliteTaskStore](../../src/storage/sqlite-task-store.ts) 中
 
 公开优化请求可显式选择 `verification_mode: source_only`。缺省仍为原有 `verified`，保留历史配置与行为。源码模式通过现有 WorkflowService、OptimizationRuntime、Pi 会话与源码工具生成冻结 Candidate，`Task.evaluator` 为 `null`，不伪造测试身份；终态 `CANDIDATE_READY` 表示代码待验证，报告分别标明构建、正确性和性能未执行。缺评价器或源码模式的候选不能通过正式实验、批准及交付门禁。
 
+新源码任务由用户明确指定允许修改的文件或目录，范围进入请求身份、任务和执行契约，Agent 假设、写工具及相对原基准的累计变更均受其约束。调查入口只用于读取，不能隐式授权修改。旧任务的候选与原执行契约保留；首次继续时追加仅用于后续的授权，先核对工作区累计差异，再将授权和继续状态写入同一事务。范围检查不能替代操作系统级隔离。
+
 源码模式的预检、Pi 源码用例及会话装配分别在 `src/workflow/source-optimization.ts`、`source-agent-workflow.ts`、`source-optimization-execution.ts`。它们隔离“没有评价器”的用例差异，复用原有工作区、候选、预算、取消与检查点；没有建立第二套 Agent 工具循环。
 
 独立测试由 `TestingService` 持有请求、固定的方案及两端身份、准备阶段、幂等键和远端提交记录；`TestingStore` 将这些记录原子替换写入数据目录 `testing/tasks/`，将冻结上传资产保存在 `testing/assets/`。该存储沿用现有文件系统边界，没有新增数据库。它不与优化领域表双写为同一候选。原始执行事实仍由 Runner 保存，详情按原作业 ID 对账，完成结果可持久读取。
