@@ -270,7 +270,7 @@ function VerifiedWorkbench({ workflow, response, page, attached, notify, refresh
     {!report && <p className="loading" role="status">正在读取实验结果与测试条件…</p>}
     <div className="workspace-grid"><div>
       {page !== 'analysis' && page !== 'reports' && <>
-        <AgentSessionPanel workflow={workflow} attached={attached} notify={notify} refresh={refresh} />
+        <AgentSessionPanel workflow={workflow} attached={attached} notify={notify} refresh={refresh} scopeAuthority={report?.task ? report.task.library_package ? 'package' : 'user' : undefined} />
         <Panel title="执行进度" aside={<span className="muted">已记录 {tasks.filter(item => item.done).length} / {tasks.length} 个阶段</span>}><div className="timeline">{tasks.map((task, index) => <div className={'timeline-item ' + (task.done ? 'done' : index === activeStep ? running || workflow.status === 'WAITING_APPROVAL' ? 'current' : 'blocked' : '')} key={task.title}><span className="timeline-dot">{task.done ? <Icon name="check" size={13} /> : <i />}</span><div className="timeline-content"><strong>{task.title}</strong><p>{task.note}</p><details className="stage-evidence" open={expandedStage === index}><summary onClick={event => { event.preventDefault(); setExpandedStage(value => value === index ? -1 : index); }}>查看阶段证据</summary><div>{task.evidence}</div></details></div></div>)}</div><div className="live-status">{running && <span className="pulse" />}<span>{phaseLabel(workflow.progress?.phase)}</span><span className="muted">{time(workflow.updated_at)}</span></div></Panel>
       </>}
       {(!!workloadData.length || page === 'analysis') && <Panel title="负载性能对比" className="performance-table" aside={<span className="muted">加速比大于 1 表示更快 · 单位 {measurementUnit}</span>}>

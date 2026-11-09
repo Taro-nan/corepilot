@@ -46,7 +46,7 @@ test('runs build and correctness in the validation tree and stops before approva
   const selectedBaseline = spawnSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
   fs.writeFileSync(path.join(repo, 'kernel.c'), 'int cblas_sgemv(void) { return 9; }\n');
   assert.equal(spawnSync('git', ['-C', repo, 'commit', '-am', 'later head'], { encoding: 'utf8' }).status, 0);
-  const preflight = loadPublicOptimizationPreflight({ function_name: 'cblas_sgemv', entry_file: 'kernel.c', config_path: configFile(root), repository_root: repo }, { env: {} });
+  const preflight = loadPublicOptimizationPreflight({ function_name: 'cblas_sgemv', entry_file: 'kernel.c', config_path: configFile(root), repository_root: repo, candidate_scope: { include: ['kernel.c'], exclude: [] } }, { env: {} });
   const calls: string[] = [];
   const result = await runPublicAgentWorkflow({
     preflight, repository: repo, worktreeRoot: path.join(root, 'worktrees'), runId: 'run-1', baselineCommit: selectedBaseline, maxRounds: 1,
@@ -83,7 +83,7 @@ test('stopping without another mutation after a regression is a normal threshold
   fs.writeFileSync(path.join(repo, 'build-dir', '.keep'), '');
   assert.equal(spawnSync('git', ['-C', repo, 'add', '.'], { encoding: 'utf8' }).status, 0);
   assert.equal(spawnSync('git', ['-C', repo, 'commit', '-m', 'baseline'], { encoding: 'utf8' }).status, 0);
-  const preflight = loadPublicOptimizationPreflight({ function_name: 'cblas_sgemv', entry_file: 'kernel.c', config_path: configFile(root), repository_root: repo }, { env: {} });
+  const preflight = loadPublicOptimizationPreflight({ function_name: 'cblas_sgemv', entry_file: 'kernel.c', config_path: configFile(root), repository_root: repo, candidate_scope: { include: ['kernel.c'], exclude: [] } }, { env: {} });
   let round = 0;
   const result = await runPublicAgentWorkflow({
     preflight,

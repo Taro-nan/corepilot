@@ -28,8 +28,8 @@ function eventSummary(event: OptimizationSessionEvent): string {
   return text.replace(/\s+/g, ' ').slice(0, 180);
 }
 
-export function AgentSessionPanel({ workflow, attached, notify, refresh }: {
-  workflow: OptimizationWorkflowRecord; attached?: boolean; notify: (text: string, bad?: boolean) => void; refresh: () => void;
+export function AgentSessionPanel({ workflow, attached, notify, refresh, scopeAuthority }: {
+  workflow: OptimizationWorkflowRecord; attached?: boolean; notify: (text: string, bad?: boolean) => void; refresh: () => void; scopeAuthority?: 'package' | 'user';
 }) {
   const [events, setEvents] = useState<OptimizationSessionEvent[]>([]);
   const [error, setError] = useState('');
@@ -46,13 +46,15 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh }: {
   const followLatest = useRef(true);
   const active = attached !== false && ['CREATED', 'GENERATING'].includes(workflow.status);
   const sourceOnly = workflow.verification_mode === 'source_only';
-  const legacyScope = sourceOnly && !workflow.source_scope_authorization;
+  const legacyScope = (sourceOnly || scopeAuthority === 'user') && !workflow.source_scope_authorization;
+  const scopeUnknown = !sourceOnly && !workflow.source_scope_authorization && !scopeAuthority;
   const toolLabel = (name: string) => sourceOnly && name === 'submit_candidate' ? '完成源码候选' : toolLabels[name] ?? name;
   const deliveryPending = !!workflow.delivery_operation && workflow.delivery_operation.status !== 'COMPLETED';
   const canRetry = !active && canRetryWorkflowValidation(workflow);
   const validationBlocked = isWorkflowValidationBlocked(workflow);
   const measurementInconclusive = workflow.candidate_evaluation_feedback?.performance_summary.status === 'INCONCLUSIVE';
   const canResume = !deliveryPending && !validationBlocked && !!workflow.agent_session && !active && ['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'CANDIDATE_READY', 'CREATED', 'GENERATING'].includes(workflow.status);
+  const canReconcileLegacy = legacyScope && !active && !deliveryPending && workflow.status === 'INTERRUPTED' && !!(workflow.experiment_id || workflow.revalidation_experiment_id);
   const running = useRef(active);
   running.current = active;
   useEffect(() => { if (followLatest.current && list.current) list.current.scrollTop = list.current.scrollHeight; }, [events]);
@@ -95,11 +97,15 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh }: {
 
   return <Panel title="Agent 工作过程" className="agent-session" aside={workflow.agent_session && <small className="muted">{workflow.agent_session.turns} 次分析 · {workflow.agent_session.tool_calls} 次工具调用</small>}>
     <div className="agent-session-body">
-    {sourceOnly && workflow.source_scope_authorization && <Disclosure title="查看授权的修改范围" summary={workflow.source_scope_authorization.kind === 'CONTINUATION' ? '仅对历史任务继续后生效' : '任务创建时确认'}>
+    {workflow.source_scope_authorization && <Disclosure title="查看授权的修改范围" summary={workflow.source_scope_authorization.kind === 'CONTINUATION' ? '仅对历史任务继续后生效' : '任务创建时确认'}>
       <p>允许修改：{workflow.source_scope_authorization.candidate_scope.include.join('、')}</p>
       <p>排除：{workflow.source_scope_authorization.candidate_scope.exclude.join('、') || '无'}</p>
       {workflow.source_scope_authorization.kind === 'CONTINUATION' && <p>该授权不追溯适用于此前的候选。</p>}
     </Disclosure>}
+    {canReconcileLegacy && <div className="notice"><p>如果原实验状态尚未确认，可先只核对原实验，不调用 Agent 或修改源码。</p><button type="button" disabled={busy} onClick={async () => {
+      setBusy(true); try { await api.resumeOptimizationWorkflow(workflow.workflow_id); notify('已提交原实验核对。'); refresh(); }
+      catch (failure) { notify((failure as Error).message, true); } finally { setBusy(false); }
+    }}>核对原实验</button></div>}
     {canRetry && <div className="notice"><strong>{measurementInconclusive ? '测量证据不足，候选已保留' : validationBlocked ? '验证环境异常，候选已保留' : '当前候选已保留'}</strong><p>{measurementInconclusive ? '先检查测量噪声。采样方案变化需要建立新测试版本；不要重复试到通过。' : validationBlocked ? '本次测试未形成完整结论。修复执行环境后，可以重新验证当前候选。' : '可以继续优化以生成新候选，或保持当前源码重新验证。'}系统会创建新实验并保留原记录，重新验证不调用模型。</p><button className="primary" disabled={busy} onClick={async () => {
       setBusy(true);
       try { await api.retryOptimizationValidation(workflow.workflow_id, workflow.candidate_id); notify('已开始重新验证当前候选。'); refresh(); }
@@ -118,10 +124,12 @@ export function AgentSessionPanel({ workflow, attached, notify, refresh }: {
       <time>{new Date(event.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</time>
     </button>)}</div></Disclosure></>}
     {(active || canResume) && <form className="agent-instructions" onSubmit={event => void continueOrSend(event)}>
-      {legacyScope && canResume && <div className="notice"><strong>历史任务未记录修改授权</strong><p>请选择继续时允许修改的范围。已有候选保留历史语义；当前工作区已有改动也须在所选范围内。</p><SourceScopeField include={scopeInclude} exclude={scopeExclude} onChange={value => { if (value.include !== undefined) setScopeInclude(value.include); if (value.exclude !== undefined) setScopeExclude(value.exclude); }} /></div>}
+      {legacyScope && canResume && <div className="notice"><strong>历史任务未记录修改授权</strong><p>请选择继续时允许修改的范围。已有候选保留历史语义；当前工作区已有改动也须在所选范围内。</p>
+        <SourceScopeField include={scopeInclude} exclude={scopeExclude} onChange={value => { if (value.include !== undefined) setScopeInclude(value.include); if (value.exclude !== undefined) setScopeExclude(value.exclude); }} /></div>}
+      {scopeUnknown && canResume && <p className="notice">正在核对任务的源码授权；如长时间无法读取，请重试实验报告。</p>}
       <label className="field"><span>{active ? '补充优化要求' : '继续时的补充要求（可选）'}</span><textarea rows={2} maxLength={16384} value={message} onChange={event => setMessage(event.target.value)} placeholder="例如：先分析大尺寸输入的缓存行为，保留小尺寸性能。" disabled={busy} /></label>
       {canResume && <Disclosure title="本次继续的探索预算" summary={minutes + ' 分钟 · ' + (sourceOnly ? '生成一个候选' : candidates + ' 个候选')} modified={minutes !== Math.round((workflow.session_budget?.time_limit_ms ?? 3_600_000) / 60_000) || !sourceOnly && candidates !== (workflow.session_budget?.max_candidates ?? 8)}><div className="field-grid"><label className="field"><span>探索时间（分钟）</span><input type="number" min={1} max={1440} required value={minutes} onChange={event => setMinutes(Number(event.target.value))} /></label>{!sourceOnly && <label className="field"><span>最多评估候选数</span><input type="number" min={1} max={1000} required value={candidates} onChange={event => setCandidates(Number(event.target.value))} /></label>}</div></Disclosure>}
-      <div className="form-actions"><button className="primary" disabled={busy || active && !message.trim()}>{busy ? '正在提交…' : active ? '发送给 Agent' : '继续优化'}</button><span className="hint">{active ? '关闭页面后，后台会继续运行。' : sourceOnly ? '沿用原源码工作区，生成新的未验证候选。' : '沿用原源码和测试口径，保留已有实验。'}</span></div>
+      <div className="form-actions"><button className="primary" disabled={busy || active && !message.trim() || !active && scopeUnknown}>{busy ? '正在提交…' : active ? '发送给 Agent' : '继续优化'}</button><span className="hint">{active ? '关闭页面后，后台会继续运行。' : sourceOnly ? '沿用原源码工作区，生成新的未验证候选。' : '沿用原源码和测试口径，保留已有实验。'}</span></div>
     </form>}
     {detail && <Modal title={detail.tool_name ? toolLabel(detail.tool_name) : 'Agent 过程详情'} onClose={() => setDetail(null)} wide><pre className="detail-code">{detail.text}</pre></Modal>}
     </div>

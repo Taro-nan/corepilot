@@ -12,6 +12,12 @@
 
 已保存测试草稿、试跑结果与方案资格是不同状态。AI 起草的代码仍须审阅和验证；检查通过只说明当前检查项满足条件，不代表正式实验已执行、正确性已通过或性能已提升。`#/validation` 与 `#/settings/validation` 旧链接继续可用于查看原有配置。
 
+仅源码任务和未绑定 Package 的自动验证任务，都须明确选择允许 Agent 修改的仓库相对文件或目录；预检和创建使用同一范围。绑定 Package 的自动验证任务沿用包内固定范围，不接受请求覆盖。目录授权包括目录内的测试、参考实现及构建脚本，务必审阅并排除不应修改的路径。该范围表达用户授权，不能证明 oracle 独立，也不提供进程隔离；仓库内评价资产及同账户构建命令仍需独立审查和隔离。
+
+没有记录范围的历史任务可继续查看原候选与证据。继续由 Agent 编辑前须追加授权，系统检查现有工作区相对原基线的全部改动；原任务验证身份与旧证据不回写。对已冻结候选执行 `workflow retry-validation` 不需要追加源码授权，也不调用模型或要求模型凭据。若原正式实验或复验状态尚未确认，可在页面点击「核对原实验」，或不带 `--allow` 执行 `workflow resume`；系统只恢复与原检查点关联的作业，不调用 Agent 或要求模型凭据。检查点缺失或无法证明关联时保留现场并提示人工核对。
+
+旧开发调查的 `development-job` 独立保存在 Agent 会话，不一定进入正式实验列表，且旧记录未固定 Runner 数据库身份；当前无授权的只核对入口尚不能自动定位或安全对账这类作业。应保留原会话与作业 ID，让维护者核对原 Runner；不要将未确认终态当成失败并重新启动。未来接入固定身份后仍需独立验证。
+
 任务准备默认列出当前项目自建或已绑定、且目标函数匹配的方案。首次绑定外部目录中的其他方案时，可在「选择已有库接入方案」中进入完整目录，核对目标并保存，再返回任务；目前系统不会记录所有曾经绑定过的外部方案。测试条件和代码的未保存修改在当前网页会话内保留；刷新或关闭前浏览器会提示，尚未应用的 JSON、参数名和线程数需先应用才能保存或试跑。
 
 ## 生命周期与执行者
@@ -62,7 +68,7 @@ flowchart TD
 默认每次探索为 60 分钟、最多评估 8 个候选；可通过创建任务页面的「探索预算」或 CLI `--budget-minutes`、`--max-candidates` 调整。达到预算时为 `BUDGET_EXHAUSTED`，Control 中断时为 `INTERRUPTED`，两者均保留现场。时间预算在新模型请求和工具执行边界检查，正在进行的有超时约束的测试会先结束。关闭浏览器或停止 `watch` 不取消任务。
 
 ```text
-corepilot optimize --project <project-id> --performance --budget-minutes 60 --max-candidates 8
+corepilot optimize --project <project-id> --performance --allow src/kernel.c --budget-minutes 60 --max-candidates 8
 corepilot workflow events <workflow-id> --json
 corepilot workflow message <workflow-id> --message "先检查大尺寸负载的缓存行为"
 corepilot workflow resume <workflow-id> --budget-minutes 30 --max-candidates 4
@@ -91,12 +97,12 @@ corepilot package list
 corepilot package inspect ippi-ft 0.1.0
 corepilot package init /path/to/new-library --target public_symbol
 corepilot package init /path/to/new-library --target public_symbol --config corepilot.yaml
-corepilot optimize --config corepilot.yaml --function public_symbol --file src/entry.c --performance
+corepilot optimize --config corepilot.yaml --function public_symbol --file src/entry.c --allow src/kernel.c --performance
 corepilot workflow status <workflow-id>
 corepilot workflow cancel <workflow-id>
 ```
 
-路径、symbol 和 Workflow ID 必须使用实际值。Package 配置见 [Library Package](library-packages.md)；`--file` 只是优先读取入口，不能扩大 Package/Hypothesis writable scope。正式 Package preflight 要求 RPC，按 evaluator owner/id/version/digest 核验 Qualified bundle。模型、Runner endpoint/token 和机器路径由运行配置绑定，不放入 Package。
+路径、symbol 和 Workflow ID 必须使用实际值。上述 `--allow` 示例适用于未绑定 Package 的任务；使用 Package 时省略它。Package 配置见 [Library Package](library-packages.md)；`--file` 只是优先读取入口，不能扩大用户或 Package 授权的范围。正式 Package preflight 要求 RPC，按 evaluator owner/id/version/digest 核验 Qualified bundle。模型、Runner endpoint/token 和机器路径由运行配置绑定，不放入 Package。
 
 `corepilot package init` 的全部选项以 [CLI 实现](../../src/cli.ts)为准：`--id`、`--version`、`--target`、`--config`、`--api-key`、`--output-root`。不应从概念阶段推导出 `package qualify`、`evaluator qualify`、`evidence freeze`、`workflow export` 等命令。
 

@@ -273,7 +273,7 @@ test('Agent process records and continuation reuse the same workflow and evaluat
   testpack.correctness.command.args = ['-e', `if(!require('fs').existsSync(${JSON.stringify(release)})){console.error('fixture case waits for release');process.exit(1)}console.log('fixture PASS')`];
   fs.writeFileSync(config.config.validation.testpack, JSON.stringify(testpack));
   const api = new ApiClient(f.url, { token: f.token });
-  const submitted = await api.submitOptimizationWorkflow({ project_id: project.project_id, enable_performance: false, budget: { max_candidates: 1, time_limit_ms: 60_000 } }) as { workflow_id: string };
+  const submitted = await api.submitOptimizationWorkflow({ project_id: project.project_id, enable_performance: false, candidate_scope: { include: ['kernel.c'], exclude: [] }, budget: { max_candidates: 1, time_limit_ms: 60_000 } }) as { workflow_id: string };
   await expect.poll(() => f.service.get(submitted.workflow_id)?.status).toBe('BUDGET_EXHAUSTED');
   await login(page);
   await page.getByRole('button', { name: '优化任务', exact: true }).click();
@@ -514,6 +514,7 @@ test('browser configures, optimizes, reports and delivers through the same CLI b
   await expect(page.getByRole('status')).toContainText('配置已保存');
   await page.getByRole('button', { name: '项目概览', exact: true }).click();
   await page.getByRole('button', { name: '创建优化任务', exact: true }).click();
+  await page.getByRole('dialog', { name: '创建优化任务' }).getByLabel('允许修改的源码文件或目录').fill('kernel.c');
   await page.getByRole('dialog', { name: '创建优化任务' }).getByRole('button', { name: '运行前检查', exact: true }).click();
   await expect(page.locator('dialog .check-output')).toContainText('输入检查通过');
   const baseline = f.git('rev-parse', 'HEAD');
@@ -544,7 +545,7 @@ test('browser configures, optimizes, reports and delivers through the same CLI b
   expect(JSON.parse(cliReport.stdout).experiments).toEqual(downloaded.experiments);
   expect(downloaded.candidates[0].approval).toBeNull();
   await page.getByRole('button', { name: '优化任务', exact: true }).click();
-  const second = await runFixtureCli(f.url, f.token, ['optimize', '--project', projectId, '--performance']);
+  const second = await runFixtureCli(f.url, f.token, ['optimize', '--project', projectId, '--performance', '--allow', 'kernel.c']);
   expect(second.code, second.stderr).toBe(0);
   const secondId = second.stdout.match(/workflow:[\w-]+/)![0];
   await addVerifiedFixtureExperiments(f, secondId);
@@ -1292,6 +1293,7 @@ test('preflight checks the typed function and configuration read failures can be
   await login(page);
   await page.getByRole('button', { name: '创建优化任务', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '创建优化任务' });
+  await dialog.getByLabel('允许修改的源码文件或目录').fill('kernel.c');
   await dialog.getByLabel('优化函数').fill('wrong_function');
   await dialog.getByRole('button', { name: '运行前检查', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('wrong_function');
@@ -1459,6 +1461,7 @@ test('a task optimizes another branch and delivers there while preserving the or
   await page.getByRole('button', { name: '创建优化任务', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '创建优化任务' });
   await expect(dialog.getByLabel('优化分支')).toHaveValue('main');
+  await dialog.getByLabel('允许修改的源码文件或目录').fill('kernel.c');
   await dialog.getByLabel('优化分支').selectOption('feature/vector');
   await dialog.getByRole('button', { name: '运行前检查', exact: true }).click();
   await expect(dialog.locator('.check-output')).toContainText('源码分支：feature/vector');

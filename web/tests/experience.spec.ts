@@ -304,6 +304,7 @@ test('task draft restores after close and refresh, advanced validation reveals h
   await page.getByRole('button', { name: '创建优化任务', exact: true }).click();
   let dialog = page.getByRole('dialog', { name: '创建优化任务' });
   await expect(dialog.getByLabel('运行时间（分钟）')).not.toBeVisible();
+  await dialog.getByLabel('允许修改的源码文件或目录').fill('kernel.c');
   await dialog.getByLabel('执行机器', { exact: true }).selectOption(second.machine_id);
   await dialog.locator('summary').filter({ has: page.getByText('高级设置', { exact: true }) }).click();
   await dialog.getByLabel('运行时间（分钟）').fill('25');
@@ -322,6 +323,7 @@ test('task draft restores after close and refresh, advanced validation reveals h
   await page.getByRole('button', { name: '创建优化任务', exact: true }).click();
   dialog = page.getByRole('dialog', { name: '创建优化任务' });
   await expect(dialog.getByLabel('执行机器', { exact: true })).toHaveValue(second.machine_id);
+  await expect(dialog.getByLabel('允许修改的源码文件或目录')).toHaveValue('kernel.c');
   await expect(page.locator('.composer-actions')).toContainText('25 分钟 · 3 个候选');
   await dialog.getByRole('button', { name: '运行前检查', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('所选示例机器离线');

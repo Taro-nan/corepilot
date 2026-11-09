@@ -16,6 +16,11 @@ import { DEFAULT_STATISTICS } from '../src/contracts/performance-statistics.js';
 import type { RemoteValidationTransport } from '../src/workspace/validation-runner.js';
 import { PiOptimizationSession } from '../src/agent/pi-optimization-session.js';
 import { createPiModels, COREPILOT_PI_PROVIDER_ID } from '../src/model/pi-provider.js';
+import http from 'node:http';
+import { packageValidationTestpack, resolveLibraryPackageTask } from '../src/library-package/task-definition.js';
+import { prepareReviewFixture } from './validation-review-fixture.js';
+import { fixtureRunnerStoreId } from './guarded-runner-fixture.js';
+import { RUNNER_PROTOCOL_VERSION } from '../src/contracts/runner-rpc.js';
 
 test('insufficient statistical evidence stops the workflow with its frozen candidate and no additional model turn', async () => {
   const f = await startWebFixture();
@@ -46,7 +51,7 @@ test('evaluator failure stops before another Agent turn and never counts rejecte
   const f = await startWebFixture();
   try {
     const seeded = await seedBlockedValidation(f);
-    const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath, repository_root: f.repo });
+    const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath, repository_root: f.repo, candidate_scope: { include: ['kernel.c'], exclude: [] } });
     let modelCalls = 0; let completed = 0;
     const result = await runPublicAgentWorkflow({ preflight, repository: f.repo, worktreeRoot: path.join(f.root, 'unused'), runId: 'recovery',
       resumeFrom: { ...seeded.saved, phase: 'VALIDATION', activeExperimentId: seeded.experiment.experiment_id, pendingDecision: null, evaluationFeedback: null },
@@ -84,7 +89,7 @@ for (const phase of ['VALIDATION', 'REVALIDATION'] as const) {
       const experiment = phase === 'VALIDATION' ? seeded.experiment : runtime.startExperiment({ taskId: seeded.candidate.task_id,
         candidateId: seeded.candidate.candidate_id, type: 'REVALIDATION', initialStatus: 'RUNNING' });
       const before = f.store.getExperiment(experiment.experiment_id);
-      const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath, repository_root: f.repo });
+      const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath, repository_root: f.repo, candidate_scope: { include: ['kernel.c'], exclude: [] } });
       let transportCalls = 0, failedCalls = 0;
       const transport = { runRemote() { transportCalls++; throw new Error('unconfirmed work must not be staged'); } } as unknown as RemoteValidationTransport;
       const result = await runPublicAgentWorkflow({ preflight, repository: f.repo, worktreeRoot: path.join(f.root, 'unused'), runId: 'recovery',
@@ -104,6 +109,109 @@ for (const phase of ['VALIDATION', 'REVALIDATION'] as const) {
     } finally { await f.close(); }
   });
 }
+
+test('reconciling a successful original formal experiment does not start independent revalidation', async () => {
+  const f = await startWebFixture();
+  try {
+    const seeded = await seedBlockedValidation(f, false, true);
+    const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath,
+      repository_root: f.repo }, { allowUnscopedHistorical: true });
+    const { runner_status: _oldStatus, ...withoutStatus } = seeded.validation;
+    const successful = { ...withoutStatus, passed: true };
+    let completed = 0, revalidations = 0, model = 0;
+    let savedPhase = '';
+    const result = await runPublicAgentWorkflow({ preflight, repository: f.repo, worktreeRoot: path.join(f.root, 'unused'), runId: 'reconcile-only',
+      resumeFrom: { ...seeded.saved, phase: 'VALIDATION', activeExperimentId: seeded.experiment.experiment_id,
+        validationOnly: true, pendingDecision: null, evaluationFeedback: null }, reconcileOnly: true,
+      saveCheckpoint: async saved => { savedPhase = saved.phase; },
+      runAgent: async () => { model++; throw new Error('reconciliation must not call Agent'); },
+      lifecycle: { candidateCheckpointed: () => { throw new Error('candidate should not change'); },
+        experimentStarted: () => { throw new Error('original experiment already exists'); }, experimentCompleted: () => { completed++; },
+        revalidationStarted: () => { revalidations++; throw new Error('reconciliation must not create a new experiment'); },
+        revalidationCompleted: () => {}, experimentFailed: () => {} },
+      experimentExecution: { executeValidation: async () => successful } as unknown as RpcExperimentTransitionAdapter });
+    assert.equal(result.status, 'INTERRUPTED');
+    assert.match(result.error!, /独立复验尚未启动/);
+    assert.equal(savedPhase, 'REVALIDATION');
+    assert.equal(completed, 1); assert.equal(revalidations, 0); assert.equal(model, 0);
+  } finally { await f.close(); }
+});
+
+for (const checkpointLink of ['active-id', 'intent-only', 'intent-no-plan', 'intent-no-store'] as const) test(`legacy unscoped RPC ${checkpointLink} reconciliation queries only a provable original ID and never submits a new job`, async () => {
+  const f = await startWebFixture();
+  const review = await prepareReviewFixture(f).catch(async error => { await f.close(); throw error; });
+  const requests: Array<{ method: string; url: string }> = [];
+  const runner = http.createServer((req, res) => {
+    requests.push({ method: req.method ?? '', url: req.url ?? '' });
+    if (req.url?.endsWith('/health')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ runner_id: 'scope-fixture', protocol_version: RUNNER_PROTOCOL_VERSION, store_instance_id: fixtureRunnerStoreId,
+        status: 'READY', resource_enforcement: 'REQUIRED', capabilities: { store_identity_guard: 1, artifact_path_check: 1 } })); return;
+    }
+    if (req.url?.endsWith('/machine')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ hostname: 'fixture', architecture: 'aarch64', cpu_count: 2, machine_identity_sha256: 'a'.repeat(64) })); return;
+    }
+    res.writeHead(503, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: { code: 'TEMPORARY', message: 'fixture Runner unavailable' } }));
+  });
+  await new Promise<void>(resolve => runner.listen(0, '127.0.0.1', resolve));
+  try {
+    const inspected = await f.projects.validationReview.preview(review.project, review.pkg, review.version, review.target);
+    await f.projects.validationReview.approve(review.project, review.pkg, review.version, review.target, { expected_digest: inspected.evaluator_digest,
+      expected_package_digest: inspected.package_digest, trial_id: review.trialId, reviewer: 'Fixture owner', confirm: true });
+    const current = f.projects.config(review.project.project_id);
+    const packageRef = current.validation.library_package!;
+    const resolved = resolveLibraryPackageTask(packageRef, { requireQualified: true, loader: f.projects.packageLoader });
+    const file = path.join(f.root, 'standalone-testpack.json');
+    const testpack = packageValidationTestpack(resolved, current.validation.baseline_artifact!).testpack;
+    testpack.performance.key_cases = [testpack.performance.cases[0].case_id];
+    fs.writeFileSync(file, JSON.stringify(testpack));
+    const address = runner.address(); assert.ok(address && typeof address === 'object');
+    f.projects.saveConfig(review.project.project_id, { ...current, build: resolved.build,
+      validation: { testpack: file }, runner: { mode: 'rpc', endpoint: `http://127.0.0.1:${address.port}`, token: 'fixture-runner' } });
+    const seeded = await seedBlockedValidation(f, false, true);
+    const credentiallessConfig = loadOptimizationConfig(f.configPath).config;
+    credentiallessConfig.model.api_key = '${COREPILOT_MISSING_RECOVERY_FIXTURE_KEY}';
+    assert.equal(process.env.COREPILOT_MISSING_RECOVERY_FIXTURE_KEY, undefined);
+    fs.writeFileSync(f.configPath, JSON.stringify(credentiallessConfig));
+    const original = f.store.getExperiment(seeded.experiment.experiment_id)!;
+    const intent = { schema_version: 1 as const, experiment_id: original.experiment_id, candidate_id: seeded.candidate.candidate_id,
+      type: 'FORMAL_EVALUATION' as const, round: seeded.saved.round };
+    f.store.saveExperiment({ ...original, status: 'RUNNING', validity: 'UNKNOWN', ended_at: null, failure_category: null, evaluation: null,
+      declared_context: { ...original.declared_context,
+        ...(checkpointLink === 'intent-no-plan' ? {} : { runner_execution_plan: { steps: [] } }),
+        ...(checkpointLink === 'intent-no-store' ? {} : { runner_store_instance_id: fixtureRunnerStoreId }),
+        ...(checkpointLink !== 'active-id' ? { workflow_experiment_intent: intent } : {}) } });
+    const record = f.service.get(seeded.workflowId)!;
+    record.status = 'INTERRUPTED'; record.candidate_evaluation_feedback = null;
+    if (checkpointLink !== 'active-id') record.experiment_creation_intent = intent;
+    f.store.saveOptimizationWorkflowJson(record.workflow_id, JSON.stringify(record));
+    const model = loadOptimizationConfig(f.configPath).config.model;
+    const models = createPiModels({ endpoint: model.endpoint, modelId: model.model_id, apiKey: model.api_key! });
+    const session = await PiOptimizationSession.open({ id: record.agent_session!.id, directory: record.agent_session!.directory,
+      models, model: models.getModel(COREPILOT_PI_PROVIDER_ID, model.model_id)!, systemPrompt: 'RPC recovery fixture.' });
+    await session.checkpoint({ ...seeded.saved, phase: 'VALIDATION', activeExperimentId: checkpointLink === 'active-id' ? original.experiment_id : null,
+      ...(checkpointLink !== 'active-id' ? { experimentIntent: intent } : {}),
+      pendingDecision: null, evaluationFeedback: null }); await session.close();
+    const api = new ApiClient(f.url, { token: f.token });
+    await api.resumeOptimizationWorkflow(record.workflow_id);
+    for (let i = 0; i < 500 && f.service.activeWorkflowIds().length; i++) await delay(20);
+    assert.equal(f.service.get(record.workflow_id)!.status, 'INTERRUPTED');
+    assert.equal(f.service.get(record.workflow_id)!.source_scope_authorization, undefined);
+    assert.ok(requests.every(request => request.method === 'GET'), JSON.stringify(requests));
+    const experimentRequests = requests.filter(request => request.url.includes('/experiments/'));
+    if (checkpointLink === 'intent-no-plan' || checkpointLink === 'intent-no-store') {
+      assert.equal(requests.length, 0, JSON.stringify(requests));
+      assert.equal(experimentRequests.length, 0);
+    } else {
+      assert.equal(experimentRequests.length, 1, JSON.stringify(requests));
+      assert.match(experimentRequests[0].url, new RegExp(`${fixtureRunnerStoreId}/experiments/${encodeURIComponent(original.experiment_id)}`));
+    }
+    assert.equal(f.store.listExperiments(seeded.candidate.task_id).length, 1);
+    assert.equal(f.modelRequests.inference, 0);
+  } finally { await new Promise<void>(resolve => runner.close(() => resolve())); await review.close(); await f.close(); }
+});
 
 for (const mismatch of ['candidate', 'task', 'type', 'intent'] as const) {
 test(`public resume refuses an active experiment with a mismatched ${mismatch}`, async () => {
@@ -215,3 +323,41 @@ test('retry rejects an unresolved revalidation even when the last feedback point
     assert.equal(f.modelRequests.inference, 0);
   } finally { await f.close(); }
 });
+
+for (const phase of ['VALIDATION', 'REVALIDATION'] as const) {
+  test(`legacy unscoped ${phase} can reconcile only its original unknown experiment without calling Agent`, async () => {
+    const f = await startWebFixture();
+    try {
+      const seeded = await seedBlockedValidation(f, false, true);
+      const runtime = new OptimizationRuntime(f.store);
+      const original = phase === 'VALIDATION' ? seeded.experiment : runtime.startExperiment({ taskId: seeded.candidate.task_id,
+        candidateId: seeded.candidate.candidate_id, type: 'REVALIDATION', initialStatus: 'RUNNING' });
+      const unresolved = { ...f.store.getExperiment(original.experiment_id)!, status: 'RUNNING' as const, validity: 'UNKNOWN' as const,
+        ended_at: null, failure_category: null, evaluation: null };
+      f.store.saveExperiment(unresolved);
+      const record = f.service.get(seeded.workflowId)!;
+      record.status = 'INTERRUPTED'; record.candidate_evaluation_feedback = null;
+      if (phase === 'REVALIDATION') record.revalidation_experiment_id = original.experiment_id;
+      f.store.saveOptimizationWorkflowJson(record.workflow_id, JSON.stringify(record));
+      const model = loadOptimizationConfig(f.configPath).config.model;
+      const models = createPiModels({ endpoint: model.endpoint, modelId: model.model_id, apiKey: model.api_key! });
+      const session = await PiOptimizationSession.open({ id: record.agent_session!.id, directory: record.agent_session!.directory,
+        models, model: models.getModel(COREPILOT_PI_PROVIDER_ID, model.model_id)!, systemPrompt: 'Legacy recovery fixture.' });
+      await session.checkpoint({ ...seeded.saved, phase, activeExperimentId: original.experiment_id, validationOnly: false,
+        pendingDecision: null, evaluationFeedback: null });
+      await session.close();
+      const before = f.store.getExperiment(original.experiment_id);
+      const count = f.store.listExperiments(seeded.candidate.task_id).length;
+      const api = new ApiClient(f.url, { token: f.token });
+      await api.resumeOptimizationWorkflow(seeded.workflowId);
+      for (let index = 0; index < 500 && f.service.activeWorkflowIds().length; index++) await delay(20);
+      const after = f.service.get(seeded.workflowId)!;
+      assert.equal(after.status, 'INTERRUPTED');
+      assert.match(after.error!, /本地进程状态未确认/);
+      assert.equal(after.source_scope_authorization, undefined);
+      assert.deepEqual(f.store.getExperiment(original.experiment_id), before);
+      assert.equal(f.store.listExperiments(seeded.candidate.task_id).length, count);
+      assert.equal(f.modelRequests.inference, 0);
+    } finally { await f.close(); }
+  });
+}

@@ -57,10 +57,9 @@ export interface RecordCandidateInput {
   agentIdentity: Record<string, unknown>;
 }
 
-/** New source tasks own their scope; historical tasks may add a continuation authorization. */
+/** New tasks own their scope; historical tasks may add a continuation authorization. */
 function taskCandidateScope(task: OptimizationTask): CandidateSourceScope | undefined {
   if (task.library_package) return task.target.scope.candidate_scope as CandidateSourceScope;
-  if (task.target.scope.verification_mode !== 'source_only') return undefined;
   const continuation = task.declared_context.source_scope_authorization as { candidate_scope?: CandidateSourceScope } | undefined;
   return (task.target.scope.candidate_scope as CandidateSourceScope | undefined) ?? continuation?.candidate_scope;
 }

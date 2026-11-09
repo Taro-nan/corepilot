@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
 import type { AgentTool, PiAgentRuntimeResult } from '../agent/pi-agent-runtime.js';
 import { WorkspaceToolset, type WorkspaceToolOptions } from '../agent/workspace-tools.js';
-import { checkpointCandidate, createCandidateWorkspace, restoreCandidateWorkspace, type CandidateCheckpoint, type CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
+import { candidateSourceChangesSinceBaseline, checkpointCandidate, createCandidateWorkspace, restoreCandidateWorkspace, type CandidateCheckpoint, type CandidateWorkspaceState } from '../workspace/candidate-workspace.js';
 import {
   evaluatePerformanceGate,
   parsePerformanceMeasurements,
@@ -165,7 +165,7 @@ export function buildDomainAgentPrompt(preflight: PublicOptimizationPreflight): 
     operation: testpack.operation,
     data_type: testpack.data_type,
     entry_file: preflight.request.entry_file,
-    ...(preflight.libraryPackage ? { candidate_scope: preflight.libraryPackage.target.candidate_scope } : {}),
+    ...((preflight.libraryPackage?.target.candidate_scope ?? preflight.request.candidate_scope) ? { candidate_scope: preflight.libraryPackage?.target.candidate_scope ?? preflight.request.candidate_scope } : {}),
   };
   const validation = {
     evaluator: evaluator
@@ -223,6 +223,8 @@ export async function runPublicAgentWorkflow(input: {
   onProgress?: (progress: PublicAgentProgress) => void | Promise<void>;
   signal?: AbortSignal;
   resumeFrom?: PublicAgentWorkflowCheckpoint;
+  /** Reconcile the already-submitted experiment without starting another experiment. */
+  reconcileOnly?: boolean;
   saveCheckpoint?: (checkpoint: PublicAgentWorkflowCheckpoint) => void | Promise<void>;
 }): Promise<PublicAgentWorkflowResult> {
   const saved = input.resumeFrom;
@@ -234,6 +236,8 @@ export async function runPublicAgentWorkflow(input: {
     ...(input.sourceBranch ? { sourceBranch: input.sourceBranch } : {}),
   });
   const build = buildCommand(input.preflight, workspace.repository);
+  const sourceScope = input.preflight.libraryPackage?.target.candidate_scope ?? input.preflight.request.candidate_scope;
+  const checkScope = () => { if (sourceScope) assertCandidateSourceScope(sourceScope, candidateSourceChangesSinceBaseline(workspace)); };
   const formalRpc = input.preflight.runner?.mode === 'rpc';
   const development = input.createDevelopmentInvestigation?.(workspace);
   let evaluationFeedback = saved?.evaluationFeedback ?? null;
@@ -267,7 +271,7 @@ export async function runPublicAgentWorkflow(input: {
       },
     }),
     ...(development?.toolOptions ?? {}),
-    ...(input.preflight.libraryPackage ? { candidateSourceScope: input.preflight.libraryPackage.target.candidate_scope } : {}),
+    ...(sourceScope ? { candidateSourceScope: sourceScope } : {}),
     beforeSourceMutation: () => {
       const decision = decisions.at(-1) ?? (input.reasoning ? pendingDecision : null);
       if (evaluationFeedback && (!decision || decision.action === 'ABANDON')) throw new Error('record_candidate_decision must select REPAIR or NEW_HYPOTHESIS before modifying a failed Candidate');
@@ -284,7 +288,10 @@ export async function runPublicAgentWorkflow(input: {
   let remote: RemoteValidationSession | undefined;
   let agent = saved?.agent ?? null;
   let developmentGate = saved?.developmentGate ?? null;
-  let activeExperimentId = saved?.activeExperimentId ?? null;
+  // Reconciliation must never create an Experiment just because the checkpoint
+  // acknowledgement after the intent was lost. The caller has checked the
+  // intent against the already-persisted workflow and Experiment.
+  let activeExperimentId = saved?.activeExperimentId ?? (input.reconcileOnly ? saved?.experimentIntent?.experiment_id : null) ?? null;
   let experimentIntent = saved?.experimentIntent ?? null;
   let executionMayHaveStarted = false;
   let resultAwaitingPersistence = false;
@@ -350,6 +357,7 @@ export async function runPublicAgentWorkflow(input: {
       currentRound = round;
       input.signal?.throwIfAborted();
       if (phase === 'AGENT') {
+        checkScope();
         if (evaluationFeedback && validation) {
           const stopped = await stopValidation(validation, evaluationFeedback);
           if (stopped) return stopped;
@@ -437,8 +445,9 @@ export async function runPublicAgentWorkflow(input: {
       if (!agent) throw new Error('saved candidate evaluation is missing its Agent result');
 
       if (phase === 'CHECKPOINT') {
+        checkScope();
         checkpoint = checkpointCandidate(workspace, `corepilot candidate checkpoint round ${round}`);
-        if (input.preflight.libraryPackage) assertCandidateSourceScope(input.preflight.libraryPackage.target.candidate_scope, checkpoint.files.map((item) => item.path));
+        checkScope();
         candidateId = input.lifecycle
           ? await input.lifecycle.candidateCheckpointed({ round, workspace, checkpoint, agent })
           : null;
@@ -472,7 +481,9 @@ export async function runPublicAgentWorkflow(input: {
         activeExperimentId = await startExperiment('FORMAL_EVALUATION', round);
         await capture('VALIDATION');
         const experimentId = activeExperimentId;
-        if (activeExperimentId && saved?.phase === 'VALIDATION' && saved.activeExperimentId === activeExperimentId && !input.experimentExecution) {
+        const resumingOriginal = saved?.phase === 'VALIDATION' &&
+          (saved.activeExperimentId ?? (input.reconcileOnly ? saved.experimentIntent?.experiment_id : null)) === activeExperimentId;
+        if (activeExperimentId && resumingOriginal && !input.experimentExecution) {
           throw new LocalExperimentUnknownError(`原实验 ${activeExperimentId} 的本地进程状态未确认，不能自动重新执行；请核对原实验。`);
         }
         if (!input.experimentExecution && input.remote) {
@@ -494,7 +505,7 @@ export async function runPublicAgentWorkflow(input: {
               sourceRoot: workspace.repository,
               includePerformance: input.enablePerformance === true,
               signal: input.signal,
-              resume: saved?.phase === 'VALIDATION' && saved.activeExperimentId === activeExperimentId,
+              resume: resumingOriginal,
             })
           : await runValidationCycle({
               workspace: workspace.validation,
@@ -566,12 +577,19 @@ export async function runPublicAgentWorkflow(input: {
 
         await completeExperiment(null);
         await capture('REVALIDATION');
+        if (input.reconcileOnly) {
+          const message = '原正式实验已核对；独立复验尚未启动。候选与实验均已保留，请确认后继续。';
+          await input.onProgress?.({ phase: 'INTERRUPTED', round, last_event: message });
+          return { status: 'INTERRUPTED', rounds: round, workspace, checkpoint, validation, performance, revalidation, agent, development_gate: developmentGate, error: message };
+        }
       }
 
       activeExperimentId = await startExperiment('REVALIDATION', round);
       await capture('REVALIDATION');
       const revalidationExperimentId = activeExperimentId;
-      if (activeExperimentId && saved?.phase === 'REVALIDATION' && saved.activeExperimentId === activeExperimentId && !input.experimentExecution) {
+      const resumingOriginal = saved?.phase === 'REVALIDATION' &&
+        (saved.activeExperimentId ?? (input.reconcileOnly ? saved.experimentIntent?.experiment_id : null)) === activeExperimentId;
+      if (activeExperimentId && resumingOriginal && !input.experimentExecution) {
         throw new LocalExperimentUnknownError(`原复验 ${activeExperimentId} 的本地进程状态未确认，不能自动重新执行；请核对原实验。`);
       }
       executionMayHaveStarted = true;
@@ -583,7 +601,7 @@ export async function runPublicAgentWorkflow(input: {
             build,
             sourceRoot: workspace.repository,
             signal: input.signal,
-            resume: saved?.phase === 'REVALIDATION' && saved.activeExperimentId === activeExperimentId,
+            resume: resumingOriginal,
           })
         : await runRevalidationCycle({ workspace, testpack: input.preflight.testpack.testpack, build, sourceRoot: workspace.repository, testpackDir: input.preflight.testpack.testpackDir, remote, signal: input.signal });
       resultAwaitingPersistence = true;

@@ -32,9 +32,6 @@ export function configuredOptimizationFunction(configPath: string, packageLoader
 
 /** Validate the same inputs as submission without creating a task or calling a model. */
 export async function checkOptimization(configPath: string, functionName?: string, options: CheckOptimizationOptions = {}): Promise<{ message: string; function_name: string }> {
-  if (options.verificationMode !== 'source_only' && options.candidateScope !== undefined) {
-    throw new Error('源码修改范围仅适用于仅源码优化；正式验证使用已确认测试方案的范围。');
-  }
   if (options.verificationMode === 'source_only') {
     if (!functionName?.trim()) throw new Error('请选择要优化的函数；源码优化无需测试方案。');
     const preflight = loadSourceOptimizationPreflight({ verification_mode: 'source_only', config_path: configPath,
@@ -48,10 +45,13 @@ export async function checkOptimization(configPath: string, functionName?: strin
   }
   const targetFunction = functionName ?? configuredOptimizationFunction(configPath, options.packageLoader);
   const preflight = loadPublicOptimizationPreflight({ config_path: configPath, function_name: targetFunction, entry_file: null,
+    ...(options.candidateScope ? { candidate_scope: options.candidateScope } : {}),
     ...(options.machineId ? { machine_id: options.machineId } : {}) }, options);
   const lines = [`配置：${configPath}`, `函数：${targetFunction}`, `模型：${preflight.config.config.model.model_id}（凭据已解析；未调用模型）`,
     `验证：${preflight.libraryPackage ? `${preflight.libraryPackage.loaded.manifest.package_id}@${preflight.libraryPackage.loaded.manifest.version}` : preflight.testpack.testpack.testpack_id}`,
     `正确性用例：${preflight.testpack.testpack.correctness.cases.length}；性能 workload：${preflight.testpack.testpack.performance.cases.length}`];
+  const scope = preflight.libraryPackage?.target.candidate_scope ?? preflight.request.candidate_scope!;
+  lines.push(`允许修改：${scope.include.join('、')}；排除：${scope.exclude.join('、') || '无'}`);
   if (preflight.executionMachine) lines.push(`执行机器：${preflight.executionMachine.name}（${preflight.executionMachine.machine_id}，配置版本 ${preflight.executionMachine.revision}）`);
   if (preflight.libraryPackage) {
     const baseline = preflight.testpack.testpack.performance.baselines.comparison;

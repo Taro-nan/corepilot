@@ -140,7 +140,7 @@ test('verified Agent cannot start an experiment by submitting only an untracked 
   try {
     const project = f.projects.add({ name: 'Artifact only', repository_root: f.repo, config_path: f.configPath });
     const api = new ApiClient(f.url, { token: f.token });
-    const start = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', enable_performance: false }) as { workflow_id: string };
+    const start = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', enable_performance: false, candidate_scope: { include: ['kernel.c', 'temporary.o'], exclude: [] } }) as { workflow_id: string };
     const deadline = Date.now() + 20_000;
     while (f.service.activeWorkflowIds().length && Date.now() < deadline) await delay(20);
     const record = f.service.get(start.workflow_id)!;
@@ -159,7 +159,7 @@ test('public Agent finishes delete/recreate editing before a Candidate is checkp
   try {
     const project = f.projects.add({ name: 'Complete rewrite', repository_root: f.repo, config_path: f.configPath });
     const api = new ApiClient(f.url, { token: f.token });
-    const start = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', enable_performance: false }) as { workflow_id: string };
+    const start = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', enable_performance: false, candidate_scope: { include: ['kernel.c'], exclude: [] } }) as { workflow_id: string };
     const deadline = Date.now() + 20_000;
     while (f.service.activeWorkflowIds().length && Date.now() < deadline) await delay(20);
     const record = f.service.get(start.workflow_id)!;
@@ -192,7 +192,7 @@ test('repair can restore a file removed by a failed checkpoint from the immutabl
 test('a failed development build feeds its command and deleted paths into the next Candidate repair', async () => {
   const f = await startWebFixture();
   try {
-    const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: null, config_path: f.configPath, repository_root: f.repo });
+    const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: null, config_path: f.configPath, repository_root: f.repo, candidate_scope: { include: ['kernel.c'], exclude: [] } });
     let round = 0, gates = 0, failedCommit = '';
     const result = await runPublicAgentWorkflow({ preflight, repository: f.repo, worktreeRoot: path.join(f.root, 'repair-trees'), runId: 'repair', maxRounds: 2,
       createDevelopmentInvestigation: () => ({ toolOptions: { inspectMachine: async () => ({ isError: false, text: '{}' }) },

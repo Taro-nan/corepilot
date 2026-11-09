@@ -52,7 +52,7 @@ export interface OptimizationWorkflowProgress {
 export interface OptimizationWorkflowRecord {
   /** Missing on historical workflows means verified. */
   verification_mode?: OptimizationVerificationMode;
-  /** Missing on a source-only task denotes a legacy task without recorded permission. */
+  /** Missing on a non-Package task denotes a legacy task without recorded permission. */
   source_scope_authorization?: SourceScopeAuthorization;
   review_evidence?: WorkflowEvidenceSnapshot;
   review_evidence_history?: WorkflowEvidenceSnapshot[];

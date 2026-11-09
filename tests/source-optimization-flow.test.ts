@@ -167,7 +167,7 @@ test('source-only request identity normalizes disabled performance and cannot be
     const request = { verification_mode: 'source_only' as const, config_path: f.configPath, function_name: 'kernel', entry_file: 'kernel.c', repository_root: f.repo, candidate_scope: { include: ['kernel.c'], exclude: [] } };
     const first = service.submitPublic(request, { requestId: 'source-request' });
     assert.deepEqual(service.submitPublic({ ...request, enable_performance: false }, { requestId: 'source-request' }), first);
-    assert.throws(() => service.submitPublic({ ...request, verification_mode: 'verified' }, { requestId: 'source-request' }), /修改范围仅适用/);
+    assert.throws(() => service.submitPublic({ ...request, verification_mode: 'verified' }, { requestId: 'source-request' }), /different optimization inputs/);
     assert.throws(() => service.submitPublic({ ...request, candidate_scope: { include: ['other.c'], exclude: [] } }, { requestId: 'source-request' }), /different optimization inputs/);
     assert.equal(service.list().length, 1); assert.equal(f.contexts.length, 0);
   } finally { await service.stop(); await f.close(); }

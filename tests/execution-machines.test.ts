@@ -33,7 +33,7 @@ test('task preflight probes the selected machine override without saving it, cal
     f.projects.bindMachine(project.project_id, defaultMachine.machine_id);
     const original = fs.readFileSync(project.config_path, 'utf8');
     const api = new ApiClient(f.url, { token: f.token });
-    const checked = await api.projectAction(project.project_id, 'check', { function_name: pack.function_name, machine_id: selected.machine_id }) as { message: string };
+    const checked = await api.projectAction(project.project_id, 'check', { function_name: pack.function_name, machine_id: selected.machine_id, candidate_scope: { include: ['kernel.c'], exclude: [] } }) as { message: string };
     assert.match(checked.message, /Selected preflight fixture/);
     assert.doesNotMatch(checked.message, /Default offline fixture|preflight-fixture-token/);
     assert.equal(fs.readFileSync(project.config_path, 'utf8'), original);

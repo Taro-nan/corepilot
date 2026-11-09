@@ -6,7 +6,7 @@ import type { ApiClient } from './api-client.js';
 import type { OptimizationWorkflowRecord } from '../contracts/workflow.js';
 import { writeOptimizationReport } from '../report/write-report.js';
 
-export const WORKFLOW_USAGE = 'workflow list | workflow status|watch|report|evidence|human-approve|deliver|reproduce|events|resume|retry-validation|message|cancel|delivery-check|delivery-resume|delivery-withdraw|delivery-cleanup <workflow-id> [--json]；历史源码任务首次继续：workflow resume <id> --allow <文件或目录/> [--exclude <路径>]';
+export const WORKFLOW_USAGE = 'workflow list | workflow status|watch|report|evidence|human-approve|deliver|reproduce|events|resume|retry-validation|message|cancel|delivery-check|delivery-resume|delivery-withdraw|delivery-cleanup <workflow-id> [--json]；历史未授权任务首次继续编辑：workflow resume <id> --allow <文件或目录/> [--exclude <路径>]';
 export function isWorkflowFinished(record: OptimizationWorkflowRecord): boolean {
   return ['CANDIDATE_READY', 'WAITING_APPROVAL', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'BUDGET_EXHAUSTED', 'INTERRUPTED', 'VALIDATION_BLOCKED', 'DELIVERABLE', 'FAILED', 'CANCELLED'].includes(record.status);
 }

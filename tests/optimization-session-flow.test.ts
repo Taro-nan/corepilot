@@ -85,7 +85,7 @@ async function fixture(readTurns: number, maxCandidates?: number, holdFirst = fa
   await listen();
   return { root, configPath, contexts, git, original, store, get api() { return api; }, get url() { return url; }, get service() { return service; },
     get held() { return held; }, release() { hold = false; },
-    async start() { const result = await api.submitOptimizationWorkflow({ config_path: configPath, function_name: 'kernel', entry_file: 'kernel.c', repository_root: repo }) as { workflow_id: string }; workflowId = result.workflow_id; return workflowId; },
+    async start() { const result = await api.submitOptimizationWorkflow({ config_path: configPath, function_name: 'kernel', entry_file: 'kernel.c', repository_root: repo, candidate_scope: { include: ['kernel.c'], exclude: [] } }) as { workflow_id: string }; workflowId = result.workflow_id; return workflowId; },
     async wait(status: string) {
       for (let count = 0; count < 800; count++) { const record = service.get(workflowId)!; if (record.status === status && !service.activeWorkflowIds().length) return record; if (record.status === 'FAILED') assert.fail(record.error ?? 'workflow failed'); await delay(25); }
       assert.fail(JSON.stringify(service.get(workflowId)));

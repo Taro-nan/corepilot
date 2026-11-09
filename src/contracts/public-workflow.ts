@@ -12,7 +12,7 @@ export interface PublicWorkflowRequest {
   budget?: OptimizationSessionBudget;
   function_name: string;
   entry_file: string | null;
-  /** Explicit source-only write permission; entry_file remains an investigation hint. */
+  /** Explicit write permission when no Package owns it; entry_file is an investigation hint. */
   candidate_scope?: CandidateSourceScope;
   config_path: string;
   /** CLI 从调用目录派生出的算法库根目录；直接调用 HTTP 时可省略。 */
@@ -62,7 +62,6 @@ export function parsePublicWorkflowRequest(value: unknown): PublicWorkflowReques
   }
   let candidateScope: CandidateSourceScope | undefined;
   if (body.candidate_scope !== undefined) {
-    if (body.verification_mode !== 'source_only') throw new PublicWorkflowRequestError('修改范围仅适用于仅源码优化；正式优化沿用其测试方案的范围。');
     try { candidateScope = parseSourceScope(body.candidate_scope); }
     catch (error) { throw new PublicWorkflowRequestError((error as Error).message); }
   }

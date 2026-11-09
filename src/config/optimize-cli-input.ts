@@ -102,7 +102,6 @@ export function parseOptimizeCliInput(args: readonly string[], cwd = process.cwd
   if (parsed.values['source-only'] && parsed.values.performance) throw new OptimizeCliInputError('--source-only 不能与 --performance 同时使用。仅源码优化不执行测试。');
   let candidateScope: CandidateSourceScope | undefined;
   if (parsed.values.allow !== undefined || parsed.values.exclude !== undefined || parsed.values['source-only']) {
-    if (!parsed.values['source-only']) throw new OptimizeCliInputError('--allow/--exclude 仅用于 --source-only；正式优化的修改范围由测试方案确定。');
     try { candidateScope = parseSourceScope({ include: parsed.values.allow ?? [], exclude: parsed.values.exclude ?? [] }); }
     catch (error) { throw new OptimizeCliInputError(`${(error as Error).message} 请使用 --allow <文件或目录/> 指定允许修改的范围。`); }
   }
@@ -139,7 +138,7 @@ export function renderOptimizeCliHelp(): string {
     '  corepilot optimize --project <id> [--function <name>] [--performance] [--watch]',
     '  探索预算：[--budget-minutes <分钟>] [--max-candidates <候选数>]；默认 60 分钟 / 8 个候选，可继续原会话。',
     '',
-    '说明：--source-only --allow <文件或目录/> 仅生成优化代码；可重复 --allow 和 --exclude。',
-    '--file 只是调查入口；修改范围须使用 --allow 明确授权。正确性与性能未验证。',
+    '说明：非接入包任务使用 --allow <文件或目录/> 指定允许修改的源码；可重复 --allow 和 --exclude。',
+    '--source-only 仅生成优化代码；--file 只是调查入口，正确性与性能未在源码模式验证。',
   ].join('\n');
 }

@@ -446,12 +446,13 @@ export class SqliteTaskStore implements TaskStore {
     const authorization = workflow.source_scope_authorization;
     if (!authorization || authorization.kind !== 'CONTINUATION' || workflow.status !== 'GENERATING' ||
         previous.workflow_id !== workflow.workflow_id || previous.optimization_task_id !== workflow.optimization_task_id ||
-        previous.verification_mode !== 'source_only' || previous.source_scope_authorization ||
+        previous.source_scope_authorization ||
         authorization.previous_candidate_id !== (previous.candidate_id ?? null)) throw new Error('历史源码任务授权状态不匹配。');
     this.transaction(() => {
       if (this.getOptimizationWorkflowJson(previous.workflow_id) !== expectedWorkflowJson) throw new Error('任务状态已改变，请刷新后重新授权。');
       const task = previous.optimization_task_id ? this.getOptimizationTask(previous.optimization_task_id) : null;
-      if (!task || task.workflow_id !== previous.workflow_id || task.target.scope.verification_mode !== 'source_only' ||
+      if (!task || task.workflow_id !== previous.workflow_id || task.library_package ||
+          (previous.verification_mode === 'source_only') !== (task.target.scope.verification_mode === 'source_only') ||
           task.target.scope.candidate_scope || task.declared_context.source_scope_authorization) throw new Error('历史源码任务的领域授权状态不匹配。');
       this.saveOptimizationTask({ ...task, declared_context: { ...task.declared_context, source_scope_authorization: structuredClone(authorization) }, updated_at: workflow.updated_at });
       this.saveOptimizationWorkflowJson(workflow.workflow_id, JSON.stringify(workflow));

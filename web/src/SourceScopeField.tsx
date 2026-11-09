@@ -12,7 +12,7 @@ export function SourceScopeField({ include, exclude, onChange }: { include: stri
   return <div>
     <label className="field"><span>允许修改的源码文件或目录</span>
       <textarea required rows={3} value={include} onChange={event => onChange({ include: event.target.value })} placeholder={'每行一个相对路径，例如：\nsrc/kernel.c\nsrc/impl/'} />
-      <small>填写仓库相对路径；目录以 / 结尾。目录内所有文件都可修改，请核对并排除测试和参考实现。</small>
+      <small>填写仓库相对路径；目录以 / 结尾。目录内所有文件都可修改，请核对并排除测试、参考实现和构建脚本。授权范围不证明参考实现独立，也不提供进程隔离。</small>
     </label>
     <Disclosure title="排除目录或文件" summary={exclude.trim() ? '已设置排除路径' : '可选'} modified={!!exclude.trim()}>
       <label className="field"><span>禁止修改的路径</span><textarea rows={2} value={exclude} onChange={event => onChange({ exclude: event.target.value })} placeholder="每行一个文件或目录/" /></label>

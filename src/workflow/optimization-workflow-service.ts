@@ -188,7 +188,6 @@ export class OptimizationWorkflowService {
     if (this.stopping) throw new Error('后台正在停止，请稍后重试。');
     if (request.verification_mode === 'source_only' && request.enable_performance === true) throw new Error('仅优化源码不执行性能测试，请选择优化并验证。');
     if (request.candidate_scope) {
-      if (request.verification_mode !== 'source_only') throw new Error('修改范围仅适用于仅源码优化。');
       request = { ...request, candidate_scope: parseSourceScope(request.candidate_scope) };
     }
     const requestDigest = createHash('sha256').update(JSON.stringify({
@@ -238,6 +237,7 @@ export class OptimizationWorkflowService {
     const performanceBaseline = preflight.testpack.testpack.performance.baselines.comparison;
     record.session_budget = resolveOptimizationBudget(request.budget);
     record.execution_contract_digest = executionContractDigest(preflight);
+    if (preflight.request.candidate_scope) record.source_scope_authorization = { kind: 'AT_CREATION', candidate_scope: structuredClone(preflight.request.candidate_scope), authorized_at: record.created_at };
     if (preflight.executionMachine) record.execution_machine = { ...preflight.executionMachine };
     if (preflight.source) { record.source_branch = preflight.source.branch; record.baseline_commit = preflight.source.commit; }
     if (options.requestId) { record.request_id = options.requestId; record.request_digest = requestDigest; record.request_input_digest = options.requestInputDigest; }
@@ -249,6 +249,7 @@ export class OptimizationWorkflowService {
         scope: {
           entry_file: request.entry_file,
           repository_root: request.repository_root ?? preflight.config.configDir,
+          ...(preflight.request.candidate_scope ? { candidate_scope: structuredClone(preflight.request.candidate_scope) } : {}),
           ...(preflight.source ? { source_branch: preflight.source.branch } : {}),
           testpack_id: preflight.testpack.testpack.testpack_id,
           function_family: preflight.testpack.testpack.function_family,
@@ -329,14 +330,14 @@ export class OptimizationWorkflowService {
     return { workflowId };
   }
 
-  private async executePublic(workflowId: string, preflight: ReturnType<typeof loadPublicOptimizationPreflight>, signal: AbortSignal, resume = false, continuationMessage?: string, retryValidation = false): Promise<void> {
+  private async executePublic(workflowId: string, preflight: ReturnType<typeof loadPublicOptimizationPreflight>, signal: AbortSignal, resume = false, continuationMessage?: string, retryValidation = false, reconcileOnly = false): Promise<void> {
     const update = (patch: Partial<OptimizationWorkflowRecord>) => {
       const record = this.records.get(workflowId);
       if (!record) return;
       Object.assign(record, patch, { updated_at: new Date().toISOString() });
       this.records.save(record);
     };
-    const clean = (text: string) => redact(redact(text, preflight.credential.apiKey), preflight.runner.mode === 'rpc' ? preflight.runner.token : null);
+    const clean = (text: string) => redact(redact(text, preflight.credential?.apiKey ?? null), preflight.runner.mode === 'rpc' ? preflight.runner.token : null);
     const taskId = this.records.get(workflowId)?.optimization_task_id;
     if (!taskId) {
       update({ status: 'FAILED', error: 'optimization task identity is missing', progress: { phase: 'FAILED', last_event: 'optimization task identity is missing' } });
@@ -355,7 +356,7 @@ export class OptimizationWorkflowService {
       const modelConfig: PiRuntimeModelConfig = {
         modelId: preflight.config.config.model.model_id,
         endpoint: preflight.config.config.model.endpoint,
-        apiKey: preflight.credential.apiKey,
+        apiKey: preflight.credential?.apiKey ?? '',
         reasoningEffort: preflight.config.config.model.reasoning_effort,
         maxOutputTokens: preflight.config.config.model.max_output_tokens,
       };
@@ -416,6 +417,18 @@ export class OptimizationWorkflowService {
           validation: null, performance: null, revalidation: null };
         await session.checkpoint(resumeFrom);
         await session.progress({ phase: 'RETRYING_VALIDATION', last_event: `重新验证冻结候选 ${candidate.candidate_id}；保持源码与测试口径，创建新实验。` });
+      } else if (reconcileOnly) {
+        const pendingDevelopment = await session.readRecord<ExperimentExecutionPlan | null>('development-job');
+        if (pendingDevelopment) throw new RemoteExperimentUnknownError(pendingDevelopment.experiment.experiment_id,
+          `原开发实验 ${pendingDevelopment.experiment.experiment_id} 未固定 Runner 数据库身份，无法安全自动核对；请维护者核对原作业，现场已保留。`);
+        const id = resumeFrom?.activeExperimentId ?? resumeFrom?.experimentIntent?.experiment_id;
+        const experiment = id ? this.options.store.getExperiment(id) : null;
+        if (!id || !resumeFrom || !['VALIDATION', 'REVALIDATION'].includes(resumeFrom.phase) || !experiment ||
+            experiment.task_id !== taskId || !['PENDING', 'RUNNING', 'UNKNOWN'].includes(experiment.status)) {
+          throw new RemoteExperimentUnknownError(id ?? 'unknown', '未能从原检查点确认待核对的实验身份，请保留现场人工核对；未调用 Agent 或启动新实验。');
+        }
+        resumeFrom = { ...resumeFrom, validationOnly: true };
+        await session.checkpoint(resumeFrom);
       } else if (resumeFrom?.validationOnly && !resumeFrom.activeExperimentId && resumeFrom.evaluationFeedback
         && (resumeFrom.validation?.build.ok === false || resumeFrom.evaluationFeedback.correctness_status === 'FAILED'
           || resumeFrom.evaluationFeedback.performance_summary.status === 'FAILED')) {
@@ -424,8 +437,9 @@ export class OptimizationWorkflowService {
         afterSavedEvaluation = true;
         await session.checkpoint(resumeFrom);
       }
-      if (resumeFrom?.activeExperimentId) {
-        const experiment = this.runtime.getExperiment(resumeFrom.activeExperimentId);
+      const checkpointExperimentId = resumeFrom?.activeExperimentId ?? (reconcileOnly ? resumeFrom?.experimentIntent?.experiment_id : null);
+      if (checkpointExperimentId && resumeFrom) {
+        const experiment = this.runtime.getExperiment(checkpointExperimentId);
         const workflow = this.records.get(workflowId)!;
         const type = resumeFrom.phase === 'VALIDATION' ? 'FORMAL_EVALUATION' : resumeFrom.phase === 'REVALIDATION' ? 'REVALIDATION' : null;
         const reference = type === 'FORMAL_EVALUATION' ? workflow.experiment_id : workflow.revalidation_experiment_id;
@@ -446,6 +460,7 @@ export class OptimizationWorkflowService {
         throw new Error(`任务仍有未确认终态的原实验 ${unrelatedActive.experiment_id}；请先核对原实验，系统不会继续调查或启动新实验。`);
       }
       if (!resumeFrom?.validationOnly) {
+        if (!preflight.credential) throw new Error('继续 Agent 工作需要有效的模型凭据；原实验未被重新提交。');
         const verification = await verifyToolCalling(modelConfig, { models, timeoutMs: preflight.config.config.model.timeout_ms, signal, fetch: modelFetch });
         if (!verification.ok) throw new Error(`模型工具调用能力验证失败：${verification.error ?? '未返回合法 tool call'}`);
       }
@@ -713,6 +728,7 @@ export class OptimizationWorkflowService {
         runId,
         maxRounds: this.options.publicMaxRounds ?? budget.max_candidates,
         ...(resumeFrom ? { resumeFrom } : {}),
+        ...(reconcileOnly ? { reconcileOnly: true } : {}),
         saveCheckpoint: checkpoint => session!.checkpoint(JSON.parse(JSON.stringify(checkpoint, (key, value) => ['stdout', 'stderr'].includes(key) && typeof value === 'string' ? value.slice(-8192) : value))),
         ...(this.options.publicInitialFeedback === undefined ? {} : { initialFeedback: this.options.publicInitialFeedback }),
         enablePerformance: recordPerformance(this.records.get(workflowId), this.options.publicEnablePerformance),
@@ -930,20 +946,39 @@ export class OptimizationWorkflowService {
     if (this.controllers.has(workflowId)) return { workflow_id: workflowId, status: record.status };
     if (input.message !== undefined && (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 16_384)) throw new Error('补充要求需为 1–16384 字符');
     if (record.verification_mode === 'source_only') return this.resumeSourceWorkflow(record, input);
-    if (input.candidateScope) throw new Error('正式优化的修改范围由已固定的测试方案确定，不能继续时更改。');
-    if (isWorkflowValidationBlocked(record)) throw new Error('验证环境异常不会通过修改候选修复；请使用「重新验证当前候选」或 workflow retry-validation。');
     if (!record.agent_session || !['BUDGET_EXHAUSTED', 'INTERRUPTED', 'FAILED', 'PERFORMANCE_THRESHOLD_NOT_MET', 'NO_CANDIDATE', 'GENERATING', 'CREATED'].includes(record.status)) throw new Error('此任务没有可继续的 Agent 会话；旧记录仍可查看报告。');
+    const expectedWorkflowJson = JSON.stringify(record);
+    const task = this.runtime.getTask(record.optimization_task_id!);
+    const unresolvedExperiment = this.options.store.listExperiments(task.task_id).some(experiment =>
+      ['FORMAL_EVALUATION', 'REVALIDATION'].includes(experiment.type) && ['PENDING', 'RUNNING', 'UNKNOWN'].includes(experiment.status));
+    if (isWorkflowValidationBlocked(record) && !unresolvedExperiment) throw new Error('验证环境异常不会通过修改候选修复；请使用「重新验证当前候选」或 workflow retry-validation。');
+    const authorization = record.source_scope_authorization;
+    const taskScope = task.target.scope.candidate_scope as CandidateSourceScope | undefined;
+    const continuation = task.declared_context.source_scope_authorization as OptimizationWorkflowRecord['source_scope_authorization'];
+    if (task.library_package && (!taskScope || input.candidateScope)) throw new Error('接入包固定的源码范围不可更改，请核对任务记录。');
+    if (authorization && JSON.stringify(authorization.kind === 'AT_CREATION' ? taskScope : continuation?.candidate_scope) !== JSON.stringify(authorization.candidate_scope)) throw new Error('保存的源码授权范围不一致，请保留现场并核对任务记录。');
+    if (authorization && input.candidateScope) throw new Error('任务的修改范围已固定，不能继续时更改；需要其他范围请新建任务。');
+    const candidateScope = task.library_package ? taskScope : authorization?.candidate_scope ?? (input.candidateScope ? parseSourceScope(input.candidateScope) : undefined);
+    const reconcileOnly = !candidateScope && unresolvedExperiment;
+    if (!candidateScope && !reconcileOnly) throw new Error('历史任务未记录源码授权范围。请明确允许修改的文件或目录（CLI 使用 --allow）后再继续，已有候选不会被改写。');
+    if (reconcileOnly && input.message) throw new Error('仅核对原实验时不能发送 Agent 补充要求；需要继续修改源码时请先明确授权范围。');
+    if (!task.library_package && !authorization && candidateScope) {
+      if (!record.workspace_editing || !record.baseline_commit) throw new Error('历史工作区或源码基线缺失，无法核对已有改动；请查看历史记录并新建任务。');
+      assertCandidateSourceScope(candidateScope, candidateSourceChangesSinceBaseline({ editing: record.workspace_editing, baseline_commit: record.baseline_commit }));
+      record.source_scope_authorization = { kind: 'CONTINUATION', candidate_scope: candidateScope, authorized_at: new Date().toISOString(), previous_candidate_id: record.candidate_id ?? null };
+    }
     const budget = resolveOptimizationBudget(input.budget ?? record.session_budget);
-    const preflight = this.continuationPreflight(record, input);
+    const preflight = this.continuationPreflight(record, input, reconcileOnly);
     record.session_budget = budget;
     record.continuation_count = (record.continuation_count ?? 0) + 1;
     record.status = 'GENERATING'; record.error = null; delete record.stop_reason;
-    record.progress = { ...record.progress, phase: 'RESUMING', last_event: '正在恢复原会话、源码工作区和已有 Runner 实验' };
+    record.progress = { ...record.progress, phase: 'RESUMING', last_event: reconcileOnly ? '正在核对原实验，不调用 Agent 或修改源码。' : '正在恢复原会话、源码工作区和已有 Runner 实验' };
     record.updated_at = new Date().toISOString();
-    this.records.save(record);
+    if (!task.library_package && !authorization && candidateScope) this.options.store.authorizeLegacySourceContinuation(expectedWorkflowJson, record);
+    else this.records.save(record);
     const controller = new AbortController();
     this.controllers.set(workflowId, controller);
-    const running = this.executePublic(workflowId, preflight, controller.signal, true, input.message).finally(() => {
+    const running = this.executePublic(workflowId, preflight, controller.signal, true, input.message, false, reconcileOnly).finally(() => {
       this.controllers.delete(workflowId); this.running.delete(workflowId);
     });
     this.running.set(workflowId, running);
@@ -969,7 +1004,7 @@ export class OptimizationWorkflowService {
       && !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(experiment.status))) {
       throw new Error('当前候选仍有未确认终态的实验或复验；请先继续并核对原实验，不能重复启动。');
     }
-    const preflight = this.continuationPreflight(record, input);
+    const preflight = this.continuationPreflight(record, input, true);
     record.status = 'GENERATING'; record.error = null; delete record.stop_reason;
     record.validation_retry_count = (record.validation_retry_count ?? 0) + 1;
     record.candidate_evaluation_decision = null;
@@ -983,12 +1018,14 @@ export class OptimizationWorkflowService {
     return { workflow_id: workflowId, status: 'GENERATING' };
   }
 
-  private continuationPreflight(record: OptimizationWorkflowRecord, input: { cliApiKey?: string; packageLoader?: LibraryPackageLoader }) {
+  private continuationPreflight(record: OptimizationWorkflowRecord, input: { cliApiKey?: string; packageLoader?: LibraryPackageLoader }, withoutModel = false) {
     const preflight = loadPublicOptimizationPreflight({ function_name: record.function_name, entry_file: record.entry_file,
       config_path: record.config_path, repository_root: record.repository_root, enable_performance: record.enable_performance,
+      ...(record.source_scope_authorization?.kind === 'AT_CREATION' ? { candidate_scope: record.source_scope_authorization.candidate_scope } : {}),
       ...(record.execution_machine ? { machine_id: record.execution_machine.machine_id } : {}) },
-    { cliApiKey: input.cliApiKey, resolveMachine: id => new ExecutionMachineService(this.options.store).resolve(id), packageLoader: input.packageLoader });
+    { cliApiKey: input.cliApiKey, resolveMachine: id => new ExecutionMachineService(this.options.store).resolve(id), packageLoader: input.packageLoader, allowUnscopedHistorical: true, withoutModel });
     if (record.execution_contract_digest !== executionContractDigest(preflight)) throw new Error('构建、验证方案或执行机器已改变；请使用新配置创建任务，原会话的实验口径保持固定。模型与凭据可以更新后继续。');
+    if (record.source_scope_authorization?.kind === 'CONTINUATION') preflight.request = { ...preflight.request, candidate_scope: record.source_scope_authorization.candidate_scope };
     if (record.baseline_commit) preflight.source = { branch: record.source_branch ?? 'detached', commit: record.baseline_commit };
     return preflight;
   }
@@ -1023,6 +1060,7 @@ export class OptimizationWorkflowService {
 
 function executionContractDigest(preflight: ReturnType<typeof loadPublicOptimizationPreflight>): string {
   return createHash('sha256').update(JSON.stringify({ function_name: preflight.request.function_name,
+    ...(preflight.request.candidate_scope ? { candidate_scope: preflight.request.candidate_scope } : {}),
     build: preflight.config.config.build, testpack: preflight.testpack.rawSha256,
     machine: preflight.executionMachine?.machine_id ?? null,
     runner: preflight.runner.mode === 'rpc' ? preflight.runner.endpoint : 'legacy',

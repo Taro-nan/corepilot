@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { parseArgs } from 'node:util';
+import { parseSourceScope } from '../contracts/source-scope.js';
 import type { WorkbenchContext } from './context.js';
 import { parseOptimizeCliInput } from '../config/optimize-cli-input.js';
 import { isBuildConfigured, loadOptimizationConfig, resolveConfiguredApiKey, resolveOptimizationApiKey, resolveOptimizationProxy, stringifyOptimizationConfig, REASONING_EFFORTS, type OptimizationConfig, type ReasoningEffort, type ResolvedModelCredential } from '../config/optimization-config.js';
@@ -113,7 +115,13 @@ async function optimize(ctx: WorkbenchContext, args: string[], io: CommandIO): P
       { label: '性能优化，提交到后台后返回', value: 'background' },
     ]);
     if (!mode) return { ok: true, message: '已取消优化。' };
-    args = ['--function', fn.trim(), ...(mode === 'correctness' ? [] : ['--performance']), ...(mode === 'background' ? [] : ['--watch'])];
+    let scopeArgs: string[] = [];
+    if (!loadOptimizationConfig(ctx.configPath).config.validation.library_package) {
+      const scope = await io.prompt('允许修改的源码文件或目录（逗号分隔）：');
+      if (!scope?.trim()) return { ok: true, message: '已取消优化。' };
+      scopeArgs = scope.split(/[,，\n]+/).map(item => item.trim()).filter(Boolean).flatMap(item => ['--allow', item]);
+    }
+    args = ['--function', fn.trim(), ...scopeArgs, ...(mode === 'correctness' ? [] : ['--performance']), ...(mode === 'background' ? [] : ['--watch'])];
   }
   const effective = args.some((arg) => arg === '--config' || arg.startsWith('--config=')) ? args : ['--config', ctx.configPath, ...args];
   const input = parseOptimizeCliInput(effective);
@@ -621,16 +629,17 @@ export async function runCommandArgs(ctx: WorkbenchContext, name: string, args: 
     if (name === '/workflow') return await workflow(ctx, args, io);
     if (name === '/validation') return await configureValidation(ctx, io);
     if (name === '/check') {
-      if (args.length) return { ok: false, message: '/check 不接受参数。源码范围预检请使用 corepilot check --source-only --allow <文件或目录/>。' };
+      const parsed = parseArgs({ args, strict: true, options: { allow: { type: 'string', multiple: true }, exclude: { type: 'string', multiple: true } } });
+      const candidateScope = parsed.values.allow || parsed.values.exclude ? parseSourceScope({ include: parsed.values.allow ?? [], exclude: parsed.values.exclude ?? [] }) : undefined;
       const loaded = loadOptimizationConfig(ctx.configPath);
       if (isRegisteredRunner(loaded.config.runner)) {
         const api = await ctx.getApi();
         const { projects } = await api.listProjects();
         const project = projects.find(item => path.resolve(item.config_path) === path.resolve(ctx.configPath));
-        if (project) return { ok: true, ...await api.projectAction(project.project_id, 'check', {}) as { message: string } };
+        if (project) return { ok: true, ...await api.projectAction(project.project_id, 'check', candidateScope ? { candidate_scope: candidateScope } : {}) as { message: string } };
         return { ok: false, message: '请先将此配置导入共享项目，再执行 corepilot project check <项目 ID>。' };
       }
-      return { ok: true, ...await checkOptimization(ctx.configPath) };
+      return { ok: true, ...await checkOptimization(ctx.configPath, undefined, { candidateScope }) };
     }
     if (name === '/task') return await task(ctx, args);
     if (name === '/model') return await configureModel(ctx, io);

@@ -61,6 +61,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
   const machine = context.machines.find(item => item.machine_id === form.machineId);
   const mismatchedFunction = !!form.functionName.trim() && !!context.validationFunctionName && form.functionName.trim() !== context.validationFunctionName;
   const sourceOnly = form.verificationMode === 'source_only';
+  const requiresScope = sourceOnly || !selection;
   const needsValidation = !sourceOnly && (!context.validationReady || mismatchedFunction);
   const preparation = (): TaskPreparationContext => ({ projectId: project.project_id, functionName: form.functionName.trim(),
     sourceBranch: form.sourceBranch, machineId: form.machineId, returnTo: 'task' });
@@ -90,7 +91,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
       const payload = { project_id: project.project_id, function_name: form.functionName.trim() || undefined,
         source_branch: form.sourceBranch || undefined, ...(form.machineId ? { machine_id: form.machineId } : {}),
         entry_file: form.entryFile.trim() || null, verification_mode: form.verificationMode, enable_performance: !sourceOnly && form.performance,
-        ...(sourceOnly ? { candidate_scope: sourceScopeFromText(form.sourceInclude, form.sourceExclude) } : {}),
+        ...(requiresScope ? { candidate_scope: sourceScopeFromText(form.sourceInclude, form.sourceExclude) } : {}),
         budget: { time_limit_ms: form.minutes * 60_000, max_candidates: sourceOnly ? 1 : form.candidates } };
       try { sessionStorage.setItem(storageKey, JSON.stringify({ version: 1, form })); }
       catch { throw new Error('无法保存本次表单，请启用浏览器会话存储后重试。'); }
@@ -139,7 +140,7 @@ export function TaskComposer({ project, context, close, created, configure, retu
     try {
       const result = await api.projectAction(project.project_id, 'check', { function_name: form.functionName.trim() || undefined,
         source_branch: form.sourceBranch || undefined, machine_id: form.machineId || undefined, verification_mode: form.verificationMode,
-        ...(sourceOnly ? { candidate_scope: sourceScopeFromText(form.sourceInclude, form.sourceExclude) } : {}) }) as { message: string };
+        ...(requiresScope ? { candidate_scope: sourceScopeFromText(form.sourceInclude, form.sourceExclude) } : {}) }) as { message: string };
       setCheck(result.message);
     } catch (failure) {
       const message = (failure as Error).message;
@@ -172,7 +173,8 @@ export function TaskComposer({ project, context, close, created, configure, retu
         </div>
         {needsValidation && <div className="notice compact" role="status">{mismatchedFunction ? `当前测试方案用于 ${context.validationFunctionName}，与所选函数 ${form.functionName.trim()} 不同。请为目标函数准备匹配的测试方案。` : context.validationBlocker ?? '当前测试方案尚未准备完成或未获资格。请为目标函数准备匹配的测试方案。'} <button type="button" className="text-btn" onClick={() => configure('validation', preparation())}>准备构建与验证</button></div>}
         <SourceBranchSelect repository={context.repository} value={form.sourceBranch} compact onChange={sourceBranch => change({ sourceBranch })} />
-        {sourceOnly && <SourceScopeField include={form.sourceInclude} exclude={form.sourceExclude} onChange={value => change({ ...(value.include === undefined ? {} : { sourceInclude: value.include }), ...(value.exclude === undefined ? {} : { sourceExclude: value.exclude }) })} />}
+        {requiresScope && <SourceScopeField include={form.sourceInclude} exclude={form.sourceExclude} onChange={value => change({ ...(value.include === undefined ? {} : { sourceInclude: value.include }), ...(value.exclude === undefined ? {} : { sourceExclude: value.exclude }) })} />}
+        {!requiresScope && <p className="hint">源码修改范围由接入包固定，可在运行前检查中查看；本次不能覆盖。</p>}
         {!sourceOnly && machine && machine.status !== 'ONLINE' && <p className="notice compact">所选机器最近未确认在线。运行前检查会检测本次所选机器，不会创建实验。</p>}
         <dl className="review-facts"><div><dt>模型</dt><dd>{context.config.model.model_id || '尚未配置'}</dd></div></dl>
         {sourceOnly ? <div className="notice compact" role="status"><strong>本次产出：待验证的源码候选</strong><p>正确性未验证 · 性能未测量。可查看和下载补丁，之后创建测试任务。</p></div>

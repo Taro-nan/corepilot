@@ -99,7 +99,7 @@ test('verified execution failure persists FAILED to both records through HTTP wi
     };
     const api = new ApiClient(f.url, { token: f.token });
     const submitted = await api.submitOptimizationWorkflow({ function_name: 'kernel', entry_file: 'kernel.c',
-      config_path: f.configPath, repository_root: f.repo }) as { workflow_id: string };
+      config_path: f.configPath, repository_root: f.repo, candidate_scope: { include: ['kernel.c'], exclude: [] } }) as { workflow_id: string };
     const record = await waitDetached(f.service, submitted.workflow_id);
     assert.equal(record.status, 'FAILED');
     assert.match(record.error!, /fixture workspace failure/);

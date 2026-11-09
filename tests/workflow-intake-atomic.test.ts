@@ -11,7 +11,7 @@ const modes = ['source_only', 'verified'] as const;
 
 function input(f: Awaited<ReturnType<typeof startWebFixture>>, mode: typeof modes[number]) {
   return { verification_mode: mode, function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath, repository_root: f.repo,
-    ...(mode === 'source_only' ? { candidate_scope: { include: ['kernel.c'], exclude: [] } } : {}) };
+    candidate_scope: { include: ['kernel.c'], exclude: [] } };
 }
 
 function counts(db: DatabaseSync) {

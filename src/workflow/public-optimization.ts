@@ -10,6 +10,7 @@ import { resolveSourceBranch } from '../workspace/git-repository.js';
 import { isRegisteredRunner } from '../config/runner-config.js';
 import type { ResolvedExecutionMachine, ExecutionMachineIdentity } from '../contracts/execution-machine.js';
 import type { LibraryPackageLoader } from '../library-package/loader.js';
+import { parseSourceScope } from '../contracts/source-scope.js';
 
 export interface PublicOptimizationPreflight {
   executionMachine?: ExecutionMachineIdentity;
@@ -18,7 +19,7 @@ export interface PublicOptimizationPreflight {
   config: LoadedOptimizationConfig;
   testpack: LoadedValidationTestpack;
   libraryPackage?: ResolvedPackageTask;
-  credential: ResolvedModelCredential;
+  credential: ResolvedModelCredential | null;
   model_proxy?: string;
   /** In-memory only; the bearer token must never enter workflow/domain records. */
   runner: ResolvedRunnerConfig;
@@ -39,7 +40,7 @@ export interface PublicOptimizationPreflight {
 /** 在模型调用和远端命令之前加载所有公开输入并完成严格校验。 */
 export function loadPublicOptimizationPreflight(
   request: PublicWorkflowRequest,
-  options: { cliApiKey?: string; env?: NodeJS.ProcessEnv; resolveMachine?: (id: string) => ResolvedExecutionMachine; packageLoader?: LibraryPackageLoader } = {},
+  options: { cliApiKey?: string; env?: NodeJS.ProcessEnv; resolveMachine?: (id: string) => ResolvedExecutionMachine; packageLoader?: LibraryPackageLoader; allowUnscopedHistorical?: boolean; withoutModel?: boolean } = {},
 ): PublicOptimizationPreflight {
   const config = loadOptimizationConfig(request.config_path);
   const machineId = request.machine_id ?? (isRegisteredRunner(config.config.runner) ? config.config.runner.machine_id : undefined);
@@ -50,13 +51,15 @@ export function loadPublicOptimizationPreflight(
   const libraryPackage = config.config.validation.library_package
     ? resolveLibraryPackageTask(config.config.validation.library_package, { requireQualified: true, loader: options.packageLoader })
     : undefined;
+  if (libraryPackage && request.candidate_scope) throw new Error('接入包已固定源码修改范围，不能在请求中覆盖。');
+  if (!libraryPackage && request.candidate_scope) request = { ...request, candidate_scope: parseSourceScope(request.candidate_scope) };
   if (libraryPackage) config.config.build = structuredClone(libraryPackage.build);
   const testpack = libraryPackage
     ? packageValidationTestpack(libraryPackage, config.config.validation.baseline_artifact ?? '')
     : loadValidationTestpack(config.config.validation.testpack);
   if (!isBuildConfigured(config.config.build)) throw new Error('尚未配置构建命令。请在「构建与验证」填写实际构建命令，CLI 用户可使用 /build 配置。');
-  const credential = resolveOptimizationApiKey(config.config, options);
-  const modelProxy = resolveOptimizationProxy(config.config, options)?.proxy;
+  const credential = options.withoutModel ? null : resolveOptimizationApiKey(config.config, options);
+  const modelProxy = options.withoutModel ? undefined : resolveOptimizationProxy(config.config, options)?.proxy;
   const runner = resolveRunnerConfig(config.config, { env: options.env });
   if (libraryPackage && runner.mode !== 'rpc') throw new Error('library package formal execution requires RPC runner mode');
   if (request.function_name !== testpack.testpack.function_name) {
@@ -76,6 +79,7 @@ export function loadPublicOptimizationPreflight(
       throw new Error(`evaluator API '${bundle.manifest.domain.api}' differs from testpack function '${testpack.testpack.function_name}'`);
     }
   }
+  if (!libraryPackage && !request.candidate_scope && !options.allowUnscopedHistorical) throw new Error('请明确选择本次允许修改的源码文件或目录。');
   return {
     ...(executionMachine ? { executionMachine: executionMachine.identity } : {}),
     request,

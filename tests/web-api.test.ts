@@ -41,13 +41,13 @@ test('browser session and CLI Bearer share projects, config, workflow IDs, repor
     assert.equal(loadOptimizationConfig(f.configPath).config.model.model_id, 'changed-model');
     const bad = await browser(`/v1/projects/${project.project_id}/config`, 'PUT', { config: { ...config, model: { ...config.model, endpoint: 'invalid endpoint' } } });
     assert.equal(bad.status, 400); assert.equal(loadOptimizationConfig(f.configPath).config.model.endpoint, config.model.endpoint);
-    const payload = { project_id: project.project_id, enable_performance: true };
+    const payload = { project_id: project.project_id, enable_performance: true, candidate_scope: { include: ['kernel.c'], exclude: [] } };
     const submitted = await browser('/v1/workflows', 'POST', payload, { 'idempotency-key': 'shared-retry' }); assert.equal(submitted.status, 202);
     const { workflow_id: id } = await submitted.json();
     const replay = await api.submitOptimizationWorkflow(payload, { requestId: 'shared-retry' }) as { workflow_id: string };
     assert.equal(replay.workflow_id, id); assert.equal((await api.listOptimizationWorkflows()).workflows.length, 1);
     const recreated = new OptimizationWorkflowService({ store: f.store, transportFactory: () => { throw new Error('must not execute on replay'); } });
-    assert.equal(recreated.submitPublic(f.projects.request(project.project_id, { enable_performance: true }), { requestId: 'shared-retry' }).workflowId, id);
+    assert.equal(recreated.submitPublic(f.projects.request(project.project_id, { enable_performance: true, candidate_scope: payload.candidate_scope }), { requestId: 'shared-retry' }).workflowId, id);
     const mismatch = await browser('/v1/workflows', 'POST', { ...payload, enable_performance: false }, { 'idempotency-key': 'shared-retry' });
     assert.equal(mismatch.status, 409);
     assert.equal((await mismatch.json()).error.code, 'WORKFLOW_REQUEST_CONFLICT');
@@ -73,7 +73,7 @@ test('browser session and CLI Bearer share projects, config, workflow IDs, repor
       assert.equal(pendingCancel.signal.aborted, true);
       assert.equal(f.service.get(id)?.status, 'CREATED', 'a request alone does not establish a terminal outcome');
     } finally { controllers.delete(id); }
-    const second = await runFixtureCli(f.url, f.token, ['optimize', '--project', project.project_id, '--performance']);
+    const second = await runFixtureCli(f.url, f.token, ['optimize', '--project', project.project_id, '--performance', '--allow', 'kernel.c']);
     assert.equal(second.code, 0, second.stderr); const secondId = second.stdout.match(/workflow:[\w-]+/)![0];
     assert.equal((await (await browser(`/v1/workflows/${encodeURIComponent(secondId)}`)).json()).workflow.config_path, f.configPath);
     const crossed = await browser('/v1/projects', 'POST', {}, { origin: 'http://different.invalid' }); assert.equal(crossed.status, 403);
@@ -140,7 +140,7 @@ test('unfinished project configuration stays editable and requires a real testpa
     f.projects.saveConfig(project.project_id, { ...partial.config, validation: known.validation });
     await assert.rejects(api.projectAction(project.project_id, 'check', {}), /尚未配置构建命令/);
     f.projects.saveConfig(project.project_id, { ...known });
-    const checked = await api.projectAction(project.project_id, 'check', {}) as { message: string; function_name: string };
+    const checked = await api.projectAction(project.project_id, 'check', { candidate_scope: { include: ['kernel.c'], exclude: [] } }) as { message: string; function_name: string };
     assert.equal(checked.function_name, 'kernel'); assert.match(checked.message, /输入检查通过/);
     assert.equal(f.service.list().length, 0);
   } finally { await f.close(); }
@@ -258,7 +258,7 @@ test('project preflight checks the submitted function, accepts repository-relati
     const { project } = await api.addProject({ name: 'Relative configuration', repository_root: f.repo, config_path: 'imported.yaml' });
     assert.equal(project.config_path, path.join(f.repo, 'imported.yaml'));
     await assert.rejects(api.projectAction(project.project_id, 'check', { function_name: 'wrong_function' }), /wrong_function.*kernel/);
-    const valid = await api.projectAction(project.project_id, 'check', { function_name: 'kernel' }) as { function_name: string };
+    const valid = await api.projectAction(project.project_id, 'check', { function_name: 'kernel', candidate_scope: { include: ['kernel.c'], exclude: [] } }) as { function_name: string };
     assert.equal(valid.function_name, 'kernel');
     const invalid = await fetch(`${f.url}/v1/projects/${project.project_id}/check`, { method: 'POST', headers: { authorization: `Bearer ${f.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ function_name: 123 }) });
     assert.equal(invalid.status, 400);
@@ -321,23 +321,24 @@ test('repository branches, project defaults and CLI branch overrides share froze
     assert.equal(inspection.branches.find(branch => branch.name === 'feature/vector')?.commit, feature);
     const { project } = await api.addProject({ name: 'Branches', repository_root: f.repo, config_path: f.configPath, source_branch: 'feature/vector' });
     assert.equal(project.source_branch, 'feature/vector');
-    const checked = await api.projectAction(project.project_id, 'check', {}) as { source_branch: string; baseline_commit: string };
+    const scope = { include: ['kernel.c'], exclude: [] };
+    const checked = await api.projectAction(project.project_id, 'check', { candidate_scope: scope }) as { source_branch: string; baseline_commit: string };
     assert.equal(checked.baseline_commit, feature);
-    const submitted = await api.submitOptimizationWorkflow({ project_id: project.project_id }, { requestId: 'branch-request' }) as { workflow_id: string };
+    const submitted = await api.submitOptimizationWorkflow({ project_id: project.project_id, candidate_scope: scope }, { requestId: 'branch-request' }) as { workflow_id: string };
     assert.equal(f.service.get(submitted.workflow_id)?.source_branch, 'feature/vector');
     assert.equal(f.service.get(submitted.workflow_id)?.baseline_commit, feature);
     f.git('update-ref', 'refs/heads/feature/vector', main);
-    const retried = await api.submitOptimizationWorkflow({ project_id: project.project_id }, { requestId: 'branch-request' }) as { workflow_id: string };
+    const retried = await api.submitOptimizationWorkflow({ project_id: project.project_id, candidate_scope: scope }, { requestId: 'branch-request' }) as { workflow_id: string };
     assert.equal(retried.workflow_id, submitted.workflow_id);
     assert.equal(f.service.get(retried.workflow_id)?.baseline_commit, feature);
-    await assert.rejects(api.submitOptimizationWorkflow({ project_id: project.project_id, source_branch: 'main' }, { requestId: 'branch-request' }), /different optimization inputs/);
-    const cli = await runFixtureCli(f.url, f.token, ['optimize', '--project', project.project_id, '--branch', 'main']);
+    await assert.rejects(api.submitOptimizationWorkflow({ project_id: project.project_id, source_branch: 'main', candidate_scope: scope }, { requestId: 'branch-request' }), /different optimization inputs/);
+    const cli = await runFixtureCli(f.url, f.token, ['optimize', '--project', project.project_id, '--branch', 'main', '--allow', 'kernel.c']);
     assert.equal(cli.code, 0, cli.stderr);
     const cliId = cli.stdout.match(/workflow:[\w-]+/)![0];
     assert.equal(f.service.get(cliId)?.source_branch, 'main');
     assert.equal(f.service.get(cliId)?.baseline_commit, main);
-    const legacy = await api.submitOptimizationWorkflow({ config_path: f.configPath, repository_root: f.repo, function_name: 'kernel', entry_file: null, enable_performance: false }, { requestId: 'legacy-no-branch' }) as { workflow_id: string };
-    const legacyDigest = createHash('sha256').update(JSON.stringify({ config_path: f.configPath, function_name: 'kernel', entry_file: null, repository_root: f.repo, enable_performance: false })).digest('hex');
+    const legacy = await api.submitOptimizationWorkflow({ config_path: f.configPath, repository_root: f.repo, function_name: 'kernel', entry_file: null, candidate_scope: scope, enable_performance: false }, { requestId: 'legacy-no-branch' }) as { workflow_id: string };
+    const legacyDigest = createHash('sha256').update(JSON.stringify({ config_path: f.configPath, function_name: 'kernel', entry_file: null, candidate_scope: scope, repository_root: f.repo, enable_performance: false })).digest('hex');
     assert.equal(f.service.get(legacy.workflow_id)?.request_digest, legacyDigest);
     const invalid = await fetch(`${f.url}/v1/workflows`, { method: 'POST', headers: { authorization: `Bearer ${f.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ project_id: project.project_id, source_branch: 123 }) });
     assert.equal(invalid.status, 400);

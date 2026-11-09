@@ -79,12 +79,12 @@ test('guided optimization reaches independent revalidation and automatically exp
   const printed: string[] = [];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
-  const io: CommandIO = { signal: controller.signal, print: text => printed.push(text), error: text => printed.push(text), prompt: async (_question, options) => options?.initialValue ?? null,
+  const io: CommandIO = { signal: controller.signal, print: text => printed.push(text), error: text => printed.push(text), prompt: async (question, options) => question.includes('允许修改') ? 'kernel.c' : options?.initialValue ?? null,
     select: async (_question, choices) => choices[0].value, confirm: async () => false };
   const previousCwd = process.cwd();
   try {
     process.chdir(repo);
-    const checked = await runCommand(ctx, '/check', io);
+    const checked = await runCommand(ctx, '/check --allow kernel.c', io);
     assert.equal(checked.ok, true, checked.message);
     assert.equal(turn, 0, 'check must not call a model or start optimization');
     const outcome = await runCommand(ctx, '/optimize', io);

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { PiOptimizationSession } from '../src/agent/pi-optimization-session.js';
 import { createPiModels, COREPILOT_PI_PROVIDER_ID } from '../src/model/pi-provider.js';
 import { loadOptimizationConfig } from '../src/config/optimization-config.js';
@@ -9,13 +10,17 @@ import { candidateEvaluationFeedback } from '../src/workspace/candidate-evaluati
 import type { ValidationCycleResult, CommandRunResult } from '../src/workspace/validation-runner.js';
 import type { PublicAgentWorkflowCheckpoint } from '../src/workflow/public-agent-workflow.js';
 import { proposeFixtureHypothesis } from './hypothesis-fixture.js';
+import { loadPublicOptimizationPreflight } from '../src/workflow/public-optimization.js';
 import type { startWebFixture } from './web-fixture.js';
 
 /** Reconstructs the historical bug: a frozen candidate, invalid zero-exit output,
  * no accepted measurement, and a stale ABANDON decision in the native session. */
-export async function seedBlockedValidation(f: Awaited<ReturnType<typeof startWebFixture>>, enablePerformance = false) {
+export async function seedBlockedValidation(f: Awaited<ReturnType<typeof startWebFixture>>, enablePerformance = false, legacyUnscoped = false) {
+  const hasPackage = !!loadOptimizationConfig(f.configPath).config.validation.library_package;
+  if (legacyUnscoped && hasPackage) throw new Error('legacy unscoped fixture requires a non-Package task');
   const { workflowId } = f.service.submitPublic({ function_name: 'kernel', entry_file: 'kernel.c',
-    config_path: f.configPath, repository_root: f.repo, source_branch: 'main', enable_performance: enablePerformance },
+    config_path: f.configPath, repository_root: f.repo, source_branch: 'main', enable_performance: enablePerformance,
+    ...(hasPackage ? {} : { candidate_scope: { include: ['kernel.c'], exclude: [] } }) },
     { packageLoader: f.projects.packageLoader });
   const record = f.service.get(workflowId)!;
   const runtime = new OptimizationRuntime(f.store);
@@ -64,6 +69,20 @@ export async function seedBlockedValidation(f: Awaited<ReturnType<typeof startWe
     candidate_evaluation_decision: decision, candidate_commit: checkpoint.commit, candidate_tree: checkpoint.tree,
     baseline_commit: workspace.baseline_commit, workspace_editing: workspace.editing, workspace_validation: workspace.validation,
     stop_reason: 'Historical ABANDON after repeated evaluator errors', repository_root: f.repo });
+  if (legacyUnscoped) {
+    // Model an old record, whose original contract and Candidate predate source authorizations.
+    const task = runtime.getTask(candidate.task_id);
+    delete task.target.scope.candidate_scope;
+    f.store.saveOptimizationTask(task);
+    delete record.source_scope_authorization;
+    const preflight = loadPublicOptimizationPreflight({ function_name: 'kernel', entry_file: 'kernel.c', config_path: f.configPath,
+      repository_root: f.repo, enable_performance: enablePerformance }, { allowUnscopedHistorical: true });
+    record.execution_contract_digest = createHash('sha256').update(JSON.stringify({ function_name: 'kernel',
+      build: preflight.config.config.build, testpack: preflight.testpack.rawSha256,
+      machine: preflight.executionMachine?.machine_id ?? null,
+      runner: preflight.runner.mode === 'rpc' ? preflight.runner.endpoint : 'legacy',
+      workspace: preflight.config.config.target.workspace_root })).digest('hex');
+  }
   f.store.saveOptimizationWorkflowJson(workflowId, JSON.stringify(record));
   return { workflowId, candidate, experiment, hypothesis, workspace, checkpoint, validation, saved };
 }

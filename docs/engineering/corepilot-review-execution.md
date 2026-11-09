@@ -21,7 +21,7 @@
 | P1 | 正式实验创建与远端提交的恢复语义。 | IMPLEMENTED：会话先固定实验创建意图，实验与工作流引用在 SQLite 事务中保存；计划与 Runner 数据库身份一起固定。提交响应丢失、取消未确认或查询失败时保留原 ID；旧孤儿及无身份的历史记录不自动修复，跨资源仍需对账。 |
 | P1 | 从浏览器/CLI 创建试跑的请求幂等。 | IMPLEMENTED：相同请求复用固定记录，不同输入冲突；浏览器可在回执丢失后核对或关闭尚未创建的请求。独立测试的客户端刷新和跨进程创建仍有单独竞态，正在处理；真实断电及跨浏览器恢复未验证。 |
 | P1 | 作业恢复时的 Runner 实例身份。 | IMPLEMENTED：正式实验、复现、独立测试、试跑与分支构建固定数据库身份，提交与对账使用受保护路径；开发实验恢复尚需接线。历史记录缺少实例身份时不能自动补造；数据库完整复制与 SSH 端身份不由此标识证明。 |
-| P1 | Agent 读写必须受候选工作区和源码范围约束。 | IMPLEMENTED：Package 与新 `source_only` 任务分别使用固定范围，终点和中间符号链接拒绝穿越。旧源码任务首次继续时另行确认范围并核对工作区；这不等于对任意构建脚本或并发进程提供操作系统级沙箱。 |
+| P1 | Agent 读写必须受候选工作区和源码范围约束。 | IMPLEMENTED：Package 使用包内固定范围；新 `source_only` 与无 Package 的 `verified` 任务固定用户授权范围，假设、写工具及相对基线累计变更均受约束。旧任务首次继续编辑时另行授权；原正式实验对账及冻结候选复验无须授权。路径约束不提供进程隔离，旧开发实验对账仍未全部接线。 |
 | P1 | 不可信候选的操作系统级隔离。 | NOT STARTED：Runner 目前以执行账户运行构建和评价命令，资源绑定及前后摘要检查不能阻止同账户进程临时篡改后恢复文件；需按部署信任模型设计进程权限和文件隔离。 |
 | P2 | Candidate、Baseline、Evaluator、机器、原始测量、Evidence、Approval、Delivery 的绑定和完整性。 | IMPLEMENTED：冻结包保存摘要和原始记录，新批准会重算统计并核对 RPC 计划、样本、命令与基线身份。未保存的候选二进制及自报评价程序摘要无法由控制端事后独立核验。 |
 | P2 | 不依赖原服务端目录的归档完整性核验。 | IMPLEMENTED：`corepilot evidence verify <归档> --sha256 <可信摘要> --json` 校验 V1 归档、文件清单和部分身份关联；不能证明来源、统计、审批、交付或公开安全。 |
@@ -61,6 +61,15 @@
 - **修改**：新任务从网页、HTTP、CLI 和交互工作台明确接收可修改文件或目录，固定到幂等身份、Task 与执行契约；假设、写工具及相对原基准的累计候选改动共同受限。`--file` 仍只是调查入口。交互式 `/optimize --source-only` 同时修复模式和授权未传入后端的问题。
 - **历史兼容**：历史候选保持原样并可查看、独立测试；首次继续时要求明确后续范围，已有工作区改动须在范围内；授权及继续状态事务保存，原候选与旧执行摘要不回写。范围不自动识别用户项目内的测试或 oracle，选择目录前仍须人工确认。
 - **针对性验证**：独立工作区源码、公开 API 和事务测试 19 项、Package 测试 18 项及 CLI 单项 3 项通过；浏览器新建、预检和历史继续 3 项通过。均为本机模型与 Runner 夹具；最终合并版本的全量回归另行记录。
+
+### 自动验证任务的源码授权与旧实验恢复
+
+- **问题**：非 Package 的 `verified` 请求可以引用正式 evaluator，但未固定 Agent 可写范围；旧 API 同时错误地拒绝用户传入范围。工作流只检查每次候选增量，缺少相对原基线的累计约束。
+- **修改**：网页、CLI（含交互工作台和项目预检）与 HTTP 共用范围解析及预检；新无 Package 任务固定授权并纳入幂等与执行身份，Package 拒绝覆盖。假设、写工具和候选冻结分别检查范围；冻结另检查相对原基线累计变更。历史任务首次继续编辑时对现有工作区核验后事务追加授权，原 Task 目标、旧摘要、候选及实验保留。
+- **恢复与限制**：旧无授权任务可对账已有未终态的正式实验或复验，且不启动新模型或实验；已结束候选可使用原 `retry-validation` 创建新验证。原正式实验对账成功后停在待复验，不自动创建复验。旧 `development-job` 单独存在于 Agent 会话且未固定 Runner 数据库身份，尚不能在无授权时安全自动对账；需保留现场由维护者核对。用户授权范围可能包含测试、oracle 或构建脚本，路径约束本身既不证明参考实现独立，也不是 OS 级隔离。
+- **针对性验证**：`node --import tsx --test --test-concurrency=1 tests/verified-source-scope.test.ts` 6/6；`tests/optimization-session-flow.test.ts` 12/12；`tests/candidate-editing.test.ts` 8/8；`tests/web-api.test.ts` 12/12；`npm run test:web -- verified-source-scope.spec.ts` 4/4。模拟 HTTP Runner 的 4 项恢复测试分别覆盖 active ID、仅创建意图、缺计划与缺 Runner 数据库身份；前两项只查询原 ID，后两项无远程请求，均不发送新实验；模型凭据引用失效时仍可对账和重试冻结候选。使用本机 Git、SQLite、HTTP 和模拟模型/Runner 夹具，未启动真实远程优化；Windows 本机 `npm run build`、`npm run typecheck` 与 `npm run check:repo` 通过。
+- **首轮全量回归留痕**：在尚未完成新契约夹具调整时执行 `npm test`，474 项中 461 通过、12 失败、1 项因本机文件符号链接权限跳过；不能把该次运行视为全量通过。失败包括：`candidate-editing.test.ts` 两个未授权 verified 创建；`execution-machines.test.ts` 的机器预检；`optimization-report-flow.test.ts` 的交互 `/check`；`remote-execution.test.ts` 的 active/unlinked/legacy-plan 三个 Package 恢复夹具误传用户范围；`testing-api.test.ts` 中“verified 拒绝授权范围”的旧契约断言；`web-api.test.ts` 四个无 Package 的创建、预检及分支测试。现保留这些测试，按真实文件 `kernel.c`（产物测试另有 `temporary.o`）授权或沿用 Package，并将过时的拒绝断言改成缺失/非法授权拒绝与两种模式一致。最终版本的全量 Node 和浏览器回归须分别记录，定向通过不代替全量。
+- **首轮浏览器回归留痕**：`npm run test:web` 的 85 项中 80 通过、5 失败；失败分别为 `experience.spec.ts` 的任务草稿恢复与机器预检，以及 `workbench.spec.ts` 的 Agent 会话、完整网页/CLI 流程、函数预检和跨分支优化。这些测试的旧无 Package 请求尚未提供范围，现按实际 `kernel.c` 填写并重新验证原有操作，草稿测试额外检查授权刷新后保留。五项定向重跑中先 4/5 通过，剩余一项因同一测试内的第二次 CLI 请求漏传范围，再补齐后单项通过；该首轮结果不是最终全量通过。修复后的完整 `npm test` 与 `npm run test:web` 已重新启动，最终结果待记录。
 
 ### 干净安装和 CI
 

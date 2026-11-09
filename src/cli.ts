@@ -248,8 +248,9 @@ async function check(args: string[]): Promise<number> {
 
 async function projectCommand(args: string[]): Promise<number> {
   try {
-    const parsed = parseArgs({ args, allowPositionals: true, options: { root: { type: 'string' }, name: { type: 'string' }, config: { type: 'string' }, branch: { type: 'string' }, function: { type: 'string' }, inspect: { type: 'boolean' }, file: { type: 'string' }, directory: { type: 'string' }, entry: { type: 'string' }, generate: { type: 'boolean' }, propose: { type: 'boolean' }, 'accept-plan': { type: 'string' }, scope: { type: 'string' }, prompt: { type: 'string' }, download: { type: 'string' }, compare: { type: 'boolean' }, calibrate: { type: 'boolean' }, 'library-name': { type: 'string' }, 'library-version': { type: 'string' }, 'build-script': { type: 'string' }, 'build-cwd': { type: 'string' }, 'request-id': { type: 'string' }, artifact: { type: 'string' } } });
+    const parsed = parseArgs({ args, allowPositionals: true, options: { root: { type: 'string' }, name: { type: 'string' }, config: { type: 'string' }, branch: { type: 'string' }, function: { type: 'string' }, allow: { type: 'string', multiple: true }, exclude: { type: 'string', multiple: true }, 'source-only': { type: 'boolean' }, inspect: { type: 'boolean' }, file: { type: 'string' }, directory: { type: 'string' }, entry: { type: 'string' }, generate: { type: 'boolean' }, propose: { type: 'boolean' }, 'accept-plan': { type: 'string' }, scope: { type: 'string' }, prompt: { type: 'string' }, download: { type: 'string' }, compare: { type: 'boolean' }, calibrate: { type: 'boolean' }, 'library-name': { type: 'string' }, 'library-version': { type: 'string' }, 'build-script': { type: 'string' }, 'build-cwd': { type: 'string' }, 'request-id': { type: 'string' }, artifact: { type: 'string' } } });
     const [action, id] = parsed.positionals;
+    if (action !== 'check' && (parsed.values.allow || parsed.values.exclude || parsed.values['source-only'])) return fail('--allow、--exclude 和 --source-only 仅用于 project check');
     if (parsed.values['request-id'] !== undefined && !['trial', 'baseline-branch'].includes(action)) return fail('--request-id 只能用于 project trial 或 baseline-branch');
     if (parsed.values['request-id'] !== undefined && (!parsed.values['request-id'].trim() || parsed.values['request-id'].length > 200)) return fail('--request-id 必须是 1 到 200 个字符');
     if (parsed.values.prompt !== undefined && !(action === 'validation' && (parsed.values.generate || parsed.values.propose))) return fail('--prompt 只能与 project validation --generate 或 --propose 一起使用');
@@ -258,7 +259,12 @@ async function projectCommand(args: string[]): Promise<number> {
     if (action === 'list') result = await api.listProjects();
     else if (action === 'add' && parsed.values.root && parsed.values.name) result = await api.addProject({ name: parsed.values.name, repository_root: parsed.values.root, config_path: parsed.values.config, source_branch: parsed.values.branch });
     else if (action === 'inspect' && id) result = await api.projectAction(id);
-    else if (action === 'check' && id) result = await api.projectAction(id, 'check', {});
+    else if (action === 'check' && id) result = await api.projectAction(id, 'check', {
+      ...(parsed.values.function ? { function_name: parsed.values.function } : {}),
+      ...(parsed.values.branch ? { source_branch: parsed.values.branch } : {}),
+      ...(parsed.values['source-only'] ? { verification_mode: 'source_only' } : {}),
+      ...(parsed.values.allow || parsed.values.exclude ? { candidate_scope: { include: parsed.values.allow ?? [], exclude: parsed.values.exclude ?? [] } } : {}),
+    });
     else if (action === 'setup' && id) result = parsed.values.inspect ? await api.projectAction(id, 'source-inspection', {}) : await api.projectAction(id, 'setup');
     else if (action === 'validation-plans' && id && parsed.values.function?.trim()) result = await api.projectAction(id, `validation-plans?function_name=${encodeURIComponent(parsed.values.function.trim())}`);
     else if (action === 'build-options' && id) result = await api.projectAction(id, `build-options${parsed.positionals[2] ? `?machine_id=${encodeURIComponent(parsed.positionals[2])}` : ''}`);
