@@ -1,5 +1,10 @@
 import type { CandidateSourceScope } from './library-package.js';
 
+/** Runtime and Git metadata are never candidate source, even in nested repositories. */
+export function isProtectedWorkspacePath(filename: string): boolean {
+  return filename.replace(/\\/g, '/').split('/').some(part => ['.git', '.corepilot', 'node_modules'].includes(part.toLowerCase()));
+}
+
 /** Parse a user-selected scope. A trailing slash grants the directory's descendants. */
 export function parseSourceScope(value: unknown): CandidateSourceScope {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('请选择允许修改的源码文件或目录。');
@@ -12,7 +17,7 @@ export function parseSourceScope(value: unknown): CandidateSourceScope {
       const normalized = item.trim().replace(/\\/g, '/');
       const parts = normalized.replace(/\/$/, '').split('/');
       if (normalized.startsWith('/') || /[:*?\0]/.test(normalized) || parts.some(part => !part || part === '.' || part === '..') ||
-          ['.git', '.corepilot', 'node_modules', 'packages', 'evaluators'].includes(parts[0].toLowerCase())) {
+          isProtectedWorkspacePath(normalized) || ['packages', 'evaluators'].includes(parts[0].toLowerCase())) {
         throw new Error(`${field} 路径必须是允许的仓库相对文件或目录：${item}`);
       }
       return normalized;

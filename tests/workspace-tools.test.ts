@@ -4,6 +4,29 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { WorkspaceToolset } from '../src/agent/workspace-tools.js';
+import { candidatePathAllowed } from '../src/library-package/candidate-scope.js';
+
+test('source tools cannot modify Git and runtime metadata, including nested and case-variant paths', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-tool-protected-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, '.git'), 'gitdir: protected\n');
+  fs.mkdirSync(path.join(root, 'nested', '.git'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'nested', '.git', 'config'), 'protected\n');
+  const scoped = new WorkspaceToolset(root, { candidateSourceScope: { include: ['nested/'], exclude: [] } });
+  const unscoped = new WorkspaceToolset(root);
+  const signal = new AbortController().signal;
+  for (const target of ['.git', '.GIT', 'nested/.git/config', 'nested/.GIT/config', 'nested/.corepilot/state', 'nested/Node_Modules/item']) {
+    const output = await unscoped.execute('write_file', { path: target, content: 'tampered' }, signal);
+    assert.equal(output.isError, true, target);
+    assert.match(output.text, /protected workspace path/);
+  }
+  for (const target of ['nested/.git/config', 'nested/.GIT/config', 'nested/Node_Modules/item']) {
+    assert.equal(candidatePathAllowed({ include: ['nested/'], exclude: [] }, target), false);
+    assert.equal((await scoped.execute('write_file', { path: target, content: 'tampered' }, signal)).isError, true);
+  }
+  assert.equal(fs.readFileSync(path.join(root, '.git'), 'utf8'), 'gitdir: protected\n');
+  assert.equal(fs.readFileSync(path.join(root, 'nested', '.git', 'config'), 'utf8'), 'protected\n');
+});
 
 test('source tools reject final and intermediate symbolic links', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-tool-links-'));

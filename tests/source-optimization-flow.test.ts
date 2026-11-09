@@ -193,7 +193,7 @@ test('interactive optimize passes source-only mode and explicit scope to the sha
 test('explicit source scope is normalized and rejects traversal and protected roots', () => {
   assert.deepEqual(parseSourceScope({ include: ['src\\kernel.c', 'src\\kernel.c', 'impl/'], exclude: ['impl/tests/'] }),
     { include: ['impl/', 'src/kernel.c'], exclude: ['impl/tests/'] });
-  for (const path of ['../secret.c', '/etc/passwd', 'C:/foo', '.git/config', 'src/../test.c', 'src/*']) {
+  for (const path of ['../secret.c', '/etc/passwd', 'C:/foo', '.git/config', 'src/.GIT/config', 'src/node_modules/', 'src/../test.c', 'src/*']) {
     assert.throws(() => parseSourceScope({ include: [path], exclude: [] }), /相对|无效/);
   }
 });

@@ -49,6 +49,7 @@
 - **修改**：所有路径分量使用 `lstatSync` 检查，包括最终分量和失效链接；现有的源码范围检查继续执行。
 - **针对性测试**：`node --import tsx --test --test-concurrency=1 tests/workspace-tools.test.ts tests/library-package.test.ts`，24 项通过。本机 Windows 测试末尾和中间目录 junction 及外部文件保持不变；普通文件链接和失效文件链接已编写 Linux 测试，尚待执行，本机没有创建文件符号链接的权限。
 - **限制**：这是应用层路径约束，不能防止其他进程在检查与使用之间替换路径，也不能约束任意构建命令。需要系统级资源/权限隔离才能进一步收紧这些边界，不能把本次修复称作完整沙箱。
+- **补充核查**：旧版无 Package 的工具写入只按区分大小写的根目录名保护 `.git`，嵌套仓库的 `.git` 与大小写变体也可能被写入。现在源码范围解析、Package 范围与所有写入工具统一拒绝各层级的 Git、CorePilot 运行目录和 `node_modules` 元数据。`tests/workspace-tools.test.ts`、`tests/library-package.test.ts`、`tests/source-optimization-flow.test.ts` 集成 37/37 通过，覆盖大小写、嵌套路径和原始文件不变。
 
 ### 源码任务的用户授权范围
 

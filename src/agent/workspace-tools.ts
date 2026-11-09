@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { CandidateSourceScope } from '../contracts/library-package.js';
 import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
+import { isProtectedWorkspacePath } from '../contracts/source-scope.js';
 import { pendingCandidateSourceChanges } from '../workspace/candidate-workspace.js';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { Type, type TSchema } from 'typebox';
@@ -253,10 +254,9 @@ export class WorkspaceToolset {
   }
 
   private assertWritable(relative: string): void {
-    if (this.options.candidateSourceScope) assertCandidateSourceScope(this.options.candidateSourceScope, [this.relative(this.resolve(relative))]);
-    const normalized = relative.replace(/\\/g, '/').replace(/^\/+/, '');
-    const first = normalized.split('/')[0];
-    if (first === '.git' || first === '.corepilot' || first === 'node_modules') throw new WorkspaceToolError(`protected workspace path: ${relative}`);
+    const normalized = this.relative(this.resolve(relative));
+    if (isProtectedWorkspacePath(normalized)) throw new WorkspaceToolError(`protected workspace path: ${relative}`);
+    if (this.options.candidateSourceScope) assertCandidateSourceScope(this.options.candidateSourceScope, [normalized]);
   }
 
   private assertMutationAllowed(): void {
