@@ -36,9 +36,16 @@ test('a testing task is shown as a saved snapshot after lease loss and cannot be
   try {
     const candidate = await testing.binary('待测库'), baseline = await testing.binary('比较库');
     const plan = testing.service.plan(testingPlanRef);
-    const task = await testing.service.start({ machine_id: testing.machine.identity.machine_id, plan: testingPlanRef,
+    const task = await testing.service.start({ name: '运行中的测试', machine_id: testing.machine.identity.machine_id, plan: testingPlanRef,
       mode: 'performance', candidate, baseline, expected_evaluator_digest: plan.evaluator.digest, expected_package_digest: plan.package_digest });
     await waitTestingPreparation(testing.service, task.task_id);
+    expect((await testing.service.get(task.task_id)).task.execution.status).toBe('RUNNING');
+    const source = testing.source();
+    const sourceTask = await testing.service.start({ name: '已完成的源码测试', machine_id: testing.machine.identity.machine_id, plan: testingPlanRef,
+      mode: 'performance', candidate: { kind: 'source', project_id: source.project.project_id, branch: 'main', commit: source.commit }, baseline });
+    await waitTestingPreparation(testing.service, sourceTask.task_id);
+    testing.complete(sourceTask);
+    expect((await testing.service.get(sourceTask.task_id)).task.execution.status).toBe('SUCCEEDED');
     const reads = testing.getCalls;
     db.prepare('UPDATE host_lease SET expires_at = ? WHERE lease_key = 1').run('2000-01-01T00:00:00.000Z');
     await page.goto(f.url);
@@ -46,9 +53,37 @@ test('a testing task is shown as a saved snapshot after lease loss and cannot be
     await page.getByRole('button', { name: '进入工作台' }).click();
     await page.getByRole('navigation').getByRole('button', { name: '测试任务', exact: true }).click();
     await expect(page.getByText('当前仅显示已保存记录，未查询 Runner。', { exact: false })).toBeVisible();
-    await page.getByRole('row').filter({ hasText: 'cblas_saxpy' }).getByRole('button', { name: '查看任务' }).click();
+    await expect(page.getByRole('button', { name: '创建测试任务' })).toBeDisabled();
+    await page.getByRole('row').filter({ hasText: '运行中的测试' }).getByRole('button', { name: '查看任务' }).click();
+    const progress = page.getByRole('region', { name: '测试执行进展' });
+    await expect(progress.getByRole('heading', { name: '上次保存的执行状态' })).toBeVisible();
+    await expect(progress.locator('.pulse')).toHaveCount(0);
     await expect(page.getByText('仅显示上次保存的状态，未向 Runner 查询或发送取消请求。')).toBeVisible();
     await expect(page.getByRole('button', { name: '取消测试' })).toBeDisabled();
+    await page.getByRole('button', { name: '返回测试任务' }).click();
+    await page.getByRole('row').filter({ hasText: '已完成的源码测试' }).getByRole('button', { name: '查看任务' }).click();
+    await expect(page.getByText('当前仅显示已保存记录，未查询 Runner。', { exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: '优化待测源码' })).toBeDisabled();
     expect(testing.getCalls).toBe(reads);
   } finally { db.close(); await f.close(); testing.close(); }
+});
+
+test('a healthy control keeps test creation and source optimization available', async ({ page }) => {
+  const testing = createTestingFixture();
+  const f = await startWebFixture({ testingService: testing.service });
+  try {
+    const source = testing.source(), baseline = await testing.binary('比较库');
+    const task = await testing.service.start({ name: '源码测试', machine_id: testing.machine.identity.machine_id, plan: testingPlanRef,
+      mode: 'performance', candidate: { kind: 'source', project_id: source.project.project_id, branch: 'main', commit: source.commit }, baseline });
+    await waitTestingPreparation(testing.service, task.task_id);
+    testing.complete(task);
+    expect((await testing.service.get(task.task_id)).task.execution.status).toBe('SUCCEEDED');
+    await page.goto(f.url);
+    await page.getByLabel('管理员访问凭据').fill(f.token);
+    await page.getByRole('button', { name: '进入工作台' }).click();
+    await page.getByRole('navigation').getByRole('button', { name: '测试任务', exact: true }).click();
+    await expect(page.getByRole('button', { name: '创建测试任务' })).toBeEnabled();
+    await page.getByRole('row').filter({ hasText: '源码测试' }).getByRole('button', { name: '查看任务' }).click();
+    await expect(page.getByRole('button', { name: '优化待测源码' })).toBeEnabled();
+  } finally { await f.close(); testing.close(); }
 });

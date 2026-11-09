@@ -51,7 +51,7 @@ export function TestingWorkspace({ taskId, projects, projectId, navigate, prepar
       : <Empty title={error ? '测试任务暂时无法打开' : '正在读取测试任务…'} description={error ? '已有记录保留在服务器。请检查连接并重新读取。' : '正在查询原作业的进度和结果。'} action={<button onClick={() => navigate()}>返回测试任务</button>} />}
   </>;
   return <>
-    <div className="page-heading"><div><h1>测试任务</h1><p>比较源码或库包，独立查看正确性与性能。</p></div><button className="primary" onClick={() => navigate('new')}><Icon name="plus" size={17} />创建测试任务</button></div>
+    <div className="page-heading"><div><h1>测试任务</h1><p>比较源码或库包，独立查看正确性与性能。</p></div><button className="primary" disabled={!!localNotice} onClick={() => navigate('new')}><Icon name="plus" size={17} />创建测试任务</button></div>
     {localNotice && <p className="notice compact" role="status">{localNotice}</p>}
     {error && <><Feedback text={error} bad /><button onClick={refresh}>重新读取</button></>}
     {!loaded ? <p role="status" className="loading">正在读取测试任务…</p> : !tasks.length ? <Empty title="直接测试，不必先优化" description="选择源码分支或上传库包，复用测试方案，在同一机器上比较。无需调用模型。" />

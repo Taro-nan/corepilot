@@ -30,7 +30,7 @@ export function TestingResult({ details, back, refresh, notify, optimize }: {
       <p>{task.plan.function_name} · {task.machine.name} · {time(task.created_at)}</p></div>
       <div className="actions"><button onClick={() => download('corepilot-test-result.json', JSON.stringify(details, null, 2))}><Icon name="download" size={16} />下载结果</button>
         {active && <button disabled={busy || localOnly || task.execution.cancel_requested} onClick={() => void cancel()}>{task.execution.cancel_requested ? '等待停止确认' : '取消测试'}</button>}
-        {!active && source && <button className="primary" onClick={() => optimize(source.project_id, source.branch, task.plan.function_name)}>优化待测源码<Icon name="arrow" size={15} /></button>}
+        {!active && source && <button className="primary" disabled={localOnly} onClick={() => optimize(source.project_id, source.branch, task.plan.function_name)}>优化待测源码<Icon name="arrow" size={15} /></button>}
       </div>
     </div>
     {details.observation && <p className="notice compact" role="status">{details.observation.message}</p>}
@@ -41,7 +41,7 @@ export function TestingResult({ details, back, refresh, notify, optimize }: {
         ? `${summary.performance.measured} / ${summary.performance.planned} 条原始样本，库身份待核对`
         : summary.performance.speedup === null ? `${summary.performance.measured} / ${summary.performance.planned} 个有效样本` : `${ratio(summary.performance.speedup)} · 相对比较对象 A`}</small></dd></div>
     </dl>
-    {active && <section className="run-progress" aria-label="测试执行进展"><div><h2>{task.execution.status !== 'UNKNOWN' && <span className="pulse" />}{task.execution.status === 'UNKNOWN' ? '核对原作业状态' : testingPhaseLabel(task.execution.phase)}</h2>
+    {active && <section className="run-progress" aria-label="测试执行进展"><div><h2>{!localOnly && task.execution.status !== 'UNKNOWN' && <span className="pulse" />}{localOnly ? '上次保存的执行状态' : task.execution.status === 'UNKNOWN' ? '核对原作业状态' : testingPhaseLabel(task.execution.phase)}</h2>
       {task.execution.message && <p>{task.execution.message}</p>}
       <p>{localOnly ? '仅显示上次保存的状态，未向 Runner 查询或发送取消请求。' : task.execution.status === 'UNKNOWN' ? '正在查询原作业；不会重复提交。' : '关闭页面后后台继续运行，刷新可查看真实进展。'}</p></div><small>最近更新 {time(task.updated_at)}</small></section>}
     {task.execution.failure && <div className="notice"><strong>{task.execution.failure.message}</strong><p>请检查本次配置和下方执行记录。修复后创建新的测试，原任务会保留。</p><small>{task.execution.failure.stage} · {task.execution.failure.code}</small></div>}
