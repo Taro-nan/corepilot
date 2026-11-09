@@ -7,6 +7,21 @@ import { parsePublicWorkflowRequest } from '../src/contracts/public-workflow.js'
 import { OptimizationRuntime } from '../src/core/optimization-runtime.js';
 import { checkOptimization } from '../src/workflow/check-optimization.js';
 import { sourceOptimizationFixture } from './source-optimization-fixture.js';
+
+test('source-only Agent receives a submission error for an isolated build artifact and produces no Candidate', async () => {
+  const f = await sourceOptimizationFixture({ onlyArtifact: true });
+  try {
+    const id = await f.start();
+    const record = await f.wait('NO_CANDIDATE');
+    assert.equal(record.workflow_id, id);
+    assert.equal(record.candidate_id ?? null, null);
+    assert.equal(f.store.listCandidates(record.optimization_task_id!).length, 0);
+    assert.equal(f.store.listExperiments(record.optimization_task_id!).length, 0);
+    const events = await f.api.getOptimizationSessionEvents(id, 0, 200);
+    assert.ok(events.events.some(event => event.kind === 'tool_result' && event.tool_name === 'submit_candidate'
+      && event.is_error && /build artifacts are not Candidate source/i.test(event.text)));
+  } finally { await f.close(); }
+});
 import type { ExecutionMachineRecord } from '../src/contracts/execution-machine.js';
 import { OptimizationWorkflowService } from '../src/workflow/optimization-workflow-service.js';
 

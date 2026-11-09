@@ -14,7 +14,7 @@ import { removeCandidateWorkspace } from '../src/workspace/candidate-workspace.j
 import { hypothesisProposal } from './hypothesis-fixture.js';
 
 /** Local protocol fixture; no paid model, Runner connection or performance sample. */
-export async function sourceOptimizationFixture(options: { delayFirstMs?: number; holdFirst?: boolean } = {}) {
+export async function sourceOptimizationFixture(options: { delayFirstMs?: number; holdFirst?: boolean; onlyArtifact?: boolean } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-source-only-'));
   const repo = path.join(root, 'repo'); fs.mkdirSync(repo);
   const git = (...args: string[]) => {
@@ -39,7 +39,12 @@ export async function sourceOptimizationFixture(options: { delayFirstMs?: number
       const step = probe ? -1 : calls++;
       if (!probe && step === 0 && options.delayFirstMs) await delay(options.delayFirstMs);
       const parent = step >= 4 ? service.get(workflowId)?.hypothesis_id ?? null : null;
-      const actions: Array<[string, Record<string, unknown>]> = [
+      const actions: Array<[string, Record<string, unknown>]> = options.onlyArtifact ? [
+        ['record_hypothesis', { ...hypothesisProposal('Inspect an artifact without changing source'), parent_hypothesis_id: null }],
+        ['create_file', { path: 'temporary.o', content: 'not source' }],
+        ['submit_candidate', { summary: 'No source was changed.' }],
+        ['finish_optimization', { reason: 'No source change remains.' }],
+      ] : [
         ['read_file', { path: 'kernel.c' }],
         ['record_hypothesis', { ...hypothesisProposal('Fold identical integer constant expression'), parent_hypothesis_id: null }],
         ['replace_text', { path: 'kernel.c', old_text: 'return 1 + 1', new_text: 'return 2' }],

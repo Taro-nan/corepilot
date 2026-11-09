@@ -1,13 +1,111 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
-import { createCandidateWorkspace } from '../src/workspace/candidate-workspace.js';
+import { checkpointCandidate, createCandidateWorkspace, pendingCandidateSourceChanges, refreshValidationWorkspace } from '../src/workspace/candidate-workspace.js';
 import { exportGitSourceArchive, snapshotEditingSource } from '../src/workspace/git-source-archive.js';
 import { RunnerClient } from '../src/client/runner-client.js';
 import { startRunnerHttpServer } from '../src/runner/http-server.js';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { execFileSync } from 'node:child_process';
 import { WorkspaceToolset } from '../src/agent/workspace-tools.js';
+
+test('a checkpoint excludes untracked build artifacts while preserving source changes and crash recovery', async () => {
+  const f = await startWebFixture();
+  try {
+    const state = createCandidateWorkspace({ repository: f.repo, worktreeRoot: path.join(f.root, 'worktrees'), runId: 'source-changes' });
+    const tools = new WorkspaceToolset(state.editing, { candidateSubmission: true });
+    const signal = new AbortController().signal;
+    fs.writeFileSync(path.join(state.editing, 'temporary.o'), 'artifact');
+    const rejected = await tools.execute('submit_candidate', { summary: 'Artifact only' }, signal);
+    assert.equal(rejected.isError, true);
+    assert.match(rejected.text, /build artifacts are not Candidate source/i);
+    assert.deepEqual(pendingCandidateSourceChanges(state.editing), []);
+    assert.throws(() => checkpointCandidate(state), /No source changes to checkpoint/);
+    assert.equal(state.candidate_commit, null);
+
+    const sourcePath = path.join(state.editing, 'kernel.c');
+    const baseline = fs.readFileSync(sourcePath, 'utf8');
+    fs.writeFileSync(sourcePath, 'int kernel(void) { return 88; }\n');
+    execFileSync('git', ['-C', state.editing, 'add', '--', 'kernel.c']);
+    fs.writeFileSync(sourcePath, baseline);
+    assert.deepEqual(pendingCandidateSourceChanges(state.editing), [], 'staged edits undone in the working tree are not checkpoint changes');
+    assert.throws(() => checkpointCandidate(state), /No source changes to checkpoint/);
+
+    fs.writeFileSync(path.join(state.editing, 'extra.c'), 'int helper(void) { return 2; }\n');
+    fs.writeFileSync(sourcePath, baseline.replace('1 + 1', '2'));
+    assert.deepEqual(pendingCandidateSourceChanges(state.editing).sort(), ['extra.c', 'kernel.c']);
+    assert.equal((await tools.execute('submit_candidate', { summary: 'Source and artifact' }, signal)).isError, false);
+    const before = structuredClone(state);
+    const first = checkpointCandidate(state);
+    assert.deepEqual(first.files.map(item => item.path).sort(), ['extra.c', 'kernel.c']);
+    assert.equal(fs.existsSync(path.join(state.validation, 'temporary.o')), false);
+    assert.equal(fs.existsSync(path.join(state.editing, 'temporary.o')), true);
+    assert.deepEqual(pendingCandidateSourceChanges(state.editing), []);
+    assert.throws(() => checkpointCandidate(state), /No source changes to checkpoint/);
+
+    // Simulate process death after Git committed but before the updated session
+    // checkpoint was saved. The previous recorded tree still differs from HEAD.
+    const recovered = checkpointCandidate(before);
+    assert.equal(recovered.commit, first.commit, 'recovery reuses the original commit rather than manufacturing an empty one');
+    assert.equal(recovered.tree, first.tree);
+    assert.deepEqual(recovered.files, first.files, 'recovery preserves the exact files and hashes used by scope checks');
+    assert.equal(before.candidate_tree, first.tree);
+
+    fs.writeFileSync(path.join(before.editing, 'kernel.c'), 'int kernel(void) { return 5; }\n');
+    assert.ok(pendingCandidateSourceChanges(before.editing).includes('kernel.c'));
+    assert.ok(checkpointCandidate(before).files.some(item => item.path === 'kernel.c'));
+    fs.unlinkSync(path.join(before.editing, 'kernel.c'));
+    assert.ok(pendingCandidateSourceChanges(before.editing).includes('kernel.c'));
+    assert.ok(checkpointCandidate(before).files.some(item => item.path === 'kernel.c' && item.after_sha256 === null));
+    fs.writeFileSync(path.join(before.editing, 'kernel.c'), 'int kernel(void) { return 7; }\n');
+    execFileSync('git', ['-C', before.editing, 'add', '--', 'kernel.c']);
+    execFileSync('git', ['-C', before.editing, 'commit', '-m', 'unrelated commit']);
+    assert.throws(() => checkpointCandidate(before), /HEAD differs from its saved checkpoint/);
+    fs.writeFileSync(path.join(before.editing, 'later.c'), 'int later(void) { return 1; }\n');
+    assert.throws(() => checkpointCandidate(before), /additional source edits/);
+    assert.equal(fs.existsSync(path.join(before.editing, 'later.c')), true);
+  } finally { await f.close(); }
+});
+
+test('legacy checkpoint recovery requires the original pre-commit validation checkout', async () => {
+  const f = await startWebFixture();
+  try {
+    for (const priorCheckoutAvailable of [true, false]) {
+      const state = createCandidateWorkspace({ repository: f.repo, worktreeRoot: path.join(f.root, 'worktrees'),
+        runId: priorCheckoutAvailable ? 'legacy-before' : 'legacy-after' });
+      fs.writeFileSync(path.join(state.editing, 'kernel.c'), 'int kernel(void) { return 42; }\n');
+      execFileSync('git', ['-C', state.editing, 'add', '--', 'kernel.c']);
+      execFileSync('git', ['-C', state.editing, 'commit', '-m', 'corepilot candidate checkpoint']);
+      const commit = execFileSync('git', ['-C', state.editing, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      if (priorCheckoutAvailable) {
+        const recovered = checkpointCandidate(state);
+        assert.equal(recovered.commit, commit);
+        assert.equal(recovered.files.length, 1);
+        assert.ok(recovered.files[0].before_sha256);
+        assert.ok(recovered.files[0].after_sha256);
+      } else {
+        refreshValidationWorkspace(state, commit);
+        assert.throws(() => checkpointCandidate(state), /Cannot recover the original file hashes/);
+        assert.equal(execFileSync('git', ['-C', state.editing, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), commit);
+      }
+    }
+  } finally { await f.close(); }
+});
+
+test('checkpoint recovery rejects a corrupted saved source inventory', async () => {
+  const f = await startWebFixture();
+  try {
+    const state = createCandidateWorkspace({ repository: f.repo, worktreeRoot: path.join(f.root, 'worktrees'), runId: 'bad-inventory' });
+    fs.writeFileSync(path.join(state.editing, 'kernel.c'), 'int kernel(void) { return 42; }\n');
+    execFileSync('git', ['-C', state.editing, 'add', '--', 'kernel.c']);
+    execFileSync('git', ['-C', state.editing, 'commit', '-m', 'corepilot candidate checkpoint', '-m', 'CorePilot-Checkpoint-v1: e30=']);
+    const commit = execFileSync('git', ['-C', state.editing, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    assert.throws(() => checkpointCandidate(state), /checkpoint source inventory is invalid/);
+    assert.equal(execFileSync('git', ['-C', state.editing, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), commit);
+    assert.equal(state.candidate_commit, null);
+  } finally { await f.close(); }
+});
 
 test('development RPC source contains current edits without changing HEAD, and transfer retries preserve staged content', async () => {
   const f = await startWebFixture();
@@ -36,6 +134,25 @@ import { ApiClient } from '../src/client/api-client.js';
 import { startWebFixture } from './web-fixture.js';
 import { runPublicAgentWorkflow } from '../src/workflow/public-agent-workflow.js';
 import { loadPublicOptimizationPreflight } from '../src/workflow/public-optimization.js';
+
+test('verified Agent cannot start an experiment by submitting only an untracked artifact', async () => {
+  const f = await startWebFixture({ execute: true, candidateOnlyArtifact: true });
+  try {
+    const project = f.projects.add({ name: 'Artifact only', repository_root: f.repo, config_path: f.configPath });
+    const api = new ApiClient(f.url, { token: f.token });
+    const start = await api.submitOptimizationWorkflow({ project_id: project.project_id, function_name: 'kernel', enable_performance: false }) as { workflow_id: string };
+    const deadline = Date.now() + 20_000;
+    while (f.service.activeWorkflowIds().length && Date.now() < deadline) await delay(20);
+    const record = f.service.get(start.workflow_id)!;
+    assert.equal(record.status, 'NO_CANDIDATE', record.error ?? record.status);
+    assert.equal(record.candidate_id ?? null, null);
+    assert.equal(f.store.listCandidates(record.optimization_task_id!).length, 0);
+    assert.equal(f.store.listExperiments(record.optimization_task_id!).length, 0);
+    const events = await api.getOptimizationSessionEvents(start.workflow_id, 0, 200);
+    assert.ok(events.events.some(event => event.kind === 'tool_result' && event.tool_name === 'submit_candidate'
+      && event.is_error && /build artifacts are not Candidate source/i.test(event.text)));
+  } finally { await f.close(); }
+});
 
 test('public Agent finishes delete/recreate editing before a Candidate is checkpointed and tested', async () => {
   const f = await startWebFixture({ execute: true, candidateRewrite: true });

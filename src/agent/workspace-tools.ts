@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { CandidateSourceScope } from '../contracts/library-package.js';
 import { assertCandidateSourceScope } from '../library-package/candidate-scope.js';
+import { pendingCandidateSourceChanges } from '../workspace/candidate-workspace.js';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { Type, type TSchema } from 'typebox';
 import {
@@ -453,7 +454,7 @@ export class WorkspaceToolset {
           if (!this.options.candidateSubmission) throw new WorkspaceToolError('candidate submission is not configured');
           const summary = asString(args, 'summary');
           const status = runGit(this.root, ['status', '--porcelain']);
-          if (!status) throw new WorkspaceToolError('No source changes to submit. Stop without a Candidate if no justified transformation remains.');
+          if (!pendingCandidateSourceChanges(this.root).length) throw new WorkspaceToolError('No source changes to submit. Untracked build artifacts are not Candidate source; finish without a Candidate or make a justified source change.');
           return result(JSON.stringify({ submitted: true, summary, git_status: status, next: this.options.candidateValidation === 'deferred'
             ? 'System will freeze the proposed patch. Build, correctness and performance remain NOT_EXECUTED; start a separate test task to validate it.'
             : 'System will checkpoint the complete changes and run build/correctness/performance checks.' }));

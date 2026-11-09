@@ -19,7 +19,7 @@ export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.met
 
 /** Offline integration fixture: real Git, Pi protocol, commands, SQLite, HTTP and reports.
  * The fixture model and sample timings are never product data or hardware evidence. */
-export async function startWebFixture(options: { execute?: boolean; validationTextFirst?: boolean; validationGate?: Promise<void>; validationProposal?: Record<string, unknown>; correctnessPlanProposal?: Record<string, unknown>; validationMissingImportFirst?: boolean; rpcTransport?: RemoteValidationTransport; candidateRewrite?: boolean; candidateRepair?: boolean; testingService?: TestingService } = {}) {
+export async function startWebFixture(options: { execute?: boolean; validationTextFirst?: boolean; validationGate?: Promise<void>; validationProposal?: Record<string, unknown>; correctnessPlanProposal?: Record<string, unknown>; validationMissingImportFirst?: boolean; rpcTransport?: RemoteValidationTransport; candidateRewrite?: boolean; candidateRepair?: boolean; candidateOnlyArtifact?: boolean; testingService?: TestingService } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'corepilot-web-'));
   const repo = path.join(root, 'repo'); fs.mkdirSync(repo);
   const dataDir = path.join(root, 'data');
@@ -62,7 +62,7 @@ export async function startWebFixture(options: { execute?: boolean; validationTe
       const name = probe ? 'corepilot_probe' : planning ? 'submit_correctness_plan' : validation ? 'submit_validation_draft' : ++turn === 1 ? 'record_hypothesis'
         : options.candidateRewrite && turn === 2 ? 'delete_file' : options.candidateRewrite && turn === 3 ? 'create_file'
           : canSubmit && turn >= 3 ? 'submit_candidate' : 'replace_text';
-      const repairName = repairing ? turn === 1 ? 'record_candidate_decision' : turn === 2 ? 'replace_text' : 'submit_candidate' : name;
+      let repairName = repairing ? turn === 1 ? 'record_candidate_decision' : turn === 2 ? 'replace_text' : 'submit_candidate' : name;
       let args = planning ? options.correctnessPlanProposal ?? { status: 'ready', summary: '核对常量函数的精确整数结果',
         cases: [{ case_id: 'constant-result', parameters: { expected: 2 } }], oracle_description: '独立数学参考：整数 1 + 1 = 2，逐次核对返回值。',
         tolerance_rule: 'exact integer equality', tolerance_absolute: 0, tolerance_relative: 0,
@@ -91,6 +91,11 @@ export async function startWebFixture(options: { execute?: boolean; validationTe
         const record = service.list(1)[0];
         args = turn === 1 ? { candidate_id: record.candidate_id, experiment_id: record.experiment_id, action: 'REPAIR', reason: 'Recheck the observed fixture correctness failure.' }
           : turn === 2 ? { path: 'kernel.c', old_text: 'return 2', new_text: 'return 2 /* fixture repaired */' } : { summary: 'Complete repaired fixture source.' };
+      }
+      if (options.candidateOnlyArtifact && !probe && !validation && !planning) {
+        if (turn === 2) { repairName = 'create_file'; args = { path: 'temporary.o', content: 'not source' }; }
+        else if (turn === 3) { repairName = 'submit_candidate'; args = { summary: 'No source was changed.' }; }
+        else if (turn >= 4) { repairName = 'finish_optimization'; args = { reason: 'No source change remains.' }; }
       }
       response.setHeader('content-type', 'text/event-stream');
       response.write(`data: ${JSON.stringify({ id: `fixture-${turn}`, model: body.model, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: `call-${turn}`, type: 'function', function: { name: repairName, arguments: JSON.stringify(args) } }] }, finish_reason: null }] })}\n\n`);

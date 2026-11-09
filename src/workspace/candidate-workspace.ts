@@ -104,10 +104,55 @@ function workspaceFileSha256(root: string, relative: string): string | null {
   return fileSha256(absolute);
 }
 
+const CHECKPOINT_NOTE = 'CorePilot-Checkpoint-v1: ';
+
+/** Recover hashes saved before commit, without guessing earlier worktree bytes. */
+function recoveredCheckpointFiles(state: CandidateWorkspaceState, previous: string, commit: string): CandidateCheckpoint['files'] {
+  const paths = gitNullSeparated(state.editing, ['diff', '--no-ext-diff', '--name-only', '-z', previous, commit, '--']);
+  const note = git(state.editing, ['show', '-s', '--format=%B', commit]).split(/\r?\n/).find(line => line.startsWith(CHECKPOINT_NOTE));
+  let files: CandidateCheckpoint['files'];
+  if (note) {
+    try {
+      const encoded = note.slice(CHECKPOINT_NOTE.length);
+      const bytes = Buffer.from(encoded, 'base64');
+      if (bytes.toString('base64') !== encoded) throw new Error('invalid encoding');
+      const stored = JSON.parse(bytes.toString('utf8')) as { parent: string; files: CandidateCheckpoint['files'] };
+      if (stored.parent !== previous || !Array.isArray(stored.files) || stored.files.length !== paths.length ||
+          stored.files.some((file, index) => !file || file.path !== paths[index] ||
+            ![file.before_sha256, file.after_sha256].every(value => value === null || typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)))) {
+        throw new Error('invalid source inventory');
+      }
+      files = stored.files;
+    } catch {
+      throw new CandidateWorkspaceError('Saved checkpoint source inventory is invalid; preserve the workspace and inspect the original commit.');
+    }
+  } else {
+    // Old commits have no saved inventory. Only the original previous
+    // validation checkout can supply its actual pre-commit file bytes.
+    if (git(state.validation, ['rev-parse', 'HEAD']) !== previous) {
+      throw new CandidateWorkspaceError('Cannot recover the original file hashes of this older checkpoint; preserve the workspace and inspect its source history.');
+    }
+    files = paths.map(relative => ({ path: relative, before_sha256: workspaceFileSha256(state.validation, relative),
+      after_sha256: workspaceFileSha256(state.editing, relative) }));
+  }
+  if (files.some(file => file.after_sha256 !== workspaceFileSha256(state.editing, file.path))) {
+    throw new CandidateWorkspaceError('Recovered Candidate files differ from the saved checkpoint; preserve the workspace and inspect the source state.');
+  }
+  return files;
+}
+
 export function isBuildArtifact(relative: string): boolean {
   const normalized = relative.toLowerCase();
   return normalized.endsWith('.o') || normalized.endsWith('.obj') || normalized.endsWith('.a') || normalized.endsWith('.so') ||
     normalized.endsWith('.d') || normalized.endsWith('.pyc') || normalized.includes('/cmakefiles/') || normalized.startsWith('.corepilot/');
+}
+
+/** A submission includes tracked edits and new files accepted by checkpointCandidate. */
+export function pendingCandidateSourceChanges(editing: string): string[] {
+  const tracked = gitNullSeparated(editing, ['diff', '--no-ext-diff', '--name-only', '-z', 'HEAD', '--']);
+  const untracked = gitNullSeparated(editing, ['ls-files', '--others', '--exclude-standard', '-z'])
+    .filter(relative => !isBuildArtifact(relative));
+  return [...new Set([...tracked, ...untracked])];
 }
 
 function addDetached(repository: string, directory: string, commit: string): void {
@@ -227,6 +272,12 @@ export function createCandidateWorkspace(options: {
 export function checkpointCandidate(state: CandidateWorkspaceState, message = 'corepilot candidate checkpoint'): CandidateCheckpoint {
   if (!fs.existsSync(state.editing)) throw new CandidateWorkspaceError(`editing workspace does not exist: ${state.editing}`);
   assertInside(state.editing, path.dirname(path.dirname(state.editing)));
+  const previous = state.candidate_commit ?? state.baseline_commit;
+  const previousCommit = git(state.repository, ['rev-parse', `${previous}^{commit}`]);
+  const editingHead = git(state.editing, ['rev-parse', 'HEAD']);
+  if (editingHead !== previousCommit && pendingCandidateSourceChanges(state.editing).length) {
+    throw new CandidateWorkspaceError('Editing workspace HEAD differs from its saved checkpoint and has additional source edits; inspect the source state before continuing.');
+  }
 
   // checkpoint 只记录源码版本；构建产物不会从编辑树复制到验证树。
   git(state.editing, ['add', '-u']);
@@ -237,12 +288,32 @@ export function checkpointCandidate(state: CandidateWorkspaceState, message = 'c
     git(state.editing, ['add', '--', relative]);
   }
   const changedPaths = gitNullSeparated(state.editing, ['diff', '--cached', '--name-only', '-z']);
+  if (changedPaths.length === 0) {
+    // A crash can occur after the checkpoint commit but before its session
+    // record is saved. Reuse that exact commit, preserving the changed-file
+    // inventory required by the Candidate scope check.
+    const previousTree = git(state.repository, ['rev-parse', `${previous}^{tree}`]);
+    const currentTree = git(state.editing, ['rev-parse', 'HEAD^{tree}']);
+    if (currentTree === previousTree) throw new CandidateWorkspaceError('No source changes to checkpoint. Untracked build artifacts are not Candidate source.');
+    const commit = git(state.editing, ['rev-parse', 'HEAD']);
+    if (git(state.editing, ['show', '-s', '--format=%P', commit]) !== previousCommit ||
+        git(state.editing, ['show', '-s', '--format=%s', commit]) !== message) {
+      throw new CandidateWorkspaceError('Editing workspace HEAD differs from its saved checkpoint; inspect the source state before continuing.');
+    }
+    const files = recoveredCheckpointFiles(state, previousCommit, commit);
+    refreshValidationWorkspace(state, commit);
+    state.candidate_commit = commit;
+    state.candidate_tree = currentTree;
+    return { commit, tree: currentTree, files, source_archive_sha256: sourceTreeSha256(state.validation) };
+  }
   const files = changedPaths.map((relative) => ({
     path: relative,
     before_sha256: workspaceFileSha256(state.validation, relative),
     after_sha256: workspaceFileSha256(state.editing, relative),
   }));
-  git(state.editing, ['commit', '--allow-empty', '-m', message]);
+  const parent = git(state.editing, ['rev-parse', 'HEAD']);
+  const note = Buffer.from(JSON.stringify({ parent, files })).toString('base64');
+  git(state.editing, ['commit', '-F', '-'], `${message}\n\n${CHECKPOINT_NOTE}${note}\n`);
   const commitSha = git(state.editing, ['rev-parse', 'HEAD']);
   const tree = git(state.editing, ['rev-parse', 'HEAD^{tree}']);
   refreshValidationWorkspace(state, commitSha);

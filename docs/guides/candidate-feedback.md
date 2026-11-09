@@ -28,6 +28,19 @@ feedback grants permission to edit the oracle, evaluator, cases, baseline, build
 policy or acceptance policy. Merely returning text without an explicit decision
 is not treated as successful repair or abandonment.
 
+An Agent submission must contain tracked edits or untracked source files that
+the Candidate checkpoint will retain. Untracked build artifacts alone do not
+create a Candidate or start a validation experiment: the submission tool
+returns an error so the Agent can continue its investigation or stop. The
+checkpoint checks again before committing. A previously committed source tree
+can still be recovered if the process stopped before saving its checkpoint;
+this check does not prevent a user's explicit validation retry or independent
+revalidation of an existing Candidate. The checkpoint commit records its file
+inventory and hashes so recovery can retain the same source scope. An older
+commit without that inventory can be recovered only while its previous
+validation checkout is still available; otherwise the workspace is preserved
+and the missing hashes are reported rather than guessed.
+
 ## Resource measurement errors
 
 Runner owns Formal resource evidence under `domain_payload.resource_policy`,
